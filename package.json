@@ -1,0 +1,14 @@
+{
+  "name": "cavalry-geo",
+  "version": "0.4.1",
+  "private": true,
+  "description": "GeoLayers-style map toolkit for Cavalry",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "test": "node --test",
+    "build": "node tools/build.js",
+    "install-cavalry": "node tools/build.js && node tools/install.js",
+    "ne-data": "node tools/build-natural-earth.js",
+    "package": "node tools/package.js"
+  }
+}

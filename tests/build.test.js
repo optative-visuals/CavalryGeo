@@ -1,0 +1,2527 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const vm = require("node:vm");
+const { buildPanel } = require("../tools/buildlib.js");
+
+// Objects created inside the vm sandbox (e.g. via JSON.parse in that realm) fail
+// assert.deepEqual against test-realm literals because their prototypes differ
+// even when their contents match. Round-tripping through JSON strips the realm.
+function plain(x) { return JSON.parse(JSON.stringify(x)); }
+
+test("the panel bundle compiles and embeds the runtime source", () => {
+  const src = buildPanel();
+  assert.doesNotThrow(() => new vm.Script(src, { filename: "CavalryGeo.js" }));
+  assert.ok(src.includes("var GEO_RUNTIME_SRC = "));
+  assert.ok(src.includes("var GeoScene"));
+  assert.ok(src.includes("ui.show()"));
+});
+
+// A minimal in-memory Cavalry stub: enough attribute storage, parenting and layer
+// bookkeeping for the panel's own code (GeoScene/GeoNet/panel.js) to run against,
+// without needing the real application.
+function makeFakeApi() {
+  var nextId = 1;
+  var store = {};
+  var parents = {};
+  var niceNames = {};
+  var moveToBackCalls = [];
+  var childOrder = {};   // parentId -> ids, top of the Scene Window first (like Cavalry)
+  var selection = [];
+  var connections = [];
+  var files = Object.create(null);
+  var COMP_ID = "comp#1";
+  var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
+  var timers = [];
+
+  function ensure(id) { if (!store[id]) store[id] = {}; return store[id]; }
+
+  return {
+    // Like Cavalry, a new script layer already has one empty dynamic slot (index 0).
+    create: function (type, name) {
+      var id = type + "#" + (nextId++); niceNames[id] = name || type;
+      if (type === "javaScript") ensure(id)["array.0"] = 0;
+      if (type === "javaScriptShape") ensure(id)["generator.array.0"] = 0;
+      if (type === "group") ensure(id).hidden = false;
+      return id;
+    },
+    createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return id; },
+    parent: function (id, parentId) {
+      if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
+      parents[id] = parentId;
+      (childOrder[parentId] = childOrder[parentId] || []).unshift(id); // newly parented layers land on top
+    },
+    getParent: function (id) { return parents[id] || null; },
+    getChildren: function (parentId) { return (childOrder[parentId] || []).slice(); },
+    getNiceName: function (id) { return niceNames[id] || id; },
+    // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
+    setFrame: function (f) { frame = f; },
+    getFrame: function () { return frame; },
+    keyframe: function (id, f, obj) {
+      Object.keys(obj).forEach(function (k) { keyframes[id] = keyframes[id] || {}; keyframes[id][k] = keyframes[id][k] || {}; keyframes[id][k][f] = obj[k]; });
+      return "keyframe#" + (nextId++);
+    },
+    getKeyframeTimes: function (id, attr) {
+      var k = keyframes[id] && keyframes[id][attr];
+      return k ? Object.keys(k).map(Number).sort(function (a, b) { return a - b; }) : [];
+    },
+    deleteKeyframe: function (id, attr, f) { if (keyframes[id] && keyframes[id][attr]) delete keyframes[id][attr][f]; },
+    // Assets and footage.
+    loadAsset: function (path) { var id = "asset#" + (nextAsset++); assets[id] = path; return id; },
+    getAssetWindowLayers: function () { return Object.keys(assets); },
+    getAssetFilePath: function (id) { return assets[id]; },
+    // Like Cavalry, adding an asset to the comp selects the new footage layer.
+    addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return id; },
+    layerExists: function (id) { return Object.prototype.hasOwnProperty.call(niceNames, id); },
+    deleteLayer: function (id) {
+      (childOrder[id] || []).slice().forEach(function (c) { this.deleteLayer(c); }, this);
+      if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
+      delete niceNames[id]; delete parents[id]; delete childOrder[id]; delete store[id];
+    },
+    addDynamic: function (id, arr) {
+      var o = ensure(id), n = 0;
+      while (o[arr + "." + n] !== undefined) n++;
+      o[arr + "." + n] = 0;
+    },
+    renameAttribute: function () { /* display name only */ },
+    hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
+    set: function (id, obj) { var o = ensure(id); Object.keys(obj).forEach(function (k) { o[k] = obj[k]; }); },
+    get: function (id, attr) {
+      if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
+      if (id === COMP_ID && attr === "frameRange") return { x: 0, y: 9 };
+      var k = keyframes[id] && keyframes[id][attr];
+      if (k && Object.keys(k).length) {
+        var fs = Object.keys(k).map(Number).sort(function (a, b) { return a - b; }), v = k[fs[0]];
+        fs.forEach(function (f) { if (f <= frame) v = k[f]; });
+        return v;
+      }
+      return ensure(id)[attr];
+    },
+    setFill: function () {},
+    setStroke: function () {},
+    connect: function (a, b, c, d) { connections.push([a, b, c, d]); },
+    _connections: connections,
+    getCompLayers: function () { return Object.keys(niceNames); },
+    getActiveComp: function () { return COMP_ID; },
+    getSelection: function () { return selection.slice(); },
+    select: function (ids) { selection = ids.slice(); },
+    // Like Cavalry: these take no arguments and act on the selected layer.
+    moveToBack: function () {
+      if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
+      selection.forEach(function (id) {
+        var sib = childOrder[parents[id]]; if (!sib) return;
+        childOrder[parents[id]] = sib.filter(function (x) { return x !== id; }).concat([id]);
+        moveToBackCalls.push(id);
+      });
+    },
+    moveBackward: function () {
+      if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
+      selection.forEach(function (id) {
+        var sib = childOrder[parents[id]], i = sib ? sib.indexOf(id) : -1;
+        if (i >= 0 && i < sib.length - 1) { sib[i] = sib[i + 1]; sib[i + 1] = id; }
+      });
+    },
+    processEvents: function () {},
+    filePathExists: function (p) { return Object.prototype.hasOwnProperty.call(files, p); },
+    readFromFile: function (p) { return files[p]; },
+    writeToFile: function (p, c) { files[p] = c; },
+    makeFolder: function (p) { files[p] = files[p] === undefined ? "<dir>" : files[p]; },
+    getAppDataFolder: function () { return "C:/fake/AppData"; },
+    Timer: function (callbacks) {
+      var t = { callbacks: callbacks, active: false, interval: 0, repeating: true };
+      t.start = function () { t.active = true; };
+      t.stop = function () { t.active = false; };
+      t.isActive = function () { return t.active; };
+      t.setInterval = function (ms) { t.interval = ms; };
+      t.setRepeating = function (r) { t.repeating = r; };
+      timers.push(t);
+      return t;
+    },
+    _timers: timers,
+    _moveToBackCalls: moveToBackCalls,
+    _files: files
+  };
+}
+
+function makeFakeUi() {
+  function Label(text) { this._text = text || ""; }
+  Label.prototype.setText = function (t) { this._text = t; };
+  Label.prototype.getText = function () { return this._text; };
+
+  function Button(text) { this.onClick = null; this._text = text || ""; }
+  Button.prototype.setText = function (t) { this._text = t; };
+  Button.prototype.getText = function () { return this._text; };
+
+  function LineEdit() { this._text = ""; }
+  LineEdit.prototype.setPlaceholder = function () {};
+  LineEdit.prototype.getText = function () { return this._text; };
+  LineEdit.prototype.setText = function (t) { this._text = t; };
+
+  function DropDown() { this._entries = []; this._value = 0; this.onValueChanged = null; }
+  DropDown.prototype.clear = function () { this._entries = []; this._value = 0; };
+  DropDown.prototype.addEntry = function (e) { this._entries.push(e); };
+  DropDown.prototype.getValue = function () { return this._value; };
+  DropDown.prototype.setValue = function (v) { this._value = v; };
+
+  function Checkbox(v) { this._value = !!v; }
+  Checkbox.prototype.getValue = function () { return this._value; };
+  Checkbox.prototype.setValue = function (v) { this._value = !!v; };
+
+  function NumericField(v) { this._value = v || 0; }
+  NumericField.prototype.setType = function () {};
+  NumericField.prototype.setMin = function () {};
+  NumericField.prototype.setMax = function () {};
+  NumericField.prototype.getValue = function () { return this._value; };
+  NumericField.prototype.setValue = function (v) { this._value = v; };
+
+  function List() { this._model = []; }
+  List.prototype.setSelectionMode = function () {};
+  List.prototype.setModel = function (m) { this._model = m; };
+  List.prototype.getSelection = function () { return []; };
+
+  // Like Cavalry's PageView: holds one layout per page and shows one page at a time.
+  function PageView() { this._pages = []; this._page = 0; }
+  PageView.prototype.add = function (layout) { this._pages.push(layout); };
+  PageView.prototype.setPage = function (i) { this._page = i; };
+  PageView.prototype.currentPage = function () { return this._page; };
+  PageView.prototype.pageCount = function () { return this._pages.length; };
+
+  // Like Cavalry's FlowLayout: a row of widgets that reflows onto more rows when narrow.
+  function FlowLayout(h, v) { this._items = []; this._spacing = [h, v]; }
+  FlowLayout.prototype.add = function (w) { this._items.push(w); };
+  FlowLayout.prototype.setSpaceBetween = function () {};
+  FlowLayout.prototype.setMargins = function () {};
+
+  function HLayout() { this._items = []; }
+  HLayout.prototype.add = function (w) { this._items.push(w); };
+  HLayout.prototype.setMargins = function () {};
+
+  function VLayout() { this._items = []; }
+  VLayout.prototype.add = function (w) { this._items.push(w); };
+  VLayout.prototype.setMargins = function () {};
+
+  // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
+  // with withModal().
+
+  function ProgressBar() { this._value = 0; this._max = 100; }
+  ProgressBar.prototype.setValue = function (v) { this._value = v; };
+  ProgressBar.prototype.getValue = function () { return this._value; };
+  ProgressBar.prototype.setMaximum = function (m) { this._max = m; };
+
+  // Every Cavalry widget shares these.
+  [Label, Button, LineEdit, DropDown, Checkbox, NumericField, List, ProgressBar].forEach(function (W) {
+    W.prototype.setHidden = function (h) { this._hidden = !!h; };
+    W.prototype.isHidden = function () { return !!this._hidden; };
+    W.prototype.setEnabled = function (e) { this._enabled = !!e; };
+    W.prototype.setBackgroundColor = function (c) { this._background = c; };
+    W.prototype.setToolTip = function (t) { this._toolTip = t; };
+    W.prototype.setFixedWidth = function (w) { this._fixedWidth = w; };
+  });
+
+  var root = null;
+  return {
+    Label: Label, Button: Button, LineEdit: LineEdit, DropDown: DropDown, Checkbox: Checkbox,
+    NumericField: NumericField, List: List, PageView: PageView, FlowLayout: FlowLayout, HLayout: HLayout, VLayout: VLayout,
+    ProgressBar: ProgressBar,
+    add: function (w) { root = w; },
+    show: function () {},
+    setTitle: function () {},
+    _root: function () { return root; }
+  };
+}
+
+function makeFakeCavalry() {
+  function Path() {
+    this.moveTo = function () {};
+    this.lineTo = function () {};
+    this.close = function () {};
+    this.addEllipse = function () {};
+    this.addText = function () {};
+  }
+  return { Path: Path };
+}
+
+function buildSandbox() {
+  const api = makeFakeApi();
+  const ui = makeFakeUi();
+  const cavalry = makeFakeCavalry();
+  const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
+  const context = vm.createContext(sandbox);
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  return { context: context, api: api, ui: ui };
+}
+
+function runTimers(api, max = 10000) {
+  let n = 0;
+  while (api._timers.some((t) => t.active) && n++ < max) api._timers.filter((t) => t.active).forEach((t) => t.callbacks.onTimeout());
+}
+function runTimersOnce(api) { api._timers.filter((t) => t.active).forEach((t) => t.callbacks.onTimeout()); }
+
+// A world-view map made through the panel's own map-making path (tests that just need a map).
+function createWorldMap(context) { context.makeMap("Map", context.worldViewCamera(0)); }
+
+const PARIS = { name: "Paris, Ile-de-France, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } };
+const PARIS_TX = { name: "Paris, Lamar County, Texas", lat: 33.66, lon: -95.55, bbox: { south: 33.6, north: 33.7, west: -95.6, east: -95.5 } };
+function searchFinds(context, found) { context.GeoNet.search = () => found.slice(); }
+function mapSearch(context, q) { context.searchField.setText(q); context.searchBtn.onClick(); }
+
+// EOX and NASA plan large images; the tile wording is tested with a custom tile link.
+function useCustomTiles(context) {
+  context.sourcePicker.setValue(4); // Custom tile link
+  context.customUrlField.setText("https://tiles.example/{z}/{x}/{y}.png");
+}
+
+test("buildPanel() runs against stub ui/api without throwing: section buttons above a page per section", () => {
+  const { ui } = buildSandbox();
+  const root = ui._root();
+  assert.ok(root, "buildUi should have called ui.add(root)");
+  const bar = root._items[0], pages = root._items[1];
+  assert.ok(bar instanceof ui.FlowLayout, "the section buttons wrap onto more rows when the panel is narrow");
+  assert.deepEqual(bar._items.map((b) => b.getText()), ["Map", "Layers", "Imagery", "Extract", "Pins", "Routes", "Data"]);
+  assert.ok(pages instanceof ui.PageView);
+  assert.equal(pages.pageCount(), 7);
+  assert.equal(pages.currentPage(), 0);
+  assert.ok(pages._pages.every((p) => p instanceof ui.VLayout));
+  assert.equal(bar._items[0]._background, "#2f6f4f", "Map starts as the current section");
+});
+
+test("clicking a section button shows its page and highlights only that button", () => {
+  const { ui, context } = buildSandbox();
+  const bar = ui._root()._items[0], pages = ui._root()._items[1];
+  const imagery = bar._items.find((b) => b.getText() === "Imagery");
+  imagery.onClick();
+  assert.equal(pages.currentPage(), 2);
+  assert.equal(pages._pages[2]._items.some((row) => (row._items || []).includes(context.buildImageryBtn)), true, "page 2 is the Imagery section");
+  assert.equal(imagery._background, "#2f6f4f");
+  assert.equal(imagery.getText(), "Imagery", "no extra symbols on the current button");
+  bar._items.filter((b) => b !== imagery).forEach((b) => assert.notEqual(b._background, "#2f6f4f", b.getText()));
+  context.showSection("Pins");
+  assert.equal(pages.currentPage(), 4);
+  assert.equal(bar._items[4]._background, "#2f6f4f");
+  assert.notEqual(imagery._background, "#2f6f4f");
+});
+
+test("the other section buttons use the theme's Mid colour when Cavalry provides one", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  ui.getThemeColor = (name) => ({ Accent1: "#123456", Mid: "#2a2a2a" })[name] || "";
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const bar = ui._root()._items[0];
+  assert.equal(bar._items[0]._background, "#2f6f4f", "a fixed, subtle highlight, not the theme accent");
+  assert.equal(bar._items[1]._background, "#2a2a2a", "the others use the theme's button-ish colour");
+});
+
+test("every button's onClick can be invoked against an empty scene without an error escaping guard()", () => {
+  const { context } = buildSandbox();
+  const buttonNames = [
+    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
+    "addLayersBtn", "clearCacheBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn",
+    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
+    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn",
+    "dataLoadBtn", "addDataBtn", "refreshDataBtn",
+    "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
+  ];
+  buttonNames.forEach(function (name) {
+    const btn = context[name];
+    assert.ok(btn && typeof btn.onClick === "function", name + " should exist with an onClick handler");
+    assert.doesNotThrow(() => btn.onClick(), name + ".onClick() should never throw out of guard()");
+  });
+});
+
+const NO_MAP = "Error: Pick a map, or search for a place first — that creates the map (Map tab).";
+
+test("Map tab: an empty scene offers only \"New map\", and map actions say how to make one", () => {
+  const { context } = buildSandbox();
+  assert.deepEqual(plain(context.mapPicker._entries), ["New map"]);
+  assert.equal(context.mapPicker.getValue(), 0);
+  assert.equal(context.resultPicker._entries[0], "World view");
+  ["jumpBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "pinCoordBtn", "createRouteBtn"].forEach((name) => {
+    context.statusLabel.setText("");
+    if (name === "addLayersBtn") context.checks.countries.setValue(true);
+    context[name].onClick();
+    assert.equal(context.statusLabel.getText(), NO_MAP, name);
+  });
+});
+
+test("Map tab: \"New map\" stays last in the picker, and selecting it means no map", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  assert.deepEqual(plain(context.mapPicker._entries), ["Map", "New map"]);
+  assert.equal(context.mapPicker.getValue(), 0);
+  assert.equal(context.currentMap().name, "Map");
+  context.mapPicker.setValue(1);
+  context.jumpBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+});
+
+test("Map tab: picking \"New map\" in the picker is not an error: it clears the Extract list and says what to do", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.featureList.setModel([{ uuid: "g0", label: "France" }]);
+  context.mapPicker.setValue(1);
+  context.mapPicker.onValueChanged();
+  assert.equal(context.statusLabel.getText(), "New map: type a place and press Search to make it.");
+  assert.deepEqual(plain(context.featureList._model), []);
+  assert.equal(context.groupsLayer, null);
+});
+
+test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here and Fly here remain", () => {
+  const { context, ui } = buildSandbox();
+  assert.equal(context.createBtn, undefined);
+  assert.equal(context.pinBtn, undefined);
+  assert.equal(context.centreBtn, undefined);
+  const texts = [];
+  (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(ui._root()._items[1]._pages[0]);
+  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here"]);
+});
+
+test("Map tab: Search with \"New map\" selected creates the map, named from the name field and centred on the first result", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS, PARIS_TX]);
+  context.nameField.setText("Trip");
+  context.projPicker.setValue(1);
+  mapSearch(context, "Paris");
+  assert.equal(context.statusLabel.getText(), "Created map \"Trip\" centred on Paris. 2 result(s): pick one, then Jump here or Fly here.");
+  assert.deepEqual(plain(context.mapPicker._entries), ["Trip", "New map"]);
+  assert.equal(context.mapPicker.getValue(), 0);
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  const want = context.camForResult(PARIS, 1);
+  assert.ok(Math.abs(cam.lat - PARIS.lat) < 1e-9 && Math.abs(cam.lon - PARIS.lon) < 1e-9);
+  assert.ok(Math.abs(cam.zoom - want.zoom) < 1e-9);
+  assert.equal(cam.projection, 1);
+  assert.equal(context.resultPicker.getValue(), 1, "the first result is picked");
+});
+
+test("Map tab: Search names the new map after the place when the name field is blank, made unique", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.equal(context.currentMap().name, "Paris");
+  context.mapPicker.setValue(context.maps.length); // "New map"
+  mapSearch(context, "Paris");
+  assert.equal(context.currentMap().name, "Paris 2");
+  context.mapPicker.setValue(context.maps.length);
+  mapSearch(context, "Paris");
+  assert.equal(context.currentMap().name, "Paris 3");
+  assert.deepEqual(plain(context.mapPicker._entries).sort(), ["New map", "Paris", "Paris 2", "Paris 3"]);
+  assert.match(context.statusLabel.getText(), /^Created map "Paris 3" centred on Paris\. 1 result\(s\)/);
+});
+
+test("Map tab: Search with a map selected only finds places", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const before = context.GeoScene.readCamera(context.currentMap().cameraId);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
+  assert.equal(context.GeoScene.findMaps().length, 1);
+  assert.deepEqual(plain(context.GeoScene.readCamera(context.currentMap().cameraId)), plain(before), "the camera doesn't move");
+});
+
+test("Map tab: a Search with no results creates no map", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, []);
+  mapSearch(context, "Nowhere");
+  assert.equal(context.statusLabel.getText(), "No results for \"Nowhere\".");
+  assert.equal(context.GeoScene.findMaps().length, 0);
+  assert.deepEqual(plain(context.mapPicker._entries), ["New map"]);
+});
+
+test("Map tab: Jump here moves the camera to the picked place, or to the world view", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  const world = context.GeoScene.readCamera(map.cameraId);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.jumpBtn.onClick();
+  let cam = context.GeoScene.readCamera(map.cameraId);
+  assert.ok(Math.abs(cam.lat - PARIS.lat) < 1e-9 && Math.abs(cam.lon - PARIS.lon) < 1e-9);
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris \(zoom \d+\.\d\)\.$/);
+  context.resultPicker.setValue(0); // World view
+  context.jumpBtn.onClick();
+  cam = context.GeoScene.readCamera(map.cameraId);
+  assert.equal(cam.lat, 20);
+  assert.equal(cam.lon, 0);
+  assert.ok(Math.abs(cam.zoom - world.zoom) < 1e-9, "the same world view Fly here uses");
+  assert.equal(context.statusLabel.getText(), "Camera jumped to the world view.");
+});
+
+test("Map tab: a successful Search pre-fills the Pins tab, so Pin here works straight away", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  assert.equal(context.pinSearchField.getText(), "Paris");
+  assert.deepEqual(plain(context.pinResultPicker._entries), [PARIS.name, PARIS_TX.name]);
+  assert.equal(context.pinResultPicker.getValue(), 0);
+  context.pinHereBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Pin added at Paris.");
+  assert.ok(api.getCompLayers().some((id) => api.getNiceName(id) === "Pin: Paris"));
+});
+
+test("Fly to keys the camera from the current frame to the selected place", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.flyFramesField.setValue(10);
+  api.setFrame(20);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /world view/, "the world-view note only when World view is picked");
+  assert.deepEqual(plain(api.getKeyframeTimes(map.cameraId, "array.2")), [20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
+  api.setFrame(29);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.0") - 48.8566) < 1e-9);
+  assert.equal(api.getFrame(), 29);
+  context.flyFramesField.setValue(1);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Use at least 2 frames/);
+});
+
+test("Fly to the world view", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.resultPicker.setValue(0);
+  context.flyFramesField.setValue(5);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to the world view: frames 0–4\./);
+  // In Cavalry this was mistaken twice for a flight to the searched place: say why.
+  assert.match(context.statusLabel.getText(), /Flying to the world view — to fly somewhere else, search for a place and pick it first\./);
+});
+
+// F9: the comp's default fake frame range is 0..9; a flight of 15 frames from frame 0
+// runs past it, and the status should say so.
+test("Fly to notes when the flight ends after the composition's last frame (F9)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.resultPicker.setValue(0);
+  context.flyFramesField.setValue(15);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Note: the flight ends after the composition's last frame \(9\)\./);
+});
+
+test("Fly to says nothing extra when the flight stays inside the composition (F9)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.resultPicker.setValue(0);
+  context.flyFramesField.setValue(5);
+  context.flyBtn.onClick();
+  assert.doesNotMatch(context.statusLabel.getText(), /Note: the flight ends/);
+});
+
+// F13: newly added base layers must not bury an existing pin/label/extract - restack
+// base layers below all overlays, ordered countries (lowest) ... cities (highest).
+test("GeoScene.restackBaseLayers moves base layers to back in draw-order-descending order, never touching overlays", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const emptyEnc = { v: 1, kind: "polygon", f: [] };
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const countries = GeoScene.createMapLayer(map, "Countries", emptyEnc, { camera: map.cameraId, category: "countries" }, {}, {});
+  const roads = GeoScene.createMapLayer(map, "Roads", { v: 1, kind: "line", f: [] }, { camera: map.cameraId, category: "roads" }, {}, {});
+  const cities = GeoScene.createMapLayer(map, "Cities", { v: 1, kind: "point", f: [] }, { camera: map.cameraId, category: "cities" }, {}, {});
+  const pin = GeoScene.addPin(map, "Pin", 0, 0);
+
+  api._moveToBackCalls.length = 0;
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+
+  assert.deepEqual(api._moveToBackCalls, [cities, roads, countries]);
+  assert.ok(api._moveToBackCalls.indexOf(pin) < 0, "the pin (an overlay) should never be moved");
+  const kids = api.getChildren(map.groupId);
+  const pos = (id) => kids.indexOf(id);
+  assert.ok(pos(pin) < pos(cities) && pos(cities) < pos(roads) && pos(roads) < pos(countries), "pin on top, then cities, roads, countries at the bottom");
+  assert.equal(pos(countries), kids.length - 1);
+});
+
+// F13: adding a base layer after imagery was built must not bury the imagery -
+// restackBaseLayers sends imagery to the back after the base layers.
+test("restackBaseLayers keeps imagery at the back of the map group even after a new base layer is added (F13)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = GeoScene.planImagery(map, src, {});
+  const built = GeoScene.buildImagery(map, src, {}, plan);
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], built.groupId, "imagery must still be the last child of the map group");
+});
+
+test("GeoScene.restackBaseLayers is a no-op when api.moveToBack is unavailable", () => {
+  const { context, api } = buildSandbox();
+  delete api.moveToBack;
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  assert.doesNotThrow(() => GeoScene.restackBaseLayers(map, DRAW_ORDER));
+});
+
+// F14: the OSM credit text was landing partly outside the frame (centre/baseline
+// anchored, default font size). It must get a smaller font size (only if the text
+// layer actually has one) and sit fully inside the bottom-left corner.
+test("GeoScene.createAttribution insets the position inside the frame and leaves fontSize alone when the attribute doesn't exist", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const id = GeoScene.createAttribution(map);
+  // Cross-realm array from the vm sandbox: compare elements, not object identity/prototype.
+  assert.deepEqual(Array.from(api.get(id, "position")), [-1920 / 2 + 200, -1080 / 2 + 40]);
+  // This stub's text layers don't declare a fontSize attribute up front, matching
+  // "never guess an attribute id": fontSize is only set when hasAttribute says so.
+  assert.equal(api.hasAttribute(id, "fontSize"), false);
+});
+
+test("GeoScene.createAttribution sets fontSize to 24 when the text layer declares that attribute", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  // Pre-seed the next created id with a fontSize attribute by wrapping api.create once.
+  const realCreate = api.create.bind(api);
+  api.create = function (type, name) {
+    const id = realCreate(type, name);
+    api.set(id, { fontSize: 48 }); // pretend this layer type declares fontSize by default
+    return id;
+  };
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const id = GeoScene.createAttribution(map);
+  assert.equal(api.get(id, "fontSize"), 24);
+});
+
+test("GeoScene.createLabel wires a visibility helper to the text's opacity", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 });
+  const textId = GeoScene.createLabel(map, "Tokyo", 139.7, 35.7);
+  const conns = api._connections.map((c) => Array.from(c));
+  const toOpacity = conns.find((c) => c[2] === textId && c[3] === "opacity");
+  const toPosition = conns.find((c) => c[2] === textId && c[3] === "position");
+  assert.ok(toOpacity, "a helper drives the text's opacity");
+  assert.ok(toPosition, "a helper drives the text's position");
+  const vis = toOpacity[0], pos = toPosition[0];
+  assert.notEqual(vis, pos);
+  // The visibility helper follows the camera and reads its place from the position helper.
+  for (let i = 0; i < 5; i++) assert.ok(conns.some((c) => c[0] === map.cameraId && c[1] === "array." + i && c[2] === vis && c[3] === "array." + i));
+  assert.ok(conns.some((c) => c[0] === pos && c[1] === "array.5" && c[2] === vis && c[3] === "array.5"));
+  assert.ok(conns.some((c) => c[0] === pos && c[1] === "array.6" && c[2] === vis && c[3] === "array.6"));
+  assert.ok(String(api.get(vis, "expression")).includes("pointVisible"));
+});
+
+test("script layers get exactly one slot per input (no spare trailing slot)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.equal(api.hasAttribute(map.cameraId, "array.4"), true);
+  assert.equal(api.hasAttribute(map.cameraId, "array.5"), false, "camera has 5 inputs, no n5");
+  const pinId = GeoScene.addPin(map, "P", 0, 0);
+  assert.equal(api.hasAttribute(pinId, "generator.array.6"), true);
+  assert.equal(api.hasAttribute(pinId, "generator.array.7"), false, "map layer has 7 inputs, no n7");
+});
+
+test("default styles: countries show borders; states are border lines only", () => {
+  const { context } = buildSandbox();
+  const S = context.GeoScene.STYLE;
+  assert.ok(S.countries.fill && S.countries.stroke && S.countries.width > 0, "countries: fill + border");
+  assert.ok(!S.states.fill && S.states.stroke && S.states.width > 0, "states: lines only");
+  assert.ok(S.states.width < S.countries.width, "state lines thinner than country borders");
+  assert.equal(S.coastlines.width, 0.5, "coastlines default to a fine 0.5 line");
+});
+
+test("restackBaseLayers falls back to stepping backward when moveToBack does nothing, and restores the selection", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const pin = GeoScene.addPin(map, "Pin", 0, 0);
+  const countries = GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.moveToBack = function () {}; // pretend "to back" is a no-op
+  api.select(["someone#1"]);
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  const kids = api.getChildren(map.groupId);
+  assert.ok(kids.indexOf(pin) < kids.indexOf(countries), "countries stepped below the pin");
+  assert.deepEqual(Array.from(api.getSelection()), ["someone#1"]);
+});
+
+test("createRoute builds a named group with one camera-linked leg per pair of stops", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const stops = [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "Lyon", lon: 4.84, lat: 45.76 }, { name: "Marseille", lon: 5.37, lat: 43.3 }];
+  const r = GeoScene.createRoute(map, stops, { lift: 40, pins: true, labels: false });
+  assert.equal(api.getNiceName(r.groupId), "Route: Paris → Lyon → Marseille");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  assert.equal(r.legs.length, 2);
+  assert.equal(api.getNiceName(r.legs[0]), "Leg 1: Paris → Lyon");
+  assert.equal(api.getNiceName(r.legs[1]), "Leg 2: Lyon → Marseille");
+  const conns = api._connections.map((c) => Array.from(c));
+  r.legs.forEach((leg) => {
+    assert.equal(api.getParent(leg), r.groupId);
+    assert.equal(api.get(leg, "generator.array.7"), 40);
+    for (let i = 0; i < 5; i++) assert.ok(conns.some((c) => c[0] === map.cameraId && c[1] === "array." + i && c[2] === leg && c[3] === "generator.array." + i));
+    assert.ok(String(api.get(leg, "generator.expression")).includes("lift: _i7"));
+  });
+  const pins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).startsWith("Pin: "));
+  assert.equal(pins.length, 3);
+});
+
+test("createRoute refuses fewer than 2 stops and truncates long names", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.throws(() => GeoScene.createRoute(map, [{ name: "A", lon: 0, lat: 0 }], { lift: 30 }), /at least 2 stops/);
+  const long = ["Llanfairpwllgwyngyll", "Wolfeschlegelsteinhausen", "Taumatawhakatangihanga", "Bangkok"].map((n, i) => ({ name: n, lon: i, lat: i }));
+  const r = GeoScene.createRoute(map, long, { lift: 30, pins: false, labels: false });
+  const name = api.getNiceName(r.groupId);
+  assert.ok(name.length <= 60 && name.endsWith("…"), name);
+});
+
+// F2: the sandbox has no map by default, so `currentMap()` used to throw before the
+// 2-stop guard was ever reached, and the old regex also accepted "Create or pick a
+// map" - meaning this test never actually exercised the guard it claimed to test.
+test("Create route with fewer than 2 stops reports a clear message", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context); // so currentMap() succeeds
+  context.stops.push({ name: "Paris", lon: 2.35, lat: 48.85 });
+  context.refreshStops();
+  context.createRouteBtn.onClick();
+  assert.match(context.statusLabel.getText(), /at least 2 stops/);
+  const routeGroups = api.getCompLayers().filter((id) => String(api.getNiceName(id)).indexOf("Route:") === 0);
+  assert.equal(routeGroups.length, 0, "no route group should have been created");
+});
+
+test("route legs are not offered as Extract sources", () => {
+  const { context } = buildSandbox();
+  assert.ok(Array.from(context.NOT_EXTRACTABLE).indexOf("route") >= 0);
+});
+
+// I1: data layers are offered as Extract sources and Find/Bake on them threw a raw
+// TypeError, since their GEO_DATA is {geo, series, ...}, not an encoded layer.
+test("data layers are not offered as Extract sources", () => {
+  const { context } = buildSandbox();
+  assert.ok(Array.from(context.NOT_EXTRACTABLE).indexOf("data") >= 0);
+});
+
+test("GeoScene.bake refuses a data layer with a clear message instead of a raw TypeError", () => {
+  const { context } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: false, labels: false, legend: false });
+  assert.throws(() => GeoScene.bake(r.layers.regions), /Data layers can't be baked yet\./);
+});
+
+test("Bake selected layers: a mix of a real map layer and a data layer bakes the real one and skips the data layer with a status message, never a TypeError", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const countries = GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: false, labels: false, legend: false });
+  api.select([countries, r.layers.regions]);
+  assert.doesNotThrow(() => context.bakeBtn.onClick());
+  assert.match(context.statusLabel.getText(), /Baked 1 layer/);
+  assert.match(context.statusLabel.getText(), /skipped 1 data layer/i);
+});
+
+test("Bake selected layers: selecting a map group plus a real map layer bakes the layer and mentions skipping the group", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const countries = GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+
+  // Select the map group and the countries layer
+  api.select([map.groupId, countries]);
+  assert.doesNotThrow(() => context.bakeBtn.onClick());
+  assert.match(context.statusLabel.getText(), /Baked 1 layer/);
+  assert.match(context.statusLabel.getText(), /Skipped 1 group\(s\) or other layer\(s\)/i);
+});
+
+test("Bake selected layers: selecting only a map group gives the appropriate error message", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+
+  // Select only the map group
+  api.select([map.groupId]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Select Cavalry Geo map layers to bake \(groups and the camera can't be baked\)/);
+});
+
+test("Bake selected layers: selecting only a data layer gives the data layer error message", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: false, labels: false, legend: false });
+
+  // Select only the data layer
+  api.select([r.layers.regions]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Data layers can't be baked yet\. Select map layers such as/i);
+});
+
+// F3: identical consecutive stops must not create an empty leg.
+test("createRoute skips a leg between identical consecutive stops, no gap in numbering (F3)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const stops = [
+    { name: "Paris", lon: 2.35, lat: 48.85 },
+    { name: "Paris again", lon: 2.35, lat: 48.85 },
+    { name: "Lyon", lon: 4.84, lat: 45.76 }
+  ];
+  const r = GeoScene.createRoute(map, stops, { lift: 30 });
+  assert.equal(r.legs.length, 1);
+  assert.equal(api.getNiceName(r.legs[0]), "Leg 1: Paris again → Lyon");
+});
+
+test("createRoute throws when every consecutive pair of stops is identical (F3)", () => {
+  const { context } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const stops = [
+    { name: "Paris", lon: 2.35, lat: 48.85 },
+    { name: "Paris again", lon: 2.35, lat: 48.85 }
+  ];
+  assert.throws(() => GeoScene.createRoute(map, stops, { lift: 30 }), /Add at least 2 different stops to make a route/);
+});
+
+test("createRoute creates at most one pin per distinct place on a round trip A -> B -> A (F3)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const A_ = { name: "A", lon: 0, lat: 0 }, B_ = { name: "B", lon: 10, lat: 10 };
+  const r = GeoScene.createRoute(map, [A_, B_, A_], { lift: 30, pins: true, labels: false });
+  assert.equal(r.legs.length, 2);
+  const pins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
+  assert.equal(pins.length, 2, "one pin at A, one at B");
+});
+
+test("createRoute creates at most one label per distinct place on a round trip A -> B -> A (F3)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  // Force the simple (non-driver) label path so labels are plain map layers named "Label: ...".
+  context.GeoAttrs.LABEL_MODE = "simple";
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const A_ = { name: "A", lon: 0, lat: 0 }, B_ = { name: "B", lon: 10, lat: 10 };
+  const r = GeoScene.createRoute(map, [A_, B_, A_], { lift: 30, pins: false, labels: true });
+  const labels = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Label: ") === 0);
+  assert.equal(labels.length, 2, "one label at A, one at B");
+});
+
+// F3: the panel refuses adding a place identical to the current last stop.
+test("Routes tab: Add stop refuses a place identical to the current last stop (F3)", () => {
+  const { context } = buildSandbox();
+  context.routeResults = [{ name: "Paris, France", lon: 2.35, lat: 48.85 }];
+  context.routeResultPicker.setValue(0);
+  context.addStopBtn.onClick();
+  assert.equal(context.stops.length, 1);
+  context.addStopBtn.onClick(); // same result still selected
+  assert.equal(context.stops.length, 1, "duplicate stop must be refused");
+  assert.equal(context.statusLabel.getText(), "That's already the last stop.");
+});
+
+function samplePrepared(context) {
+  const C = context.GeoCodec;
+  const geo = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: { iso3: "FRA", iso2: "FR", names: ["France"], label: [2.5, 46.7] } }] });
+  const series = [[[2000, 60.9], [2020, 67.6]]];
+  const range = { min: 60.9, max: 67.6, maxAbs: 67.6 };
+  return { regions: { geo, series, range, years: [2000, 2020], title: "Population" }, points: { pts: [[2.5, 46.7, "France"]], series, range, years: [2000, 2020], title: "Population" }, matched: 1, unmatched: [], years: [2000, 2020], title: "Population" };
+}
+
+test("createDataLayers builds a group with regions, bubbles, labels and a connected legend", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true, prefix: "", suffix: "M" });
+  assert.equal(api.getNiceName(r.groupId), "Data: Population");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  const regions = r.layers.regions, legend = r.layers.legend;
+  assert.equal(api.get(regions, "generator.array.7"), 2020, "year defaults to the latest year");
+  assert.ok(String(api.get(regions, "generator.expression")).includes("GeoData.choropleth"));
+  const conns = api._connections.map((c) => Array.from(c));
+  for (let i = 0; i < 5; i++) assert.ok(conns.some((c) => c[0] === map.cameraId && c[2] === regions && c[3] === "generator.array." + i));
+  const E = context.GeoExpression;
+  E.LEGEND_INPUTS.forEach((inp, k) => {
+    const from = "generator.array." + E.inputIndex(E.REGION_INPUTS, inp[0]);
+    assert.ok(conns.some((c) => c[0] === regions && c[1] === from && c[2] === legend && c[3] === "generator.array." + k), inp[0]);
+  });
+  assert.equal(conns.some((c) => c[0] === map.cameraId && c[2] === legend), false, "legend is not camera-linked");
+  assert.ok(String(api.get(r.layers.labels, "generator.expression")).includes('"suffix":"M"'));
+  const meta = context.GeoExpression.readTag(String(api.get(regions, "generator.expression")), "GEO_META");
+  assert.deepEqual(plain(meta.source), { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" });
+});
+
+// M5: the bubbles -> bubble-legend maxRadius connection used a hard-coded ".8" slot
+// index; it must be derived from BUBBLE_INPUTS so it stays correct if inputs change.
+test("createDataLayers connects the bubble legend's maxRadius from BUBBLE_INPUTS' actual index", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, E = context.GeoExpression;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: false, bubbles: true, labels: false, legend: true });
+  const idx = E.inputIndex(E.BUBBLE_INPUTS, "maxRadius");
+  assert.equal(idx, 8);
+  const conns = api._connections.map((c) => Array.from(c));
+  assert.ok(conns.some((c) => c[0] === r.layers.bubbles && c[1] === "generator.array." + idx && c[2] === r.layers.legend && c[3] === "generator.array.0"));
+});
+
+test("refreshData re-downloads and rewrites the stored data, keeping inputs", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const prepared = samplePrepared(context);
+  const choice = { placeColumn: "Code", placeKind: "iso3", nameColumn: "Entity", valueColumn: "Population", layout: "long", yearColumn: "Year" };
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice, scale: "50m" }, prepared, { regions: true, bubbles: false, labels: false, legend: false });
+  context.GeoNet.fetchCsv = () => "Entity,Code,Year,Population\nFrance,FRA,2000,1\nFrance,FRA,2020,2\n";
+  context.GeoNet.neLayer = () => prepared.regions.geo;
+  api.set(r.layers.regions, { "generator.array.7": 2005 });
+  const out = GeoScene.refreshData(map);
+  assert.equal(out.layers, 1);
+  const data = context.GeoExpression.readData(String(api.get(r.layers.regions, "generator.expression")));
+  assert.deepEqual(plain(data.series[0]), [[2000, 1], [2020, 2]]);
+  assert.equal(api.get(r.layers.regions, "generator.array.7"), 2005);
+});
+
+// I2: Refresh must keep places that were only found via "Look up unmatched names as
+// places" - the source must remember lookup was used, and refreshData must redo the
+// lookup for whatever is still unmatched after a plain prepare.
+test("Refresh keeps places found by 'Look up unmatched names as places' (I2)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const geo = context.GeoCodec.encodeLayer({ kind: "polygon", features: [] });
+  context.GeoNet.fetchCsv = () => "Location,Visitors\nParis,30\n";
+  context.GeoNet.neLayer = () => geo;
+  context.GeoNet.geocodePlaces = (names) => { const out = {}; names.forEach((n) => { if (n === "Paris") out[n] = [2.35, 48.85]; }); return out; };
+  context.dataLinkField.setText("https://example.com/cities.csv");
+  context.dataLoadBtn.onClick();
+  context.lookupCheck.setValue(true);
+  context.addDataBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Added/);
+  const bubbles = api.getCompLayers(false).find((id) => String(api.getNiceName(id)).startsWith("Regions: ") || String(api.getNiceName(id)).startsWith("Bubbles: "));
+  assert.ok(bubbles, "a data layer should have been created for the geocoded place");
+  const meta = context.GeoExpression.readTag(String(api.get(bubbles, "generator.expression")), "GEO_META");
+  assert.equal(meta.source.lookup, true, "the source must remember the lookup checkbox was used");
+
+  const map = context.currentMap();
+  const out = context.GeoScene.refreshData(map);
+  assert.equal(out.matched, 1, "refresh should redo the lookup and keep the geocoded place");
+  assert.deepEqual(Array.from(out.unmatched), []);
+});
+
+// M4: a refresh that matches nothing must not rewrite that source's layers, and must
+// give a clear error naming the source url instead of silently wiping the data.
+test("refreshData throws and leaves layers untouched when a source's refresh matches nothing (M4)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const prepared = samplePrepared(context);
+  const choice = { placeColumn: "Code", placeKind: "iso3", nameColumn: "Entity", valueColumn: "Population", layout: "long", yearColumn: "Year" };
+  const r = GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice, scale: "50m" }, prepared, { regions: true, bubbles: false, labels: false, legend: false });
+  const before = String(api.get(r.layers.regions, "generator.expression"));
+  context.GeoNet.fetchCsv = () => "Entity,Code,Year,Population\nNowhere,ZZZ,2000,1\n";
+  context.GeoNet.neLayer = () => prepared.regions.geo;
+  assert.throws(() => GeoScene.refreshData(map), /Refresh found no matching places in https:\/\/x\/y\.csv.*nothing was changed/);
+  assert.equal(String(api.get(r.layers.regions, "generator.expression")), before, "the layer's data must be untouched");
+});
+
+test("Data tab: Load detects columns and reports matches; Add to map creates layers", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const geo = context.GeoCodec.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: { iso3: "FRA", iso2: "FR", names: ["France"], label: [2.5, 46.7] } }] });
+  context.GeoNet.fetchCsv = () => "Entity,Code,Year,Population\nFrance,FRA,2000,60.9\nFrance,FRA,2020,67.6\nWorld,OWID_WRL,2020,7800\n";
+  context.GeoNet.neLayer = () => geo;
+  context.dataLinkField.setText("https://docs.google.com/spreadsheets/d/X/edit");
+  context.dataLoadBtn.onClick();
+  assert.match(context.statusLabel.getText(), /3 rows, 1 place\(s\) matched, 1 unmatched/);
+  context.addDataBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Added/);
+  assert.ok(api.getCompLayers(false).some((id) => String(api.getNiceName(id)).startsWith("Regions: Population")));
+});
+
+function imageryMap(context, api, zoom) {
+  const map = context.GeoScene.createMap("World", { lat: 0, lon: 0, zoom: zoom, rotation: 0, projection: 0 });
+  return map;
+}
+
+// The tile path (MapTiler/Mapbox/custom) tested with EOX's tile URLs: a copy without `wms`.
+function tileSource(context) { return Object.assign({}, context.GeoSources.byId("eox"), { wms: undefined }); }
+
+test("planImagery for EOX plans large images: one per 8x8 block, cropped", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
+  const map = imageryMap(context, api, 4);
+  const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {});
+  assert.equal(plan.mode, "images");
+  assert.equal(plan.tiles.length, 48);
+  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForTiles(plan.tiles)));
+  assert.ok(plan.items.length >= 2 && plan.items.length <= 4, String(plan.items.length));
+  assert.equal(plan.missing.length, plan.items.length);
+  assert.equal(context.GeoScene.itemBase(plan, plan.items[0]),
+    context.GeoNet.imageBase("eox", plan.items[0]));
+  assert.match(context.GeoScene.itemUrl(context.GeoSources.byId("eox"), {}, plan, plan.items[0]), /^https:\/\/tiles\.maps\.eox\.at\/wms\?/);
+});
+
+test("planImagery caps image plans by image count and by tiles' worth", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
+  const map = imageryMap(context, api, 4);
+  const asked = [];
+  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+    asked.push(maxZoom);
+    const hi = Math.min(maxZoom, 10), tiles = [];
+    for (let L = 4; L <= hi; L++) for (let i = 0; i < 400; i++) tiles.push({ z: L, x: i % 20, y: Math.floor(i / 20) });
+    return { tiles, lo: 4, hi, frames: 1 };
+  };
+  const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {});
+  assert.ok(plan.tiles.length <= context.GeoBlocks.MAX_IMAGE_TILES);
+  assert.equal(plan.imageTiles, context.GeoBlocks.totalTiles(plan.items));
+  assert.ok(plan.imageTiles <= context.GeoBlocks.MAX_IMAGE_TILES);
+  assert.ok(plan.items.length <= context.GeoBlocks.MAX_IMAGES);
+  assert.equal(plan.cappedZoom, plan.hi);
+  assert.equal(plan.uncappedTiles, 2800);
+});
+
+// Images are cropped to the bounding box of the tiles they need, so sparse tiles download
+// (and hold in memory) more than their count: the limit counts the pixels really fetched (F6).
+test("planImagery names the tiles' worth limit, counted as the images' own tiles' worth (F6)", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
+  const map = imageryMap(context, api, 4);
+  const tiles = [];
+  for (let i = 0; i < 1200; i++) tiles.push({ z: 6, x: (i % 25) * 2, y: Math.floor(i / 25) });
+  context.GeoTiles.tileSet = function () { return { tiles, lo: 6, hi: 6, frames: 1 }; };
+  const worth = context.GeoBlocks.totalTiles(context.GeoBlocks.blocksForTiles(tiles));
+  assert.ok(tiles.length < 2000 && worth > 2000, String(worth));
+  assert.throws(() => context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {}),
+    new RegExp("^Error: Too many tiles' worth of images \\(" + worth + "\\) — end the flight at a lower zoom or use a smaller composition\\.$"));
+});
+
+test("planImagery treats files left in the in-flight list as missing", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = context.GeoSources.byId("eox");
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const first = context.GeoScene.planImagery(map, src, {});
+  assert.equal(first.missing.length, 0);
+  context.GeoFetch.leftovers = () => [context.GeoScene.itemBase(first, first.items[0]) + ".jpg"];
+  const second = context.GeoScene.planImagery(map, src, {});
+  assert.deepEqual(plain(second.missing), [plain(first.items[0])]);
+});
+
+test("buildImagery places one footage per image at the rect centre with a 2-px seam overlap", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
+  const map = imageryMap(context, api, 4);
+  const src = context.GeoSources.byId("eox");
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(r.tiles, plan.items.length);
+  const level = levelGroup(api, r.groupId, 4);
+  const origin = context.GeoBlocks.levelOrigin(plan.items);
+  const kids = api.getChildren(level);
+  const expected = Array.from(plan.items, (it) => context.GeoBlocks.rectLocal(it, origin).join(",")).sort();
+  assert.deepEqual(kids.map((id) => api.get(id, "position.x") + "," + api.get(id, "position.y")).sort(), expected);
+  kids.forEach((id) => {
+    const it = plan.items.find((i) => context.GeoBlocks.rectLocal(i, origin).join(",") === api.get(id, "position.x") + "," + api.get(id, "position.y"));
+    const px = context.GeoBlocks.rectPixels(it);
+    assert.equal(api.get(id, "scale.x"), (px[0] + 4) / px[0]);
+    assert.equal(api.get(id, "scale.y"), (px[1] + 4) / px[1]);
+  });
+});
+
+// F7: sampling every frame of the comp is wasteful and wrong once the camera is only
+// keyed over part of it - only the keyed range (clamped to the comp) should be sampled.
+test("sampleCamera samples only the keyed camera range, clamped to the comp frame range (F7)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  api.keyframe(map.cameraId, 2, { "array.2": 4 });
+  api.keyframe(map.cameraId, 5, { "array.2": 6 });
+  const samples = context.GeoScene.sampleCamera(map);
+  assert.equal(samples.length, 4, "frames 2, 3, 4, 5");
+});
+
+test("sampleCamera samples just the current frame when the camera has no keyframes (F7)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  api.setFrame(3);
+  const samples = context.GeoScene.sampleCamera(map);
+  assert.equal(samples.length, 1);
+  assert.equal(api.getFrame(), 3, "playhead restored");
+});
+
+test("planImagery samples every frame and lists missing tiles", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  api.setFrame(3);
+  const src = tileSource(context);
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.tiles.length, 48);
+  assert.equal(plan.missing.length, 48);
+  assert.equal(plan.cacheKey, "eox");
+  assert.deepEqual([plan.lo, plan.hi], [4, 4]);
+  assert.equal(api.getFrame(), 3, "playhead restored");
+  api.set(map.cameraId, { "array.4": 1 });
+  assert.throws(() => context.GeoScene.planImagery(map, src, {}), /Imagery needs the Web Mercator projection/);
+});
+
+test("planImagery refuses a plan over the tile cap with the updated message (F1)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  const realTileSet = context.GeoTiles.tileSet;
+  context.GeoTiles.tileSet = function () {
+    var tiles = [];
+    for (var i = 0; i < 301; i++) tiles.push({ z: 4, x: i, y: 0 });
+    return { tiles: tiles, lo: 4, hi: 4, frames: 1 };
+  };
+  assert.throws(() => context.GeoScene.planImagery(map, src, {}),
+    /Too many tiles \(301\) — end the flight at a lower zoom or use a smaller composition\.$/);
+  context.GeoTiles.tileSet = realTileSet;
+});
+
+// A fake tile set: levels 4..min(maxZoom, 10), perLevel tiles each. Records each maxZoom asked for.
+function fakeLevelTileSet(context, perLevel, asked) {
+  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+    asked.push(maxZoom);
+    var hi = Math.min(maxZoom, 10), tiles = [];
+    for (var L = 4; L <= hi; L++) for (var i = 0; i < perLevel; i++) tiles.push({ z: L, x: i, y: 0 });
+    return { tiles: tiles, lo: 4, hi: hi, frames: 1 };
+  };
+}
+
+test("planImagery caps the sharpest level until the plan fits under the tile limit", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  const asked = [];
+  fakeLevelTileSet(context, 100, asked);
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.deepEqual(asked, [15, 9, 8, 7, 6], "each retry drops one level below the last top level used");
+  assert.equal(plan.tiles.length, 300);
+  assert.deepEqual([plan.lo, plan.hi], [4, 6]);
+  assert.equal(plan.cappedZoom, 6);
+  assert.equal(plan.uncappedTiles, 700);
+});
+
+test("planImagery leaves cappedZoom unset when the plan already fits", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const plan = context.GeoScene.planImagery(map, tileSource(context), {});
+  assert.equal(plan.tiles.length, 48);
+  assert.equal(plan.cappedZoom, undefined);
+  assert.equal(plan.uncappedTiles, undefined);
+});
+
+test("planImagery refuses when even the lowest level used alone is over the limit", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const asked = [];
+  fakeLevelTileSet(context, 400, asked);
+  assert.throws(() => context.GeoScene.planImagery(map, tileSource(context), {}),
+    /^Error: Too many tiles \(400\) — end the flight at a lower zoom or use a smaller composition\.$/);
+  assert.equal(asked[asked.length - 1], 4);
+});
+
+// A world-to-city flight keyed on every frame (the fake api holds keyed values, so key each frame).
+function keyFlight(api, map, from, to, frames = 10) {
+  for (let f = 0; f < frames; f++) api.keyframe(map.cameraId, f, { "array.0": 48.85, "array.1": 2.35, "array.2": from + (to - from) * f / (frames - 1) });
+}
+
+test("planImagery caps a real world-to-city flight under the tile limit", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 2);
+  keyFlight(api, map, 2, 15);
+  context.GeoScene.setCamera(map.cameraId, { rotation: 45 }); // a turned view needs about twice the tiles
+  const plan = context.GeoScene.planImagery(map, tileSource(context), {});
+  assert.ok(plan.tiles.length <= context.GeoTiles.MAX_TILES, String(plan.tiles.length));
+  assert.ok(plan.uncappedTiles > context.GeoTiles.MAX_TILES, String(plan.uncappedTiles));
+  assert.ok(plan.cappedZoom < 15, String(plan.cappedZoom));
+  assert.equal(plan.hi, plan.cappedZoom);
+});
+
+test("buildImagery creates levels, drivers and tiles at the back of the map, and rebuild replaces it", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(r.tiles, 48);
+  assert.equal(r.levels, 1);
+  assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], r.groupId, "imagery at the back of the map group");
+  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  assert.ok(level);
+  assert.equal(api.getChildren(level).length, 48);
+  const conns = api._connections.map((c) => Array.from(c));
+  assert.ok(conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"));
+  ["position", "scale", "opacity"].forEach((a) => assert.ok(conns.some((c) => c[2] === level && c[3] === a), a));
+  assert.equal(context.GeoScene.findImagery(map).length, 1);
+  assert.equal(api.getAssetWindowLayers().length, 48);
+  const again = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(context.GeoScene.findImagery(map).length, 1, "old imagery deleted");
+  assert.equal(api.layerExists(r.groupId), false);
+  assert.equal(api.getAssetWindowLayers().length, 48, "assets reused");
+  assert.ok(api.layerExists(again.groupId));
+});
+
+test("buildImagery uses only the levels that actually have files for the opacity fade range (F2)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4.9); // visible levels [4, 5]
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => (/\/tiles\/eox\/5\//.test(base) ? null : base + ".jpg");
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.deepEqual([plan.lo, plan.hi], [4, 5]);
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(r.levels, 1, "level 5 has no files and is skipped");
+  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  assert.ok(driver);
+  const expr = String(api.get(driver, "expression"));
+  assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
+  const T = require("../src/core/tiles.js");
+  assert.equal(T.levelOpacity(5.2, 4, 4, 4, 0), 100, "z 4 must stay opaque past its old fade-out point since it's now the highest built level");
+});
+
+test("512-px sources are placed at half scale; tiles without files are skipped", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = context.GeoSources.byId("maptiler");
+  let n = 0;
+  context.GeoNet.cachedTile = (base) => (n++ % 2 ? base + ".png" : null);
+  const plan = context.GeoScene.planImagery(map, src, { key: "K", style: "streets-v2" });
+  const r = context.GeoScene.buildImagery(map, src, { key: "K", style: "streets-v2" }, plan);
+  assert.equal(r.tiles, 24);
+  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const tile = api.getChildren(level)[0];
+  assert.equal(api.get(tile, "scale.x"), 0.5 * 260 / 256);
+});
+
+// F11: neighbouring tiles must overlap by about 1px to avoid hairline seams, so scale
+// is always set (never skipped just because the base scale is 1).
+test("buildImagery scales every tile by 260/256 (times 0.5 for 512px sources) to avoid hairline seams (F11)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context); // 256px source, base scale 1
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const tile = api.getChildren(level)[0];
+  assert.equal(api.get(tile, "scale.x"), 260 / 256);
+  assert.equal(api.get(tile, "scale.y"), 260 / 256);
+});
+
+// Item 1 (live test): api.parent keeps the WORLD transform, so a layer must be parented
+// first and its local transform set afterwards - otherwise it lands offset/rotated.
+test("buildImagery parents layers before setting their local transforms (parent keeps world transform)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const realParent = api.parent.bind(api);
+  api.parent = function (id, parentId) {
+    const changed = api.getParent(id) !== parentId;
+    realParent(id, parentId);
+    if (changed && !/^javaScript/.test(String(id))) { // emulate Cavalry compensating the local transform
+      api.set(id, { "position.x": (api.get(id, "position.x") || 0) + 1000, "position.y": (api.get(id, "position.y") || 0) - 700, "rotation.z": 30 });
+    }
+  };
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api.get(r.groupId, "position.x"), 0, "outer imagery group local position must be reset after parenting");
+  assert.equal(api.get(r.groupId, "position.y"), 0);
+  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  assert.equal(api.get(level, "rotation.z"), 0, "level group local rotation must be reset after parenting");
+  assert.equal(api.get(level, "position.x"), 0);
+  assert.equal(api.get(level, "position.y"), 0);
+  const tiles = plan.tiles.filter((t) => t.z === 4);
+  const origin = context.GeoTiles.levelOrigin(tiles);
+  const kids = api.getChildren(level);
+  assert.equal(kids.length, 48);
+  kids.forEach((id) => assert.equal(api.get(id, "rotation.z"), 0, "tile rotation"));
+  const expected = tiles.map((t) => { const p = context.GeoTiles.tileLocal(t, origin); return p[0] + "," + p[1]; }).sort();
+  const actual = kids.map((id) => api.get(id, "position.x") + "," + api.get(id, "position.y")).sort();
+  assert.deepEqual(Array.from(actual), Array.from(expected));
+});
+
+// Item 3: palette PNGs load with resolution {x:0,y:0} and draw nothing.
+function zeroResolutionFor(api, isBad) {
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) {
+    const id = realAdd(assetId);
+    api.set(id, { resolution: isBad(api.getAssetFilePath(assetId)) ? { x: 0, y: 0 } : { x: 256, y: 256 } });
+    return id;
+  };
+}
+
+test("buildImagery removes unreadable (zero-resolution) tiles and reports them as unreadable", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const bad = plan.tiles.slice(0, 3).map((t) => context.GeoNet.tileBase(plan.cacheKey, t.z, t.x, t.y) + ".jpg");
+  const deleted = [];
+  const realDelete = api.deleteLayer.bind(api);
+  api.deleteLayer = function (id) { deleted.push(id); return realDelete(id); };
+  zeroResolutionFor(api, (p) => bad.indexOf(p) >= 0);
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(r.tiles, 45);
+  assert.equal(r.unreadable, 3);
+  assert.equal(deleted.length, 3, "only the unreadable footage layers are deleted");
+  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  assert.equal(api.getChildren(level).length, 45);
+});
+
+test("buildImagery's built-level range ignores a level whose tiles are all unreadable", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4.9); // visible levels [4, 5]
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.deepEqual([plan.lo, plan.hi], [4, 5]);
+  zeroResolutionFor(api, (p) => /\/tiles\/eox\/5\//.test(p));
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(r.levels, 1);
+  assert.ok(r.unreadable > 0);
+  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  const expr = String(api.get(driver, "expression"));
+  assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
+});
+
+test("Imagery tab: the status line mentions tiles Cavalry couldn't read", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  zeroResolutionFor(api, () => true);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /\d+ tiles couldn't be read by Cavalry \(palette PNGs\) — choose a JPG style or link\./);
+});
+
+// F12: the nested source-identifying meta must be named 'sourceMeta', not the generic
+// 'meta', to avoid ambiguity before shipping v0.4.0.
+test("buildImagery's GEO_META nests the source info under 'sourceMeta' (F12)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = context.GeoSources.byId("maptiler");
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, { key: "K", style: "streets-v2" });
+  context.GeoScene.buildImagery(map, src, { key: "K", style: "streets-v2" }, plan);
+  const info = context.GeoScene.findImagery(map)[0];
+  assert.deepEqual(plain(info.meta.sourceMeta), { source: "maptiler", style: "streets-v2" });
+  assert.equal(info.meta.meta, undefined);
+});
+
+// F4: buildImagery must be atomic - a throw partway through a rebuild must not leave
+// the old imagery deleted with a half-built group orphaned at the comp root.
+test("buildImagery is atomic: a throw mid-rebuild leaves the old imagery intact and cleans up the failed attempt (F4)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const first = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.ok(api.layerExists(first.groupId));
+
+  let calls = 0;
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) {
+    calls++;
+    if (calls === 3) throw new Error("boom");
+    return realAdd(assetId);
+  };
+  assert.throws(() => context.GeoScene.buildImagery(map, src, {}, plan), /boom/);
+  assert.ok(api.layerExists(first.groupId), "old imagery group must still exist");
+  const imageryGroups = api.getCompLayers(false).filter((id) => String(api.getNiceName(id)).indexOf("Imagery:") === 0);
+  assert.deepEqual(imageryGroups, [first.groupId], "the failed rebuild's group must be fully cleaned up, leaving only the old one");
+});
+
+// ---- Chunked imagery build (beginImageryBuild) ----------------------------------
+// A zero budget still does one unit of work per step, so these tests see every step.
+function imageryFixture() {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  return { context, api, map, src, plan };
+}
+function imageryGroups(api) {
+  return api.getCompLayers(false).filter((id) => String(api.getNiceName(id)).indexOf("Imagery:") === 0);
+}
+function footageCount(api) {
+  return api.getCompLayers(false).filter((id) => /^footageShape#/.test(id)).length;
+}
+function stepToEnd(job, budget, each) {
+  const out = [];
+  let r;
+  do { r = job.step(budget); out.push(r); if (each) each(r); } while (!r.done && out.length < 10000);
+  return out;
+}
+function levelGroup(api, groupId, L) { return api.getChildren(groupId).find((id) => api.getNiceName(id) === "z " + L); }
+
+test("beginImageryBuild adds one tile per zero-budget step and keeps the new group hidden until its drivers are connected", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  const first = job.step(0);
+  assert.deepEqual([first.done, first.phase, first.built, first.total], [false, "tiles", 1, 48]);
+  const outer = imageryGroups(api)[0];
+  assert.equal(api.getParent(outer), map.groupId, "the outer group is parented into the map on the first step");
+  assert.equal(api.get(outer, "hidden"), true, "half-built imagery never renders");
+  let built = 1;
+  const steps = stepToEnd(job, 0, (r) => {
+    if (r.done) return;
+    if (r.phase === "tiles") { assert.equal(r.built, ++built); assert.equal(api.get(outer, "hidden"), true); }
+  });
+  const last = steps[steps.length - 1];
+  assert.ok(steps.length >= 48, "48 tiles over at least 48 steps");
+  assert.equal(last.done, true);
+  assert.equal(last.built, 48);
+  assert.equal(last.total, 48);
+  assert.deepEqual(plain(last.result), { groupId: outer, tiles: 48, levels: 1, unreadable: 0 });
+  assert.equal(api.get(outer, "hidden"), false, "shown once the build is complete");
+  assert.equal(api.getChildren(levelGroup(api, outer, 4)).length, 48);
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], outer, "imagery at the back of the map group");
+});
+
+// Measured in Cavalry: every step that loads an asset costs a ~3.6 s rescan afterwards,
+// however many it loads, so all of a build's assets load in the first step.
+test("beginImageryBuild loads every tile's asset in the first step", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const loads = [];
+  const realLoad = api.loadAsset.bind(api);
+  api.loadAsset = function (p, b) { loads.push(p); return realLoad(p, b); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  job.step(0);
+  assert.equal(loads.length, 48, "all 48 assets after the first step");
+  stepToEnd(job, 0);
+  assert.equal(loads.length, 48, "no asset loads in later steps");
+});
+
+// Closing the panel mid-build stops its timer and abandons the job: the half-built
+// group must still be findable so the next build removes it.
+test("an abandoned half-built imagery group is removed by the next build", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const abandoned = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  abandoned.step(0); abandoned.step(0); abandoned.step(0);
+  assert.equal(imageryGroups(api).length, 1);
+  assert.equal(context.GeoScene.findImagery(map).length, 1, "the half-built group is findable");
+  stepToEnd(context.GeoScene.beginImageryBuild(map, src, {}, plan), 0);
+  assert.equal(imageryGroups(api).length, 1, "only the new imagery is left");
+});
+
+test("beginImageryBuild restores the user's selection when it finishes", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  api.select([map.cameraId]);
+  stepToEnd(context.GeoScene.beginImageryBuild(map, src, {}, plan), 0);
+  assert.deepEqual(Array.from(api.getSelection()), [map.cameraId]);
+});
+
+test("beginImageryBuild: an unbounded step does everything at once, like buildImagery", () => {
+  const { context, map, src, plan } = imageryFixture();
+  const r = context.GeoScene.beginImageryBuild(map, src, {}, plan).step(Infinity);
+  assert.equal(r.done, true);
+  assert.equal(r.result.tiles, 48);
+});
+
+test("cancelling mid-build discards the new imagery in steps and leaves the old imagery untouched", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const old = context.GeoScene.buildImagery(map, src, {}, plan);
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  for (let i = 0; i < 5; i++) job.step(0);
+  assert.equal(footageCount(api), 53);
+  job.cancel();
+  const steps = stepToEnd(job, 0);
+  const last = steps[steps.length - 1];
+  assert.ok(steps.length > 1, "the partial imagery is deleted over several steps");
+  assert.equal(last.done, true);
+  assert.equal(last.cancelled, true);
+  assert.equal(last.result, undefined);
+  assert.deepEqual(imageryGroups(api), [old.groupId], "only the old imagery group is left");
+  assert.equal(footageCount(api), 48);
+  assert.equal(api.getChildren(levelGroup(api, old.groupId, 4)).length, 48);
+  assert.equal(context.GeoScene.findImagery(map).length, 1);
+});
+
+test("cancelling before the first step builds nothing", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  job.cancel();
+  const r = job.step(0);
+  assert.equal(r.done, true);
+  assert.equal(r.cancelled, true);
+  assert.deepEqual(imageryGroups(api), []);
+});
+
+test("the old imagery is hidden and deleted in steps only after the new imagery is complete", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const old = context.GeoScene.buildImagery(map, src, {}, plan);
+  const deleted = [];
+  const realDelete = api.deleteLayer.bind(api);
+  api.deleteLayer = function (id) { deleted.push(id); return realDelete(id); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  let sawCleanup = false, cleanupSteps = 0;
+  const steps = stepToEnd(job, 0, (r) => {
+    if (r.phase !== "cleanup" || r.done) {
+      if (!r.done) {
+        assert.equal(deleted.length, 0, "nothing of the old imagery is deleted before the new one is complete");
+        assert.equal(api.getChildren(levelGroup(api, old.groupId, 4)).length, 48);
+      }
+      return;
+    }
+    cleanupSteps++;
+    if (!sawCleanup) {
+      sawCleanup = true;
+      const fresh = imageryGroups(api).find((id) => id !== old.groupId);
+      assert.equal(api.getChildren(levelGroup(api, fresh, 4)).length, 48, "new imagery complete before cleanup starts");
+      assert.equal(api.get(fresh, "hidden"), false);
+      assert.equal(api.get(old.groupId, "hidden"), true, "the old imagery is hidden while it is taken apart");
+    }
+  });
+  const last = steps[steps.length - 1];
+  assert.ok(sawCleanup);
+  assert.ok(cleanupSteps > 10, "old tiles are deleted a few at a time, not in one call");
+  assert.equal(api.layerExists(old.groupId), false);
+  assert.ok(deleted.indexOf(old.groupId) >= 0);
+  assert.equal(last.result.tiles, 48);
+  assert.deepEqual(imageryGroups(api), [last.result.groupId]);
+  assert.equal(footageCount(api), 48);
+  assert.equal(context.GeoScene.findImagery(map).length, 1);
+});
+
+test("cancel during cleanup lets the cleanup finish: the new imagery is kept", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const old = context.GeoScene.buildImagery(map, src, {}, plan);
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  let r;
+  do { r = job.step(0); } while (r.phase !== "cleanup");
+  job.step(0);
+  job.cancel();
+  const steps = stepToEnd(job, 0);
+  const last = steps[steps.length - 1];
+  assert.equal(last.cancelled, undefined);
+  assert.equal(last.result.tiles, 48);
+  assert.equal(api.layerExists(old.groupId), false);
+  assert.deepEqual(imageryGroups(api), [last.result.groupId]);
+});
+
+test("an error in a build step tears down the new group and keeps the old imagery", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const old = context.GeoScene.buildImagery(map, src, {}, plan);
+  let calls = 0;
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  job.step(0);
+  job.step(0);
+  assert.throws(() => job.step(0), /boom/);
+  assert.deepEqual(imageryGroups(api), [old.groupId]);
+  assert.equal(footageCount(api), 48);
+});
+
+// F10: a tile marked empty (404/204 on a previous download) must not show up as
+// missing again on the next plan, or it gets re-downloaded forever.
+test("planImagery excludes tiles marked empty from missing (F10)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  const empties = [];
+  context.GeoNet.isEmptyTile = (base) => empties.indexOf(base) >= 0;
+  const plan1 = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan1.missing.length, 48);
+  const t = plan1.missing[0];
+  empties.push(context.GeoNet.tileBase(plan1.cacheKey, t.z, t.x0, t.y0));
+  const plan2 = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan2.missing.length, 47, "the marked-empty tile is no longer missing");
+});
+
+test("flyCamera keys lat, lon and zoom per frame and replaces keys in that range", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 2);
+  api.keyframe(map.cameraId, 5, { "array.2": 9 });
+  api.keyframe(map.cameraId, 50, { "array.2": 7 });
+  const pts = Array.from({ length: 10 }, (_, k) => ({ lat: k, lon: 2 * k, zoom: 3 + k / 10 }));
+  const r = context.GeoScene.flyCamera(map, pts, 2);
+  assert.deepEqual(plain(r), { start: 2, end: 11 });
+  api.setFrame(5);
+  assert.equal(api.get(map.cameraId, "array.0"), 3);
+  assert.equal(api.get(map.cameraId, "array.2"), 3.3, "old key at frame 5 replaced");
+  assert.deepEqual(plain(api.getKeyframeTimes(map.cameraId, "array.2")).filter((f) => f > 11), [50], "keys outside the range kept");
+});
+
+// F5: createAttribution is the OSM credit only; a separate createImageryCredit takes
+// custom text so the imagery credit never collides with the OSM one.
+test("createImageryCredit accepts custom text; createAttribution always uses the OSM credit text (F5)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 2);
+  const imgId = context.GeoScene.createImageryCredit(map, "NASA Blue Marble");
+  assert.equal(api.get(imgId, "text"), "NASA Blue Marble");
+  const osmId = context.GeoScene.createAttribution(map);
+  assert.equal(api.get(osmId, "text"), "© OpenStreetMap contributors");
+});
+
+test("createImageryCredit coexists with the OSM credit under different names and positions (F5)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const osmId = GeoScene.createAttribution(map);
+  const imgId = GeoScene.createImageryCredit(map, "EOxCloudless credit");
+  assert.notEqual(osmId, imgId);
+  assert.equal(api.getNiceName(osmId), "OpenStreetMap credit");
+  assert.equal(api.getNiceName(imgId), "Imagery credit");
+  assert.deepEqual(Array.from(api.get(osmId, "position")), [-1920 / 2 + 200, -1080 / 2 + 40]);
+  assert.deepEqual(Array.from(api.get(imgId, "position")), [-1920 / 2 + 200, -1080 / 2 + 80]);
+});
+
+test("hasAttribution stays false after only the imagery credit is added (F5)", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  GeoScene.createImageryCredit(map, "Some credit");
+  assert.equal(GeoScene.hasAttribution(map), false);
+});
+
+test("createImageryCredit updates an existing imagery credit instead of adding another", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const first = GeoScene.createImageryCredit(map, "First credit");
+  const second = GeoScene.createImageryCredit(map, "Second credit");
+  assert.equal(first, second, "the same layer should be reused");
+  assert.equal(api.get(first, "text"), "Second credit");
+  const credits = api.getChildren(map.groupId).filter((id) => api.getNiceName(id) === "Imagery credit");
+  assert.equal(credits.length, 1);
+});
+
+// F5: pressing "Add attribution" (Imagery tab) twice must not pile up duplicate credits.
+test("Imagery tab: Add attribution twice keeps one 'Imagery credit' layer (F5)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.sourcePicker.setValue(0); // EOX
+  context.imageryAttrBtn.onClick();
+  context.imageryAttrBtn.onClick();
+  const map = context.currentMap();
+  const credits = api.getChildren(map.groupId).filter((id) => api.getNiceName(id) === "Imagery credit");
+  assert.equal(credits.length, 1);
+});
+
+function fakeTileDownloads(context, api, status) {
+  context.GeoNet.downloadTile = (url, base) => {
+    if (status && status !== 200) return { status: status };
+    api.writeToFile(base + ".jpg", "<tile>");
+    return { status: 200, path: base + ".jpg" };
+  };
+}
+
+// A fake `curl --parallel -K cfg ... --stderr status`: reads the config the panel wrote and,
+// when `deliver()` is called, writes each output file and appends
+// "<code> <exit code> <content type> <path>\n" lines. codeFor(url) returns an HTTP code, or
+// { code, exit, type, write } to say exactly what curl reports and writes (write: null = no file).
+// A batch whose config has been deleted is treated as a curl that is gone.
+function fakeCurl(api, codeFor = () => 200, version = "curl 8.4.0 (x86_64-pc-win32)") {
+  const calls = [];
+  api.runProcess = (cmd, args) => ({ output: cmd === "curl" && args[0] === "--version" ? version : "", error: "" });
+  api.runDetachedProcess = (cmd, args) => { calls.push({ cmd, args }); };
+  api.deleteFilePath = (p) => { delete api._files[p]; };
+  function outcome(url) {
+    const got = codeFor(url), o = typeof got === "object" ? got : { code: got }, code = o.code;
+    return {
+      code,
+      exit: o.exit !== undefined ? o.exit : code === 200 ? 0 : code === 0 ? 7 : code >= 400 ? 22 : 0,
+      type: o.type !== undefined ? o.type : code === 200 ? "image/jpeg" : code === 0 ? "" : "text/html",
+      write: o.write !== undefined ? o.write : code === 200 ? "<image>" : null
+    };
+  }
+  function deliver(max = Infinity) {
+    calls.forEach((c) => {
+      const cfg = api._files[c.args[c.args.indexOf("-K") + 1]];
+      if (cfg === undefined) return;
+      const status = c.args[c.args.indexOf("--stderr") + 1];
+      const un = (v) => v.replace(/\\(.)/g, "$1");
+      const pairs = [...cfg.matchAll(/url = "((?:[^"\\]|\\.)*)"\noutput = "((?:[^"\\]|\\.)*)"/g)].map((m) => ({ url: un(m[1]), path: un(m[2]) }));
+      let n = 0;
+      pairs.forEach((p) => {
+        if (n >= max || (api._files[status] || "").includes(" " + p.path + "\n")) return;
+        const o = outcome(p.url);
+        if (o.write !== null) api._files[p.path] = o.write;
+        api._files[status] = (api._files[status] || "") + String(o.code).padStart(3, "0") + " " + o.exit + " " + o.type + " " + p.path + "\n";
+        n++;
+      });
+    });
+  }
+  return { calls, deliver };
+}
+
+test("GeoFetch.available needs runDetachedProcess, runProcess and curl 7.75 or newer", () => {
+  const { context, api } = buildSandbox();
+  assert.equal(context.GeoFetch.available(), false, "no runDetachedProcess in the plain fake");
+  fakeCurl(api); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), true);
+  fakeCurl(api, undefined, "curl 7.55.1 (Windows)"); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), false, "too old for --parallel");
+  fakeCurl(api, undefined, "curl 7.74.0 (Windows)"); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), false, "too old for %{exitcode}");
+  fakeCurl(api, undefined, "curl 7.75.0 (Windows)"); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), true);
+});
+
+test("GeoFetch.available is false when the assets folder path isn't plain ASCII (F4)", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  api.getAppDataFolder = () => "C:/Users/üser/AppData"; // any non-ASCII folder name
+  assert.equal(context.GeoFetch.available(), false);
+});
+
+test("planImagery plans EOX as large images only when background downloads work, else as tiles (F4)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = context.GeoSources.byId("eox");
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.mode, "tiles", "one-at-a-time WMS images would freeze Cavalry ~15 s each");
+  assert.match(context.GeoScene.itemUrl(src, {}, plan, plan.items[0]), /\/wmts\//);
+  fakeCurl(api); context.GeoFetch._reset();
+  assert.equal(context.GeoScene.planImagery(map, src, {}).mode, "images");
+  context.GeoFetch.disable();
+  assert.equal(context.GeoFetch.available(), false);
+  assert.equal(context.GeoScene.planImagery(map, src, {}).mode, "tiles");
+});
+
+test("GeoFetch.poll reads code, exit code and content type; ok needs 200, exit 0, a JPEG/PNG type and the file (F1)", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const paths = ["C:/x/a b/1.jpg", "C:/x/2.jpg", "C:/x/3.jpg", "C:/x/4.jpg", "C:/x/5.jpg", "C:/x/6.png", "C:/x/7.jpg", "C:/x/8.jpg"];
+  const batch = context.GeoFetch.start(paths.map((p, i) => ({ url: "https://a.example/" + i, path: p })));
+  paths.forEach((p) => { api._files[p] = "<x>"; });
+  delete api._files["C:/x/7.jpg"];
+  api._files[batch.status] = [
+    "200 0 image/jpeg C:/x/a b/1.jpg", "200 56 image/jpeg C:/x/2.jpg", "200 0 text/xml C:/x/3.jpg",
+    "200 0  C:/x/4.jpg\r", "200 0 text/html; charset=utf-8 C:/x/5.jpg", "200 0 IMAGE/PNG C:/x/6.png",
+    "200 0 image/jpeg C:/x/7.jpg", "200 0 image/jpg C:/x/8.jpg"].join("\n") + "\n";
+  const r = context.GeoFetch.poll(batch);
+  assert.deepEqual(plain(r.results.map((x) => [x.path, x.status, x.exit, x.type, x.ok])), [
+    ["C:/x/a b/1.jpg", 200, 0, "image/jpeg", true],
+    ["C:/x/2.jpg", 200, 56, "image/jpeg", false],
+    ["C:/x/3.jpg", 200, 0, "text/xml", false],
+    ["C:/x/4.jpg", 200, 0, "", false],
+    ["C:/x/5.jpg", 200, 0, "text/html; charset=utf-8", false],
+    ["C:/x/6.png", 200, 0, "IMAGE/PNG", true],
+    ["C:/x/7.jpg", 200, 0, "image/jpeg", false],
+    ["C:/x/8.jpg", 200, 0, "image/jpg", true]]); // M3: the type the one-at-a-time path accepts
+  assert.equal(r.done, true);
+});
+
+test("GeoFetch.poll counts distinct job paths, not lines (F7)", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([{ url: "https://a.example/1", path: "C:/x/1.jpg" }, { url: "https://a.example/2", path: "C:/x/2.jpg" }]);
+  api._files[batch.status] = "200 0 image/jpeg C:/x/1.jpg\n200 0 image/jpeg C:/x/1.jpg\n200 0 image/jpeg C:/x/other.jpg\n";
+  const r = context.GeoFetch.poll(batch);
+  assert.equal(r.results.length, 1);
+  assert.equal(r.count, 1);
+  assert.equal(r.done, false);
+  assert.equal(batch.seen, 3, "every line read is counted as seen");
+});
+
+test("GeoFetch starts one detached curl batch and reports each file as its status line arrives", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api, (url) => (/missing/.test(url) ? 404 : 200));
+  context.GeoFetch._reset();
+  const dir = "C:/fake/AppData/Scripts/CavalryGeo_assets/cache/images/eox/4";
+  const jobs = [{ url: "https://a.example/1?x=\"q\"", path: dir + "/1.jpg" }, { url: "https://a.example/missing", path: dir + "/2.jpg" }];
+  const batch = context.GeoFetch.start(jobs);
+  assert.equal(curl.calls.length, 1);
+  assert.equal(curl.calls[0].cmd, "curl");
+  const a = curl.calls[0].args;
+  assert.deepEqual(plain(a.slice(0, 11)), ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2", "--max-time", "120"]);
+  assert.equal(a[a.indexOf("-w") + 1], "%{stderr}%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n");
+  assert.match(api._files[a[a.indexOf("-K") + 1]], /url = "https:\/\/a\.example\/1\?x=\\"q\\""\noutput = ".*\/1\.jpg"\n/);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), jobs.map((j) => j.path), "in-flight list written before curl starts");
+  let r = context.GeoFetch.poll(batch);
+  assert.deepEqual([r.results.length, r.done, r.stalled], [0, false, false]);
+  curl.deliver(1);
+  r = context.GeoFetch.poll(batch);
+  assert.deepEqual(plain(r.results), [{ path: dir + "/1.jpg", status: 200, exit: 0, type: "image/jpeg", ok: true }]);
+  curl.deliver();
+  r = context.GeoFetch.poll(batch);
+  assert.deepEqual(plain(r.results), [{ path: dir + "/2.jpg", status: 404, exit: 22, type: "text/html", ok: false }]);
+  assert.equal(r.done, true);
+  context.GeoFetch.finish(batch);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), [], "finished files leave the in-flight list");
+});
+
+test("GeoFetch.poll ignores a half-written last line and reports a stall after STALL_MS", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([{ url: "https://a.example/1", path: "C:/x/1.jpg" }]);
+  api._files[batch.status] = "200 C:/x/1.j";
+  assert.equal(context.GeoFetch.poll(batch).results.length, 0);
+  batch.lastProgress -= context.GeoFetch.STALL_MS + 1;
+  assert.equal(context.GeoFetch.poll(batch).stalled, true);
+});
+
+const INFLIGHT = "C:/fake/AppData/Scripts/CavalryGeo_assets/cache/downloads/inflight.json";
+function job(n) { return { url: "https://a.example/" + n, path: "C:/x/" + n + ".jpg" }; }
+function cfgPaths(api, call) { return [...api._files[call.args[call.args.indexOf("-K") + 1]].matchAll(/output = "([^"]*)"/g)].map((m) => m[1]); }
+
+test("GeoFetch waits 400 s for a stall, 90 s for a first line, and drops batches after 20 min (F2)", () => {
+  const { context } = buildSandbox();
+  assert.deepEqual([context.GeoFetch.STALL_MS, context.GeoFetch.FIRST_LINE_MS, context.GeoFetch.MAX_BATCH_MS], [400000, 90000, 1200000]);
+});
+
+test("GeoFetch.finish takes only reported files off the in-flight list (F2)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([job(1), job(2)]);
+  curl.deliver(1);
+  context.GeoFetch.poll(batch);
+  context.GeoFetch.finish(batch);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/2.jpg"]);
+  assert.ok(api._files[batch.cfg] !== undefined, "the batch is kept while curl may still write a file");
+});
+
+test("GeoFetch.start adopts files a live earlier batch is still fetching: curl runs only for the rest (F3)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const a = context.GeoFetch.start([job(1), job(2)]);
+  context.GeoFetch.start([job(1)]);
+  assert.equal(curl.calls.length, 1, "nothing new to fetch: no second curl");
+  const b = context.GeoFetch.start([job(2), job(3)]);
+  assert.equal(curl.calls.length, 2);
+  assert.deepEqual(cfgPaths(api, curl.calls[1]), ["C:/x/3.jpg"], "the second curl never writes a file the first one owns");
+  assert.deepEqual(plain(context.GeoFetch.leftovers()).sort(), ["C:/x/1.jpg", "C:/x/2.jpg", "C:/x/3.jpg"]);
+  curl.deliver();
+  const r = context.GeoFetch.poll(b);
+  assert.deepEqual(plain(r.results.map((x) => x.path)).sort(), ["C:/x/2.jpg", "C:/x/3.jpg"], "the adopted batch's lines count for this stage");
+  assert.equal(r.done, true);
+  context.GeoFetch.finish(b);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/1.jpg"]);
+  const c = context.GeoFetch.start([job(1)]);
+  assert.equal(curl.calls.length, 2, "already reported by the first batch: not fetched again");
+  assert.deepEqual(plain(context.GeoFetch.poll(c).results.map((x) => [x.path, x.ok])), [["C:/x/1.jpg", true]]);
+  assert.equal(api._files[a.cfg], undefined, "a batch with nothing left is dropped with its config");
+  assert.equal(api._files[a.status], undefined);
+});
+
+test("GeoFetch.start fetches again a file an earlier batch reported as failed, deleting the bad file (F3)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api, (url) => (/2$/.test(url) ? { code: 200, exit: 28, type: "image/jpeg", write: "<partial>" } : 200));
+  context.GeoFetch._reset();
+  context.GeoFetch.start([job(1), job(2), job(3)]);
+  curl.deliver();
+  api._files["C:/x/3.jpg"] = "<partial>"; // reported fine, but not part of the next stage
+  api._files["C:/x/1.jpg"] = "<partial>"; // reported fine, so it stays
+  const fake = api._files[curl.calls[0].args[curl.calls[0].args.indexOf("--stderr") + 1]];
+  api._files[curl.calls[0].args[curl.calls[0].args.indexOf("--stderr") + 1]] = fake.replace(/200 0 image\/jpeg C:\/x\/3\.jpg/, "000 7  C:/x/3.jpg");
+  const b = context.GeoFetch.start([job(1), job(2)]);
+  assert.equal(api._files["C:/x/3.jpg"], undefined, "a failed file outside this stage is deleted too");
+  assert.equal(api._files["C:/x/2.jpg"], undefined);
+  assert.deepEqual(cfgPaths(api, curl.calls[1]), ["C:/x/2.jpg"]);
+  assert.deepEqual(plain(context.GeoFetch.poll(b).results.map((x) => x.path)), ["C:/x/1.jpg"]);
+});
+
+test("GeoFetch.start drops a batch older than 20 minutes: its config and status go, its unreported files are fetched again (F3)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const a = context.GeoFetch.start([job(1), job(2)]);
+  api._files[a.status] = "200 0 image/jpeg C:/x/1.jpg\n";
+  api._files["C:/x/1.jpg"] = "<image>";
+  api._files["C:/x/2.jpg"] = "<half written>";
+  const state = JSON.parse(api._files[INFLIGHT]);
+  state.batches[0].started -= context.GeoFetch.MAX_BATCH_MS + 1;
+  state.batches[0].lastLine = state.batches[0].started;
+  state.batches[0].lines = 1; // its line was already seen back then
+  api._files[INFLIGHT] = JSON.stringify(state);
+  const b = context.GeoFetch.start([job(1), job(2)]);
+  assert.equal(api._files[a.cfg], undefined);
+  assert.equal(api._files[a.status], undefined);
+  assert.equal(api._files["C:/x/2.jpg"], undefined, "an unreported file may be half written");
+  assert.equal(curl.calls.length, 2);
+  assert.deepEqual(cfgPaths(api, curl.calls[1]), ["C:/x/2.jpg"]);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/2.jpg"]);
+  assert.deepEqual(plain(context.GeoFetch.poll(b).results.map((x) => x.path)), ["C:/x/1.jpg"]);
+});
+
+test("GeoFetch measures a batch's 20 minutes from its last status line, not its start (M2)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const a = context.GeoFetch.start([job(1), job(2)]);
+  curl.deliver(1);
+  context.GeoFetch.poll(a);
+  let state = JSON.parse(api._files[INFLIGHT]);
+  assert.equal(state.batches[0].lines, 1, "poll records the lines it has seen");
+  assert.ok(Date.now() - state.batches[0].lastLine < 1000);
+  state.batches[0].started -= context.GeoFetch.MAX_BATCH_MS + 1;
+  state.batches[0].lastLine = Date.now() - 1000; // a long download that wrote a line just now
+  api._files[INFLIGHT] = JSON.stringify(state);
+  context.GeoFetch.start([job(2)]);
+  assert.equal(curl.calls.length, 1, "still live: adopted, not dropped and fetched again");
+  assert.ok(api._files[a.status] !== undefined);
+  // A line written since the last look also counts as progress, whenever the batch started.
+  state = JSON.parse(api._files[INFLIGHT]);
+  state.batches[0].started = 0; state.batches[0].lastLine = 0;
+  api._files[INFLIGHT] = JSON.stringify(state);
+  api._files[a.status] += "500 22 text/html C:/x/9.jpg\n";
+  context.GeoFetch.start([job(2)]);
+  assert.equal(curl.calls.length, 1);
+});
+
+test("GeoFetch.abandon keeps the batch's unreported files in flight; a later start reconciles and expires it (I1)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const a = context.GeoFetch.start([job(1), job(2)]);
+  context.GeoFetch.abandon(a);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/1.jpg", "C:/x/2.jpg"], "curl may still be writing them");
+  assert.equal(api._files[a.cfg], undefined, "the config (which may hold a key) is deleted");
+  assert.ok(api._files[a.status] !== undefined, "the status file stays for a later reconcile");
+  // curl was only slow: it finishes file 1 later.
+  api._files["C:/x/1.jpg"] = "<image>";
+  api._files["C:/x/2.jpg"] = "<half written>";
+  api._files[a.status] = "200 0 image/jpeg C:/x/1.jpg\n";
+  const b = context.GeoFetch.start([job(1), job(2)]);
+  assert.equal(curl.calls.length, 1, "file 1 was reported and file 2 is adopted");
+  assert.deepEqual(plain(context.GeoFetch.poll(b).results.map((x) => [x.path, x.ok])), [["C:/x/1.jpg", true]]);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/2.jpg"]);
+  const state = JSON.parse(api._files[INFLIGHT]);
+  state.batches[0].lastLine -= context.GeoFetch.MAX_BATCH_MS + 1;
+  api._files[INFLIGHT] = JSON.stringify(state);
+  context.GeoFetch.start([job(2)]);
+  assert.equal(api._files[a.status], undefined, "expired: dropped with its status file");
+  assert.equal(api._files["C:/x/2.jpg"], undefined, "its unreported file may be half written");
+  assert.deepEqual(cfgPaths(api, curl.calls[1]), ["C:/x/2.jpg"]);
+});
+
+test("GeoFetch reads the old plain-list inflight.json as one long-gone batch (F3)", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  api._files[INFLIGHT] = JSON.stringify(["C:/x/1.jpg"]);
+  api._files["C:/x/1.jpg"] = "<half written>";
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), ["C:/x/1.jpg"]);
+  context.GeoFetch.start([job(1)]);
+  assert.equal(api._files["C:/x/1.jpg"], undefined);
+  assert.deepEqual(cfgPaths(api, curl.calls[0]), ["C:/x/1.jpg"]);
+  assert.equal(JSON.parse(api._files[INFLIGHT]).batches.length, 1);
+});
+
+test("beginImageryBuild skips files still on the in-flight list (F2)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  context.GeoFetch.leftovers = () => [context.GeoScene.itemBase(plan, plan.items[0]) + ".jpg"];
+  assert.equal(context.GeoScene.buildImagery(map, src, {}, plan).tiles, plan.items.length - 1);
+});
+
+test("Imagery tab: after a stall, a file curl never reported is not built and stays in flight (F2)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  const paths = plan.missing.map((r) => context.GeoScene.itemBase(plan, r) + ".jpg");
+  context.buildImageryBtn.onClick();
+  curl.deliver(1);
+  api._files[paths[1]] = "<half written>";
+  runTimersOnce(api);
+  context.imageryState.batch.lastProgress -= context.GeoFetch.STALL_MS + 1;
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), new RegExp("^Imagery built: 1 images in 1 level\\(s\\) \\(0 missing, " + (paths.length - 1) + " failed\\)"));
+  assert.equal(footageCount(api), 1);
+  assert.ok(context.GeoFetch.leftovers().includes(paths[1]));
+  assert.ok(!context.GeoFetch.leftovers().includes(paths[0]));
+});
+
+test("Imagery tab: Cancel, then Build again while curl is still running, adopts its files instead of starting a second curl (F3)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  curl.deliver(1);
+  runTimersOnce(api);
+  context.cancelImageryBtn.onClick();
+  context.buildImageryBtn.onClick(); // plans again: files still in flight count as missing
+  const plan = context.imageryState.plan;
+  assert.equal(plan.missing.length, plan.items.length);
+  context.buildImageryBtn.onClick();
+  assert.equal(curl.calls.length, 1, "no second curl writes the same files");
+  curl.deliver();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), new RegExp("^Imagery built: " + plan.items.length + " images in \\d+ level\\(s\\) \\(0 missing, 0 failed\\)"));
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), []);
+});
+
+const CURL_BROKEN = "Background downloads aren't working on this computer — press Build imagery to plan again with map tiles.";
+
+test("Imagery tab: no status line within 90 s turns background downloads off, and EOX then plans tiles (F4)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  context.buildImageryBtn.onClick();
+  runTimersOnce(api);
+  assert.match(context.statusLabel.getText(), /^Downloading images/);
+  context.imageryState.batch.started -= context.GeoFetch.FIRST_LINE_MS + 1;
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), CURL_BROKEN);
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery", "the plan is reset");
+  assert.equal(context.GeoFetch.available(), false);
+  assert.equal(context.GeoFetch.leftovers().length, plan.missing.length, "a slow curl may still write them: they stay in flight (I1)");
+  context.buildImageryBtn.onClick();
+  assert.equal(context.imageryState.plan.mode, "tiles");
+});
+
+test("Imagery tab: a batch whose every file failed with 000 turns background downloads off (F4)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const curl = fakeCurl(api, () => 0); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  curl.deliver();
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), CURL_BROKEN);
+  assert.equal(context.GeoFetch.available(), false);
+  assert.equal(imageryGroups(api).length, 0, "nothing is built");
+  context.buildImageryBtn.onClick();
+  assert.equal(context.imageryState.plan.mode, "tiles");
+});
+
+test("Imagery tab: Clear download cache is refused while imagery downloads (F5)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeCurl(api); context.GeoFetch._reset();
+  let cleared = 0;
+  context.GeoNet.clearCache = () => { cleared++; return { files: 0, bytes: 0, fallback: false }; };
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  context.clearCacheBtn.onClick();
+  assert.equal(cleared, 0);
+  assert.equal(context.statusLabel.getText(), "Error: The download cache can't be cleared while imagery is downloading or building — wait, or press Cancel first.");
+});
+
+test("Imagery tab: one-at-a-time downloads take their files off the in-flight list, so the build uses them (F2)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  const path = context.GeoScene.itemBase(plan, plan.missing[0]) + ".jpg";
+  api._files[INFLIGHT] = JSON.stringify({ batches: [{ id: "1", cfg: null, status: null, paths: [path], started: Date.now() }] });
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), new RegExp("^Imagery built: " + plan.items.length + " tiles"));
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), []);
+});
+
+test("image cache paths, and Clear imagery tiles clears images too while Clear download cache keeps them", () => {
+  const { context, api } = buildSandbox();
+  const base = context.GeoNet.imageBase("eox", { z: 4, x0: 8, y0: 5, x1: 11, y1: 7 });
+  assert.equal(base, "C:/fake/AppData/Scripts/CavalryGeo_assets/cache/images/eox/4/8_5_11_7");
+  const root = "C:/fake/AppData/Scripts/CavalryGeo_assets/cache";
+  [root, root + "/tiles", root + "/images"].forEach((d) => { api._files[d] = "<dir>"; });
+  const files = [root + "/images/eox/4/8_5_11_7.jpg", root + "/tiles/eox/4/8/5.jpg", root + "/downloads/inflight.json", root + "/ne/countries.json"];
+  files.forEach((f) => { api._files[f] = "x"; });
+  api.listDirectoryRecursive = (dir) => Object.keys(api._files).filter((p) => p.indexOf(dir + "/") === 0);
+  api.isDirectory = () => false;
+  api.deleteFilePath = (p) => { delete api._files[p]; };
+  context.GeoNet.clearCache();
+  assert.deepEqual(files.map((f) => !!api._files[f]), [true, true, true, false], "the in-flight list and batch files survive (F5)");
+  context.GeoNet.clearTiles();
+  assert.deepEqual(files.map((f) => !!api._files[f]), [false, false, true, false]);
+});
+
+test("Imagery tab: first press plans, second press downloads in timer steps then builds", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  context.customAttrField.setText("© Example");
+  context.buildImageryBtn.onClick();
+  assert.match(context.statusLabel.getText(), /tiles needed \(0 already downloaded/);
+  assert.match(context.buildImageryBtn.getText(), /^Download \d+ tiles$/);
+  context.buildImageryBtn.onClick();
+  assert.equal(api._timers.length, 1);
+  assert.equal(api._timers[0].active, true);
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /^Imagery built: \d+ tiles in \d+ level/);
+  assert.match(context.statusLabel.getText(), /Credit: © Example$/);
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+  assert.ok(context.imageryProgress._value > 0);
+  context.buildImageryBtn.onClick(); // a new plan must not keep showing the last build's 100%
+  assert.equal(context.imageryProgress._value, 0);
+  assert.ok(api.getCompLayers(false).some((id) => String(api.getNiceName(id)).startsWith("Imagery: ")));
+  const settings = JSON.parse(api._files["C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json"]);
+  assert.equal(settings.source, "custom");
+});
+
+// Installs a ui.Modal (newer Cavalry) whose showQuestion answers `answer` and records
+// each question asked, so Build imagery asks once instead of needing a second press.
+function withModal(ui, answer) {
+  const asked = [];
+  ui.Modal = function () {};
+  ui.Modal.prototype.showQuestion = function (title, question) { asked.push({ title: title, question: question }); return answer; };
+  return asked;
+}
+
+test("Imagery tab with the dialog: one press asks with the plan, and Yes downloads then builds", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  const asked = withModal(ui, true);
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Build imagery");
+  assert.match(asked[0].question, new RegExp("^" + plan.items.length + " tiles needed \\(0 already downloaded, about [\\d.]+ [KM]B to download\\)\\.\n\nDownload and build now\\?$"));
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery", "no \"Download N\" state with the dialog");
+  assert.equal(api._timers.length, 1);
+  assert.equal(api._timers[0].active, true, "downloading started from the one press");
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), new RegExp("^Imagery built: " + plan.items.length + " tiles in \\d+ level\\(s\\) \\(0 missing, 0 failed\\)"));
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});
+
+test("Imagery tab with the dialog: with everything already downloaded, one press builds without asking", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  const asked = withModal(ui, true);
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  let downloads = 0;
+  context.GeoNet.downloadTile = () => { downloads++; return { status: 200 }; };
+  context.buildImageryBtn.onClick();
+  assert.equal(asked.length, 1, "no second question");
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+  const timer = api._timers[api._timers.length - 1];
+  assert.equal(timer.active, true);
+  assert.equal(timer.interval, 20, "straight to building");
+  runTimers(api);
+  assert.equal(downloads, 0);
+  assert.match(context.statusLabel.getText(), /^Imagery built: \d+ tiles/);
+  assert.equal(imageryGroups(api).length, 1);
+});
+
+test("Imagery tab with the dialog: No downloads nothing and resets the plan", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  let downloads = 0;
+  context.GeoNet.downloadTile = () => { downloads++; return { status: 200 }; };
+  useCustomTiles(context);
+  const asked = withModal(ui, false);
+  context.buildImageryBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(context.statusLabel.getText(), "Nothing downloaded.");
+  assert.equal(context.imageryState.plan, null);
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+  assert.equal(api._timers.length, 0);
+  assert.equal(downloads, 0);
+  context.buildImageryBtn.onClick();
+  assert.equal(asked.length, 2, "the next press plans and asks again");
+});
+
+test("Imagery tab with the dialog: the question carries the slower and limited-detail notes", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  keyFlight(api, context.currentMap(), 2, 15);
+  context.GeoScene.setCamera(context.currentMap().cameraId, { rotation: 45 });
+  useCustomTiles(context);
+  const asked = withModal(ui, false);
+  context.buildImageryBtn.onClick();
+  assert.equal(asked.length, 1);
+  const q = asked[0].question;
+  assert.ok(q.includes(" — this may make Cavalry slower."), q);
+  assert.ok(q.includes(" Sharpest detail is limited to zoom "), q);
+  assert.ok(q.endsWith(" — imagery gets softer as the flight zooms in further.\n\nDownload and build now?"), q);
+  assert.ok(!q.includes("Press"), q);
+});
+
+test("Imagery tab: a ui.Modal without showQuestion keeps the two-press flow", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  ui.Modal = function () {};
+  context.buildImageryBtn.onClick();
+  assert.match(context.buildImageryBtn.getText(), /^Download \d+ tiles$/);
+  assert.match(context.statusLabel.getText(), /Press "Download \d+ tiles"\./);
+  assert.equal(api._timers.length, 0);
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /^Imagery built: \d+ tiles/);
+});
+
+// Makes the panel's build job do one unit of work per timer tick, so tests can watch it.
+function oneUnitPerTick(context) {
+  const real = context.GeoScene.beginImageryBuild;
+  context.GeoScene.beginImageryBuild = function () {
+    const job = real.apply(null, arguments);
+    return { step: () => job.step(0), cancel: () => job.cancel() };
+  };
+}
+
+test("Imagery tab: downloads tick every 60 ms, then the same timer builds in 20 ms steps with progress", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  oneUnitPerTick(context);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  const total = context.imageryState.plan.items.length;
+  context.buildImageryBtn.onClick();
+  const timer = api._timers[0];
+  assert.equal(timer.interval, 60, "a gap between blocking downloads keeps the UI responsive");
+  for (let i = 0; i < total; i++) timer.callbacks.onTimeout();
+  assert.equal(timer.active, true, "the same timer keeps running to build");
+  assert.equal(timer.interval, 20);
+  assert.equal(context.imageryProgress._max, total);
+  timer.callbacks.onTimeout();
+  assert.equal(context.statusLabel.getText(), "Building imagery: 1 / " + total + " tiles…");
+  assert.equal(context.imageryProgress._value, 1);
+  context.buildImageryBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Error: Imagery is already being built — press Cancel to stop\.$/);
+  runTimers(api);
+  assert.equal(api._timers.length, 1);
+  assert.match(context.statusLabel.getText(), /^Imagery built: \d+ tiles in \d+ level/);
+  assert.doesNotMatch(context.statusLabel.getText(), /pause/);
+  assert.equal(context.imageryProgress._value, total, "the progress bar reaches the total");
+});
+
+test("Imagery tab: says when it is removing the old imagery after a rebuild", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  oneUnitPerTick(context);
+  context.buildImageryBtn.onClick(); // plans again: everything is cached now
+  assert.match(context.buildImageryBtn.getText(), /^Build \d+ tiles$/);
+  context.buildImageryBtn.onClick(); // nothing to download: builds straight away, on a timer
+  const timer = api._timers[api._timers.length - 1];
+  assert.equal(timer.active, true);
+  assert.equal(timer.interval, 20);
+  const seen = [];
+  while (timer.active) { timer.callbacks.onTimeout(); seen.push(context.statusLabel.getText()); }
+  assert.ok(seen.includes("Removing the old imagery…"), seen.slice(-5).join(" | "));
+  assert.match(seen[seen.length - 1], /^Imagery built:/);
+  assert.equal(imageryGroups(api).length, 1);
+});
+
+test("Imagery tab: Cancel during the build discards the new imagery", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  oneUnitPerTick(context);
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  const total = context.imageryState.plan.items.length;
+  context.buildImageryBtn.onClick();
+  const timer = api._timers[0];
+  // All downloads, then one build tick (one tile per tick), so the build is still part-way.
+  for (let i = 0; i < total + 1; i++) timer.callbacks.onTimeout();
+  assert.ok(imageryGroups(api).length === 1, "a partial group exists");
+  context.cancelImageryBtn.onClick();
+  assert.equal(timer.active, true, "keeps ticking to delete the partial imagery");
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), "Cancelled — no imagery was built.");
+  assert.deepEqual(imageryGroups(api), []);
+  assert.equal(footageCount(api), 0);
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});
+
+test("Imagery tab: Cancel stops the download and builds nothing", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  api._timers[0].callbacks.onTimeout();
+  context.cancelImageryBtn.onClick();
+  assert.equal(api._timers[0].active, false);
+  assert.match(context.statusLabel.getText(), /Download cancelled/);
+  assert.equal(api.getCompLayers(false).some((id) => String(api.getNiceName(id)).startsWith("Imagery:")), false);
+});
+
+// F3: a saved plan must go stale after the camera animation changes underneath it,
+// whether from Fly to or a direct keyframe edit - otherwise Build imagery downloads
+// or builds tiles for a camera path that no longer matches the scene.
+test("Build imagery re-plans (does not start downloading a stale plan) after Fly to changes the camera (F3)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick(); // plans
+  assert.match(context.buildImageryBtn.getText(), /tiles$/);
+  context.flyFramesField.setValue(5);
+  context.flyBtn.onClick();
+  context.buildImageryBtn.onClick(); // must re-plan, not start downloading the stale plan
+  assert.match(context.statusLabel.getText(), /tiles needed/);
+  assert.equal(api._timers.length, 0, "no timer should have started from a stale plan");
+});
+
+test("Build imagery re-plans after a camera keyframe changes (F3)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick(); // plans
+  assert.match(context.buildImageryBtn.getText(), /tiles$/);
+  api.keyframe(map.cameraId, 3, { "array.2": 10 });
+  context.buildImageryBtn.onClick(); // must re-plan, not start downloading the stale plan
+  assert.match(context.statusLabel.getText(), /tiles needed/);
+  assert.equal(api._timers.length, 0, "no timer should have started from a stale plan");
+});
+
+// F6: pressing "Clear imagery tiles" must report what it freed and drop any active
+// plan, since the tiles a plan counted as already-downloaded may now be gone.
+test("Imagery tab: Clear imagery tiles reports what it freed and resets the plan (F6)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick(); // plans, so imageryState.plan is set
+  assert.match(context.buildImageryBtn.getText(), /tiles$/, "a plan should be active");
+  let cleared = 0;
+  context.GeoNet.clearTiles = () => { cleared++; return { files: 5, bytes: 12345, fallback: false }; };
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 0, "the first press only asks for confirmation");
+  assert.match(context.statusLabel.getText(), /Press "Confirm: clear imagery tiles" to delete/);
+  assert.equal(context.clearTilesBtn.getText(), "Confirm: clear imagery tiles");
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 1);
+  assert.match(context.statusLabel.getText(), /^Imagery tiles cleared: 5 file\(s\), .* freed\. Imagery already built from them will show missing images until you rebuild\.$/);
+  assert.equal(context.clearTilesBtn.getText(), "Clear imagery tiles");
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery", "the stale plan must be reset");
+});
+
+// In Cavalry a Cancel click landed on Clear imagery tiles (just below it) mid-build and
+// deleted 998 tiles: it now needs a confirming second press, any other imagery button
+// disarms it, and it refuses while a download or build is running.
+test("Imagery tab: Clear imagery tiles is disarmed by another button and refused while busy", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.sourcePicker.setValue(0); // EOX
+  let cleared = 0;
+  context.GeoNet.clearTiles = () => { cleared++; return { files: 1, bytes: 1, fallback: false }; };
+  context.clearTilesBtn.onClick();
+  context.buildImageryBtn.onClick(); // plans, and disarms the clear
+  assert.equal(context.clearTilesBtn.getText(), "Clear imagery tiles");
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 0, "a press after another button only asks again");
+  context.buildImageryBtn.onClick(); // starts downloading (timer running)
+  assert.equal(context.clearTilesBtn.getText(), "Clear imagery tiles");
+  context.clearTilesBtn.onClick();
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 0, "never while downloading or building");
+  assert.match(context.statusLabel.getText(), /downloading or building/);
+});
+
+// F10: the panel's download timer must mark 404/204 tiles empty as they come in.
+test("Imagery tab: 404/204 downloads mark the tile empty (F10)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const marked = [];
+  context.GeoNet.downloadTile = () => ({ status: 404 });
+  context.GeoNet.markEmptyTile = (base) => marked.push(base);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  const total = context.imageryState.plan.missing.length;
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.equal(marked.length, total, "every 404'd tile should be marked empty");
+  assert.ok(total > 0);
+  assert.match(context.statusLabel.getText(), /^Imagery built: 0 tiles in 0 level/);
+});
+
+test("Imagery tab: a capped plan says the sharpest detail is limited", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  keyFlight(api, context.currentMap(), 2, 15);
+  context.GeoScene.setCamera(context.currentMap().cameraId, { rotation: 45 }); // a turned view needs about twice the tiles
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  const z = context.imageryState.plan.cappedZoom;
+  assert.ok(z > 0);
+  const text = context.statusLabel.getText();
+  assert.ok(text.endsWith(" Sharpest detail is limited to zoom " + z + " to stay under 300 tiles — imagery gets softer as the flight zooms in further."), text);
+});
+
+test("Imagery tab: EOX plans and builds images, downloading in the background with one curl batch", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  assert.equal(plan.mode, "images");
+  assert.match(context.statusLabel.getText(), new RegExp("^" + plan.items.length + " images needed \\(" + context.GeoBlocks.totalTiles(plan.items) + " tiles' worth, 0 already downloaded, about "));
+  assert.equal(plan.imageTiles, context.GeoBlocks.totalTiles(plan.items));
+  assert.equal(context.buildImageryBtn.getText(), "Download " + plan.items.length + " images");
+  context.buildImageryBtn.onClick();
+  assert.equal(curl.calls.length, 1, "one background curl for the whole stage");
+  runTimersOnce(api);
+  assert.match(context.statusLabel.getText(), /^Downloading images: 0 \/ \d+…$/);
+  curl.deliver();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /^Imagery built: \d+ images in \d+ level\(s\) \(0 missing, 0 failed\)\. Credit: EOxCloudless/);
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), []);
+});
+
+test("Imagery tab: background 404s mark the image empty, other codes count as failed, 401 stops", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  let n = 0;
+  const curl = fakeCurl(api, () => (n++ === 0 ? 404 : 500)); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  curl.deliver();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /\(1 missing, \d+ failed\)\. Press Build again to retry\./);
+  const { context: c2, api: a2 } = buildSandbox();
+  createWorldMap(c2);
+  const curl2 = fakeCurl(a2, () => 401); c2.GeoFetch._reset();
+  c2.sourcePicker.setValue(0);
+  c2.buildImageryBtn.onClick();
+  const total = c2.imageryState.plan.missing.length;
+  c2.buildImageryBtn.onClick();
+  curl2.deliver(1);
+  runTimers(a2);
+  assert.equal(c2.statusLabel.getText(), "EOX refused the request (HTTP 401) — try again later or choose another source.", "EOX has no key (F8)");
+  assert.equal(c2.GeoFetch.leftovers().length, total - 1, "only the reported file leaves the in-flight list");
+});
+
+// Builds EOX imagery in the background with curl reporting `outcomes[i]` for the i-th image
+// (200 for the rest); returns the planned paths in download order.
+function eoxWithOutcomes(context, api, outcomes) {
+  createWorldMap(context);
+  let n = 0;
+  const curl = fakeCurl(api, () => (n < outcomes.length ? outcomes[n++] : 200)); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  const plan = context.imageryState.plan;
+  const paths = plan.missing.map((r) => context.GeoScene.itemBase(plan, r) + ".jpg");
+  context.buildImageryBtn.onClick();
+  curl.deliver();
+  runTimers(api);
+  return { paths, plan, curl };
+}
+
+test("Imagery tab: a 200 whose transfer broke off (curl exit 56) counts as failed, and its partial file is deleted and re-planned (F1)", () => {
+  const { context, api } = buildSandbox();
+  const { paths, plan } = eoxWithOutcomes(context, api, [{ code: 200, exit: 56, type: "image/jpeg", write: "<partial>" }]);
+  assert.match(context.statusLabel.getText(), new RegExp("^Imagery built: " + (plan.items.length - 1) + " images in \\d+ level\\(s\\) \\(0 missing, 1 failed\\)\\. Press Build again to retry\\."));
+  assert.equal(api._files[paths[0]], undefined, "the partial file is deleted");
+  assert.ok(api._files[paths[1]], "whole files are kept");
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), []);
+  context.buildImageryBtn.onClick(); // plans again
+  assert.deepEqual(plain(context.imageryState.plan.missing), [plain(plan.missing[0])]);
+});
+
+test("Imagery tab: a 401 still deletes the bad files reported in the same poll before stopping (M1)", () => {
+  const { context, api } = buildSandbox();
+  const { paths } = eoxWithOutcomes(context, api, [401, { code: 200, exit: 56, type: "image/jpeg", write: "<partial>" }]);
+  assert.equal(context.statusLabel.getText(), "EOX refused the request (HTTP 401) — try again later or choose another source.");
+  assert.equal(api._files[paths[1]], undefined, "the partial file is not left to look cached");
+  assert.deepEqual(plain(context.GeoFetch.leftovers()), []);
+  context.buildImageryBtn.onClick(); // plans again
+  assert.ok(context.imageryState.plan.missing.length >= 2);
+});
+
+test("Imagery tab: a 200 that isn't a JPEG/PNG (an XML error, or no type) counts as failed and is deleted (F1)", () => {
+  const { context, api } = buildSandbox();
+  const { paths } = eoxWithOutcomes(context, api, [
+    { code: 200, exit: 0, type: "text/xml", write: "<ServiceException/>" },
+    { code: 200, exit: 0, type: "", write: "<?>" }]);
+  assert.match(context.statusLabel.getText(), /\(0 missing, 2 failed\)\. Press Build again to retry\./);
+  assert.equal(api._files[paths[0]], undefined);
+  assert.equal(api._files[paths[1]], undefined);
+});
+
+test("Imagery tab: a stalled background batch counts the rest as failed and still builds", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runTimersOnce(api);
+  context.imageryState.batch.lastProgress -= context.GeoFetch.STALL_MS + 1;
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /^Imagery built: 0 images in 0 level\(s\) \(0 missing, \d+ failed\)/);
+});
+
+test("Imagery tab: Cancel during a background download keeps the in-flight list", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  context.cancelImageryBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Download cancelled. Files still downloading in the background are kept; nothing was built.");
+  assert.ok(context.GeoFetch.leftovers().length > 0);
+});
+
+test("Imagery tab: a source without a key that answers 403 is said to have refused the request (F8)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api, 403);
+  useCustomTiles(context);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), "The tile server refused the request (HTTP 403) — try again later or choose another source.");
+});
+
+test("Imagery tab: images Cavalry can't read are reported as skipped images (F8)", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  zeroResolutionFor(api, () => true);
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  const n = context.imageryState.plan.items.length;
+  context.buildImageryBtn.onClick();
+  curl.deliver();
+  runTimers(api);
+  const text = context.statusLabel.getText();
+  assert.ok(text.includes(" " + n + " image(s) couldn't be read by Cavalry and were skipped."), text);
+  assert.ok(!/palette/.test(text), text);
+});
+
+test("Imagery tab: missing and rejected keys", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.sourcePicker.setValue(2); // MapTiler
+  context.buildImageryBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Paste your MapTiler key first/);
+  context.maptilerKeyField.setText("bad");
+  fakeTileDownloads(context, api, 403);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /MapTiler rejected your key/);
+  assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});

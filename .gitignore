@@ -1,0 +1,5 @@
+dist/
+node_modules/
+# Local working notes: build specs/plans and agent scratch stay off GitHub.
+.superpowers/
+docs/superpowers/
