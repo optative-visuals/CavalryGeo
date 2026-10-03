@@ -6,7 +6,7 @@ imagery, flight routes and data maps that all move with one camera.
 [![Latest release](https://img.shields.io/github/v/release/optative-visuals/CavalryGeo?label=download)](https://github.com/optative-visuals/CavalryGeo/releases/latest)
 [![Licence: GPL v3](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 
-![Satellite imagery of Europe, built with Cavalry Geo](docs/images/hero.jpg)
+![The Cavalry Geo panel in Cavalry, with a satellite world map built by it](docs/images/hero.jpg)
 
 ### [⬇ Download the latest version](https://github.com/optative-visuals/CavalryGeo/releases/latest)
 
