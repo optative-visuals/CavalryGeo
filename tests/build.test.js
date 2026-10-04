@@ -820,6 +820,25 @@ test("pins, route legs and route stop pins are drawn in the panel's green", () =
   stopPins.forEach((id) => assert.equal(api.get(id, "material.materialColor"), "#1F8F4E"));
 });
 
+test("creating a map leaves the user's selection alone, even if Cavalry selects the new Ocean", () => {
+  const { context, api } = buildSandbox();
+  const realPrimitive = api.primitive.bind(api);
+  api.primitive = function (kind, name) { const id = realPrimitive(kind, name); api.select([id]); return id; };
+  api.select(["someone#1"]);
+  context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.deepEqual(Array.from(api.getSelection()), ["someone#1"]);
+});
+
+test("restacking does not touch the Ocean when it is already the last child", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  api._moveToBackCalls.length = 0;
+  api.select(["someone#1"]);
+  context.GeoScene.restackBaseLayers(map, context.DRAW_ORDER);
+  assert.deepEqual(api._moveToBackCalls, [], "no moveToBack when nothing needs moving");
+  assert.deepEqual(Array.from(api.getSelection()), ["someone#1"]);
+});
+
 test("restackBaseLayers falls back to stepping backward when moveToBack does nothing, and restores the selection", () => {
   const { context, api } = buildSandbox();
   const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;

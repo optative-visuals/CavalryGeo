@@ -56,17 +56,22 @@ var GeoScene = (function () {
   // still covers the frame when the map group is moved or scaled. Optional: skipped
   // when this Cavalry has no api.primitive.
   function createOcean(groupId) {
-    if (typeof api.primitive !== "function") return;
-    var s = compSize();
-    var id = api.primitive("rectangle", OCEAN_NAME);
-    setOne(id, "generator.dimensions", [2 * s.width, 2 * s.height]);
-    applyStyle(id, { fill: OCEAN_COLOR });
-    api.parent(id, groupId);
-    if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
-    var previous = [];
-    try { previous = api.getSelection(); } catch (e) { /* nothing selected */ }
-    try { sendToBack(id); } catch (e) { /* best-effort: the new layer is already the group's last-parented child */ }
-    try { api.select(previous); } catch (e) { /* selection restore is cosmetic */ }
+    // Read the selection before anything is created (Cavalry may select new layers) and
+    // put it back however this returns, so the user's selection is never changed.
+    var previous = null;
+    try { previous = api.getSelection(); } catch (e) { /* nothing to restore */ }
+    try {
+      if (typeof api.primitive !== "function") return;
+      var s = compSize();
+      var id = api.primitive("rectangle", OCEAN_NAME);
+      setOne(id, "generator.dimensions", [2 * s.width, 2 * s.height]);
+      applyStyle(id, { fill: OCEAN_COLOR });
+      api.parent(id, groupId);
+      if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
+      try { sendToBack(id); } catch (e) { /* best-effort: it was just parented on top, so it may sit above the camera */ }
+    } finally {
+      if (previous && typeof api.select === "function") { try { api.select(previous); } catch (e) { /* cosmetic */ } }
+    }
   }
 
   function findMaps() {
@@ -359,8 +364,9 @@ var GeoScene = (function () {
 
   // The Ocean is the bottom of the map: whatever else was sent back, it goes under it.
   function sendOceanToBack(map) {
-    var ocean = api.getChildren(map.groupId).filter(function (id) { return api.getNiceName(id) === OCEAN_NAME; })[0];
-    if (ocean) sendToBack(ocean);
+    var kids = api.getChildren(map.groupId);
+    var ocean = kids.filter(function (id) { return api.getNiceName(id) === OCEAN_NAME; })[0];
+    if (ocean && kids[kids.length - 1] !== ocean) sendToBack(ocean);
   }
 
   function restackBaseLayers(map, drawOrder) {
