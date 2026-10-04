@@ -96,6 +96,7 @@ var GeoStyle = (function () {
     maybe(grid, "setMargins", 0, 0, 0, 0);
     for (var i = 0; i < toggles.length; i += columns) {
       var r = new ui.HLayout();
+      maybe(r, "setMargins", 0, 0, 0, 0);
       toggles.slice(i, i + columns).forEach(function (t) { r.add(t.widget); });
       grid.add(r);
     }

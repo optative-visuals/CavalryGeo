@@ -18,11 +18,11 @@ function guard(fn) {
 }
 function column(items) {
   var v = new ui.VLayout();
-  v.setMargins(6, 6, 6, 6);
+  v.setMargins(0, 6, 0, 0); // flush left and right: everything shares one left edge
   if (typeof v.setSpaceBetween === "function") v.setSpaceBetween(4);
-  // A heading sits close to what it introduces (4 px below) and further from what came before (14 px above).
+  // A heading sits close to what it introduces (4 px below) and further from what came before (about 8 px above).
   items.forEach(function (w, i) {
-    if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(10);
+    if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(4);
     v.add(w);
   });
   if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
@@ -30,6 +30,7 @@ function column(items) {
 }
 function row() {
   var h = new ui.HLayout();
+  if (typeof h.setMargins === "function") h.setMargins(0, 0, 0, 0);
   for (var i = 0; i < arguments.length; i++) h.add(arguments[i]);
   return h;
 }

@@ -198,12 +198,12 @@ function makeFakeUi() {
 
   function HLayout() { this._items = []; }
   HLayout.prototype.add = function (w) { this._items.push(w); };
-  HLayout.prototype.setMargins = function () {};
+  HLayout.prototype.setMargins = function (l, t, r, b) { this._margins = [l, t, r, b]; };
   HLayout.prototype.addStretch = function () { this._stretch = (this._stretch || 0) + 1; };
 
   function VLayout() { this._items = []; }
   VLayout.prototype.add = function (w) { this._items.push(w); };
-  VLayout.prototype.setMargins = function () {};
+  VLayout.prototype.setMargins = function (l, t, r, b) { this._margins = [l, t, r, b]; };
   VLayout.prototype.addStretch = function () { this._stretch = (this._stretch || 0) + 1; };
 
   HLayout.prototype.setSpaceBetween = function (s) { this._spacing = s; };
@@ -2912,7 +2912,7 @@ test("each section has grey headings in order", () => {
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
 });
 
-test("every page column packs items 4 apart and puts 10 before each heading that isn't first", () => {
+test("every page column packs items 4 apart and puts 4 before each heading that isn't first", () => {
   const { context } = buildSandbox();
   // The Label section's page is just the tab bar over the two Label pages, which are the columns.
   const labelSection = context.sectionPages.pages.find((p) => holds(p, context.labelPages.widget));
@@ -2928,10 +2928,31 @@ test("every page column packs items 4 apart and puts 10 before each heading that
       if (!isHeading) return assert.equal(mine.length, 0, "column " + c + " item " + i + " is not a heading");
       headingCount++;
       if (i === 0) assert.equal(mine.length, 0, "column " + c + ": a first heading gets no space before it");
-      else assert.deepEqual(plain(mine), [{ at: i, px: 10 }], "column " + c + " heading at " + i);
+      else assert.deepEqual(plain(mine), [{ at: i, px: 4 }], "column " + c + " heading at " + i);
     });
   });
   assert.ok(headingCount >= 14, "headings were found");
+});
+
+test("content sits on one left edge: page columns have only a top margin and content rows have none", () => {
+  const { context, ui } = buildSandbox();
+  const labelSection = context.sectionPages.pages.find((p) => holds(p, context.labelPages.widget));
+  const columns = context.sectionPages.pages.filter((p) => p !== labelSection).concat(context.labelPages.pages);
+  assert.equal(columns.length, 6);
+  let rows = 0;
+  const visit = (node, c) => {
+    if (!node || typeof node !== "object" || node instanceof ui.Container) return; // tab bar / heading rule keep their own padding
+    if (node instanceof ui.HLayout && !context.GeoStyle.isHeading(node)) {
+      rows++;
+      assert.deepEqual(plain(node._margins), [0, 0, 0, 0], "a content row in column " + c);
+    }
+    (node._items || []).forEach((n) => visit(n, c));
+  };
+  columns.forEach((col, c) => {
+    assert.deepEqual(plain(col._margins), [0, 6, 0, 0], "column " + c);
+    visit(col, c);
+  });
+  assert.ok(rows > 10, "content rows were found");
 });
 
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
