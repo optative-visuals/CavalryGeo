@@ -2,13 +2,17 @@
 var GeoScene = (function () {
   var A = GeoAttrs;
   var ATTRIBUTION_NAME = "OpenStreetMap credit";
+  var OCEAN_NAME = "Ocean";
+  var OCEAN_COLOR = "#1d2a33";
+  var CREDIT_STYLE = { fill: "#e6e6e6" };
+  // Same palette as the Map tab preview.
   var STYLE = {
-    countries: { fill: "#d9d4c7", stroke: "#ffffff", width: 1 }, states: { stroke: "#f4f1ea", width: 0.5 }, lakes: { fill: "#a8c8e8" },
-    coastlines: { stroke: "#6b8fb3", width: 0.5 }, rivers: { stroke: "#6b9ccf", width: 1.5 }, cities: { fill: "#333333" },
-    buildings: { fill: "#b9b3a9" }, water: { fill: "#a8c8e8" }, parks: { fill: "#b8d8a0" },
-    roads: { stroke: "#8a8a8a", width: 2 }, railways: { stroke: "#555555", width: 1.5 },
+    countries: { fill: "#4a5a50", stroke: "#2a3530", width: 1 }, states: { stroke: "#3a4a40", width: 0.5 }, lakes: { fill: "#1d2a33" },
+    coastlines: { stroke: "#2a3530", width: 0.5 }, rivers: { stroke: "#3d6178", width: 1.5 }, cities: { fill: "#e6e6e6" },
+    buildings: { fill: "#5c6b61" }, water: { fill: "#1d2a33" }, parks: { fill: "#56705a" },
+    roads: { stroke: "#8a948e", width: 2 }, railways: { stroke: "#a0a7a3", width: 1.5 },
     extractFill: { fill: "#e4572e" }, extractLine: { stroke: "#e4572e", width: 3 },
-    pin: { fill: "#e4572e" }, label: { fill: "#222222" },
+    pin: { fill: "#e4572e" }, label: { fill: "#e6e6e6" },
     route: { stroke: "#e4572e", width: 3 }
   };
 
@@ -43,7 +47,26 @@ var GeoScene = (function () {
     setOne(cameraId, A.CAMERA_EXPR_ATTR, GeoExpression.cameraExpression({ name: name }, A.CAMERA_BODY));
     addInputs(cameraId, A.CAMERA_ARRAY_ATTR, GeoExpression.CAMERA_INPUTS, camValues(cam));
     api.parent(cameraId, groupId);
+    try { createOcean(groupId); } catch (e) { /* the Ocean is cosmetic: never fail the map over it */ }
     return { name: name, cameraId: cameraId, groupId: groupId };
+  }
+
+  // The canvas has no water layer (the sea is the composition background), so each new
+  // map gets a dark rectangle at the bottom of its group, twice the comp size so it
+  // still covers the frame when the map group is moved or scaled. Optional: skipped
+  // when this Cavalry has no api.primitive.
+  function createOcean(groupId) {
+    if (typeof api.primitive !== "function") return;
+    var s = compSize();
+    var id = api.primitive("rectangle", OCEAN_NAME);
+    setOne(id, "generator.dimensions", [2 * s.width, 2 * s.height]);
+    applyStyle(id, { fill: OCEAN_COLOR });
+    api.parent(id, groupId);
+    if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
+    var previous = [];
+    try { previous = api.getSelection(); } catch (e) { /* nothing selected */ }
+    try { sendToBack(id); } catch (e) { /* best-effort: the new layer is already the group's last-parented child */ }
+    try { api.select(previous); } catch (e) { /* selection restore is cosmetic */ }
   }
 
   function findMaps() {
@@ -172,10 +195,10 @@ var GeoScene = (function () {
   }
 
   var DATA_STYLE = {
-    regions: { stroke: "#ffffff", width: 0.5 },
+    regions: { stroke: "#1d2a33", width: 0.5 },
     bubbles: { fill: "#bc4749", stroke: "#ffffff", width: 1 },
-    labels: { fill: "#222222" },
-    legend: { fill: "#222222" }
+    labels: { fill: "#e6e6e6" },
+    legend: { fill: "#e6e6e6" }
   };
 
   function dataPayloads(prepared, opts) {
@@ -334,6 +357,12 @@ var GeoScene = (function () {
     }
   }
 
+  // The Ocean is the bottom of the map: whatever else was sent back, it goes under it.
+  function sendOceanToBack(map) {
+    var ocean = api.getChildren(map.groupId).filter(function (id) { return api.getNiceName(id) === OCEAN_NAME; })[0];
+    if (ocean) sendToBack(ocean);
+  }
+
   function restackBaseLayers(map, drawOrder) {
     if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
     var previous = [];
@@ -343,6 +372,7 @@ var GeoScene = (function () {
       layers.sort(function (a, b) { return drawOrder.indexOf(b.meta.category) - drawOrder.indexOf(a.meta.category); });
       layers.forEach(function (l) { sendToBack(l.id); });
       findImagery(map).forEach(function (i) { sendToBack(i.groupId); });
+      sendOceanToBack(map);
     } catch (e) { /* best-effort: leave layers where they landed */ }
     try { api.select(previous); } catch (e) { /* selection restore is cosmetic */ }
   }
@@ -459,7 +489,7 @@ var GeoScene = (function () {
     if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
     var previous = [];
     try { previous = api.getSelection(); } catch (e) { /* nothing selected */ }
-    try { findImagery(map).forEach(function (i) { sendToBack(i.groupId); }); } catch (e) { /* best-effort */ }
+    try { findImagery(map).forEach(function (i) { sendToBack(i.groupId); }); sendOceanToBack(map); } catch (e) { /* best-effort */ }
     try { api.select(previous); } catch (e) { /* cosmetic */ }
   }
 
@@ -677,6 +707,7 @@ var GeoScene = (function () {
     // ~330x30px centred text fully inside the bottom-left corner.
     if (api.hasAttribute(id, "fontSize")) setOne(id, "fontSize", 24);
     api.set(id, { position: [-s.width / 2 + 200, -s.height / 2 + 40] });
+    applyStyle(id, CREDIT_STYLE);
     api.parent(id, map.groupId);
     return id;
   }
@@ -694,6 +725,7 @@ var GeoScene = (function () {
     setOne(id, A.TEXT_ATTR, text || "© OpenStreetMap contributors");
     if (api.hasAttribute(id, "fontSize")) setOne(id, "fontSize", 24);
     api.set(id, { position: [-s.width / 2 + 200, -s.height / 2 + 80] });
+    applyStyle(id, CREDIT_STYLE);
     api.parent(id, map.groupId);
     return id;
   }

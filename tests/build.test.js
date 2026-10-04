@@ -44,6 +44,8 @@ function makeFakeApi() {
       if (type === "group") ensure(id).hidden = false;
       return id;
     },
+    // Like Cavalry: a primitive shape is a basicShape layer.
+    primitive: function (kind, name) { return this.create("basicShape", name); },
     createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return id; },
     parent: function (id, parentId) {
       if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
@@ -621,12 +623,13 @@ test("GeoScene.restackBaseLayers moves base layers to back in draw-order-descend
   api._moveToBackCalls.length = 0;
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
 
-  assert.deepEqual(api._moveToBackCalls, [cities, roads, countries]);
+  assert.deepEqual(api._moveToBackCalls, [cities, roads, countries, oceanOf(api, map)], "base layers back to front, then the Ocean last");
   assert.ok(api._moveToBackCalls.indexOf(pin) < 0, "the pin (an overlay) should never be moved");
   const kids = api.getChildren(map.groupId);
   const pos = (id) => kids.indexOf(id);
   assert.ok(pos(pin) < pos(cities) && pos(cities) < pos(roads) && pos(roads) < pos(countries), "pin on top, then cities, roads, countries at the bottom");
-  assert.equal(pos(countries), kids.length - 1);
+  assert.equal(pos(countries), kids.length - 2, "countries at the bottom, just above the Ocean");
+  assert.equal(pos(oceanOf(api, map)), kids.length - 1, "the Ocean stays under everything");
 });
 
 // F13: adding a base layer after imagery was built must not bury the imagery -
@@ -642,7 +645,7 @@ test("restackBaseLayers keeps imagery at the back of the map group even after a 
   GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], built.groupId, "imagery must still be the last child of the map group");
+  assert.equal(kids[kids.length - 2], built.groupId, "imagery must still sit at the back of the map group, just above the Ocean");
 });
 
 test("GeoScene.restackBaseLayers is a no-op when api.moveToBack is unavailable", () => {
@@ -721,6 +724,85 @@ test("default styles: countries show borders; states are border lines only", () 
   assert.ok(!S.states.fill && S.states.stroke && S.states.width > 0, "states: lines only");
   assert.ok(S.states.width < S.countries.width, "state lines thinner than country borders");
   assert.equal(S.coastlines.width, 0.5, "coastlines default to a fine 0.5 line");
+});
+
+// The canvas uses the Map tab preview's palette, and each new map gets an Ocean layer
+// (the composition background is the only "sea" otherwise).
+function oceanOf(api, map) { return api.getChildren(map.groupId).find((id) => api.getNiceName(id) === "Ocean"); }
+
+test("a new map gets an Ocean rectangle: twice the comp size, slate fill, last child of the group", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const ocean = oceanOf(api, map);
+  assert.ok(ocean, "an Ocean layer exists in the map group");
+  assert.equal(api.getParent(ocean), map.groupId);
+  assert.deepEqual(Array.from(api.get(ocean, "generator.dimensions")), [3840, 2160]);
+  assert.equal(api.get(ocean, "material.materialColor"), "#1d2a33");
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean is at the bottom");
+  assert.deepEqual(Object.keys(plain(map)).sort(), ["cameraId", "groupId", "name"], "createMap still returns just name/cameraId/groupId");
+});
+
+test("createMap skips the Ocean silently when api.primitive is missing", () => {
+  const { context, api } = buildSandbox();
+  delete api.primitive;
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.equal(oceanOf(api, map), undefined);
+  assert.ok(map.groupId && map.cameraId);
+});
+
+test("the Ocean stays the last child after layers are added and restacked", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const ocean = oceanOf(api, map);
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  GeoScene.addPin(map, "Pin", 0, 0);
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  let kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean below the countries after a restack");
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "and after another");
+});
+
+test("imagery is built above the Ocean, which stays at the very bottom", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = imageryMap(context, api, 4);
+  const ocean = oceanOf(api, map);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const built = GeoScene.buildImagery(map, src, {}, GeoScene.planImagery(map, src, {}));
+  let kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean last after the imagery build");
+  assert.equal(kids[kids.length - 2], built.groupId, "imagery sits directly above the Ocean");
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean);
+  assert.equal(kids[kids.length - 2], built.groupId);
+});
+
+test("default canvas styles use the preview's palette", () => {
+  const { context } = buildSandbox();
+  const S = context.GeoScene.STYLE;
+  assert.equal(S.countries.fill, "#4a5a50");
+  assert.equal(S.countries.stroke, "#2a3530");
+  assert.equal(S.lakes.fill, "#1d2a33");
+  assert.equal(S.rivers.stroke, "#3d6178");
+  assert.equal(S.label.fill, "#e6e6e6");
+  assert.equal(S.extractFill.fill, "#e4572e", "overlays keep their orange");
+  assert.equal(S.route.stroke, "#e4572e");
+});
+
+test("credit texts are light so they read on the dark map", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const osm = context.GeoScene.createAttribution(map);
+  const img = context.GeoScene.createImageryCredit(map, "Some credit");
+  assert.equal(api.get(osm, "material.materialColor"), "#e6e6e6");
+  assert.equal(api.get(img, "material.materialColor"), "#e6e6e6");
 });
 
 test("restackBaseLayers falls back to stepping backward when moveToBack does nothing, and restores the selection", () => {
@@ -1248,7 +1330,7 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.equal(r.levels, 1);
   assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], r.groupId, "imagery at the back of the map group");
+  assert.equal(kids[kids.length - 2], r.groupId, "imagery at the back of the map group, above the Ocean");
   const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
   assert.ok(level);
   assert.equal(api.getChildren(level).length, 48);
@@ -1484,7 +1566,7 @@ test("beginImageryBuild adds one tile per zero-budget step and keeps the new gro
   assert.equal(api.get(outer, "hidden"), false, "shown once the build is complete");
   assert.equal(api.getChildren(levelGroup(api, outer, 4)).length, 48);
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], outer, "imagery at the back of the map group");
+  assert.equal(kids[kids.length - 2], outer, "imagery at the back of the map group, above the Ocean");
 });
 
 // Measured in Cavalry: every step that loads an asset costs a ~3.6 s rescan afterwards,
