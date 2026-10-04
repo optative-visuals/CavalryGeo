@@ -38,8 +38,9 @@ then animate them through the years.
 ![A population data map with a legend](docs/images/data.jpg)
 
 ### And more
-Pins and labels for places, **Extract** to pull one country or street into its own layer, and
-**Bake** to turn any map layer into a plain editable shape.
+A map preview in the panel to find and frame a place before the camera moves, pins and labels for
+places, **Extract** to pull one country or street into its own layer, and **Bake** to turn any map
+layer into a plain editable shape. The panel tells you when a new version is out.
 
 ## Install
 
