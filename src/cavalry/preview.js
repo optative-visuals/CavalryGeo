@@ -6,7 +6,7 @@
 var GeoPreviewPanel = (function () {
   var WATER = "#1d2a33", LAND = "#4a5a50", BORDER = "#2a3530", FRAME = "#33CE70", DIM = "#00000059";
   var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff";
-  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6;
+  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5;
 
   function create(opts) {
     var p = {}, draw = null, note = null, error = null, controls = null;
@@ -68,6 +68,8 @@ var GeoPreviewPanel = (function () {
       path.close();
       return path;
     }
+    // The places that get a dot: one per spot (indices into places).
+    function shown() { return GeoPreview.distinctPlaces(places, picked, SAME_PLACE_KM); }
     function updateNote() {
       if (note) note.setText("Zoom " + p.frameCamera().zoom.toFixed(1) + " · drag to move, double-click to zoom in");
     }
@@ -97,7 +99,7 @@ var GeoPreviewPanel = (function () {
       }
       if (places.length) {
         var dots = new cavalry.Path();
-        places.forEach(function (pl) { var q = GeoPreview.toPx(view, pl.lon, pl.lat); dots.addEllipse(q[0], sy(q[1]), 4, 4); });
+        shown().forEach(function (i) { var q = GeoPreview.toPx(view, places[i].lon, places[i].lat); dots.addEllipse(q[0], sy(q[1]), 4, 4); });
         var dotObj = dots.toObject();
         draw.addPath(dotObj, { color: DOT });
         draw.addPath(dotObj, { color: RING, stroke: true, strokeWidth: 1 });
@@ -164,11 +166,16 @@ var GeoPreviewPanel = (function () {
     try {
       draw = new ui.Draw();
       p._draw = draw;
+      // Cavalry's Draw won't get narrower than its setSize unless a small minimum is set,
+      // and then the panel couldn't shrink back either.
+      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
+      if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(68);
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(WATER);
       draw.onMousePress = guarded(function (pos, button) {
         if (button && button !== "left") return;
-        var y = sy(pos.y), hit = GeoPreview.hitDot(view, places, pos.x, y, DOT_HIT);
+        var y = sy(pos.y), keep = shown(), hit = GeoPreview.hitDot(view, keep.map(function (i) { return places[i]; }), pos.x, y, DOT_HIT);
+        if (hit >= 0) hit = keep[hit]; // back to the place's own index
         if (hit >= 0) { picked = hit; changed(); pick(hit); return; }
         drag = { x: pos.x, y: y };
       });

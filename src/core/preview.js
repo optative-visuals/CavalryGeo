@@ -168,6 +168,26 @@ var GeoPreview = (function () {
     return best;
   }
 
+  // Which places to draw: nominatim often lists a city and its administrative area a km or two
+  // apart. The picked place is considered first, then the rest in order; one is kept only if it
+  // is more than `km` kilometres (great circle) from every place kept so far. Returns the kept
+  // places' original indices, ascending.
+  function distinctPlaces(places, picked, km) {
+    function dist(a, b) {
+      var p1 = a.lat * D2R, p2 = b.lat * D2R, dp = p2 - p1, dl = (b.lon - a.lon) * D2R;
+      var h = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+      return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
+    var order = [], kept = [];
+    if (picked >= 0 && picked < places.length) order.push(picked);
+    for (var i = 0; i < places.length; i++) if (i !== picked) order.push(i);
+    order.forEach(function (i) {
+      for (var k = 0; k < kept.length; k++) if (!(dist(places[i], places[kept[k]]) > km)) return;
+      kept.push(i);
+    });
+    return kept.sort(function (a, b) { return a - b; });
+  }
+
   // Dash segments along a rectangle's outline (clockwise from the top-left corner).
   function dashes(rect, dash, gap) {
     var pts = [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h], [rect.x, rect.y]];
@@ -190,6 +210,6 @@ var GeoPreview = (function () {
   return { FRAME_FRACTION: FRAME_FRACTION, CAMERA_MIN_ZOOM: CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM: CAMERA_MAX_ZOOM, LEVELS: LEVELS,
     worldX: worldX, worldY: worldY, lonOf: lonOf, latOf: latOf, toPx: toPx, fromPx: fromPx, pan: pan, zoomAt: zoomAt,
     frameRect: frameRect, frameCamera: frameCamera, viewForCamera: viewForCamera, cameraRect: cameraRect, detailFor: detailFor,
-    prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, dashes: dashes };
+    prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, distinctPlaces: distinctPlaces, dashes: dashes };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoPreview;

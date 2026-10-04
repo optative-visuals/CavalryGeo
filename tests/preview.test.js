@@ -155,6 +155,19 @@ test("hitDot finds the nearest place within the radius", () => {
   assert.equal(P.hitDot(VIEW, places, 5, 5, 6), -1);
 });
 
+test("distinctPlaces drops places within km of one already kept; the picked one is considered first", () => {
+  const a = { lat: 48.8566, lon: 2.3522 }, b = { lat: 48.8656, lon: 2.3522 }; // ~1 km apart
+  assert.deepEqual(P.distinctPlaces([a, b], 1, 5), [1], "the picked (second) place wins");
+  assert.deepEqual(P.distinctPlaces([a, b], 0, 5), [0]);
+  assert.deepEqual(P.distinctPlaces([a, b], -1, 5), [0], "no pick: the first is kept");
+  const far = { lat: 49.0366, lon: 2.3522 }; // ~20 km north
+  assert.deepEqual(P.distinctPlaces([a, far], 1, 5), [0, 1], "20 km apart: both, in original order");
+  assert.deepEqual(P.distinctPlaces([a, b, far], -1, 5), [0, 2]);
+  assert.deepEqual(P.distinctPlaces([a, b, far], 1, 5), [1, 2]);
+  assert.deepEqual(P.distinctPlaces([], 0, 5), []);
+  assert.deepEqual(P.distinctPlaces([a], 7, 5), [0], "an out-of-range pick is ignored");
+});
+
 test("dashes splits a rectangle's outline into dash segments", () => {
   const segs = P.dashes({ x: 0, y: 0, w: 14, h: 7 }, 4, 3);
   assert.ok(segs.length >= 4);

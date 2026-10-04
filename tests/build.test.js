@@ -243,6 +243,8 @@ function makeFakeUi() {
     W.prototype.setToolTip = function (t) { this._toolTip = t; };
     W.prototype.setFixedWidth = function (w) { this._fixedWidth = w; };
     W.prototype.setFixedHeight = function (h) { this._fixedHeight = h; };
+    W.prototype.setMinimumWidth = function (w) { this._minWidth = w; };
+    W.prototype.setMinimumHeight = function (h) { this._minHeight = h; };
     W.prototype.setFontSize = function (s) { this._fontSize = s; };
   });
 
@@ -3094,6 +3096,34 @@ test("preview: draws land as one fill plus one border, the frame, and sizes to 1
   assert.equal(p.source(), "camera");
 });
 
+test("preview: the Draw gets a small minimum size so the panel can shrink back", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 68);
+  p.setWidth(480);
+  assert.equal(p._draw._minWidth, 120, "a wider size doesn't change the minimum");
+});
+
+test("preview: two near-identical places draw one dot, and a click reports the picked place's index", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 48.86, lon: 2.35, zoom: 8 }, "result");
+  const ellipses = () => fills(p._draw, "#33CE70").reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "addEllipse").length, 0);
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 48.86, lon: 2.35, name: "Paris, Ile-de-France" }], 1);
+  p._render();
+  assert.equal(ellipses(), 1, "one dot for one place");
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.deepEqual(picks, [1], "the original index of the kept (picked) place");
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 48.86, lon: 2.35, name: "Paris, Ile-de-France" }], 0);
+  p._render();
+  assert.equal(ellipses(), 1);
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 51.5, lon: -0.12, name: "London" }], 0);
+  p._render();
+  assert.equal(ellipses(), 2, "far apart places keep both dots");
+});
+
 test("preview: dragging pans the map, marks the source as moved, and redraws on the timer", () => {
   const { context, api } = buildSandbox({ setup: installNe });
   const { p } = makePreview(context);
@@ -3492,6 +3522,16 @@ test("Map tab: the preview follows the tab bar's width when the panel is resized
   context.sectionTabs.widget._width = 300;
   ui.onResize();
   assert.deepEqual(plain(context.preview._draw._size), [300, 169]);
+});
+
+test("Map tab: the preview shrinks back when the panel gets narrower", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  context.sectionTabs.widget._width = 480;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
+  context.sectionTabs.widget._width = 260;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [260, 146]);
 });
 
 test("Map tab: Refresh shows the picked map's camera as the dashed frame", () => {
