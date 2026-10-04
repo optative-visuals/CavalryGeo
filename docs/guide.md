@@ -3,15 +3,15 @@
 Everything the panel does, section by section. New here? Start with the
 [quick start](../README.md#quick-start) in the README.
 
-The panel's sections — **Map, Layers, Imagery, Extract, Pins, Routes, Data** — are buttons along
-the top (the current one is highlighted). In a narrow panel they wrap onto a second row.
+The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Extract and
+Bake are at the bottom of Layers; Label has its own **Pins / Routes** switch.
 
 - [Map](#map)
 - [Layers](#layers)
 - [Imagery](#imagery)
 - [Extract and Bake](#extract-and-bake)
-- [Pins and labels](#pins-and-labels)
-- [Routes](#routes)
+- [Label: pins and labels](#label-pins-and-labels)
+- [Label: routes](#label-routes)
 - [Data](#data)
 - [Cache and settings](#cache-and-settings)
 - [Known limits](#known-limits)
@@ -24,7 +24,8 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press
   **Search**. The map is made centred on the first result and named after the place (or your
-  name). If that name is taken, a number is added.
+  name). If that name is taken, a number is added. The name and projection fields only show
+  while **New map** is picked.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.
@@ -36,7 +37,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 
 ## Layers
 
-Tick the categories you want and press **Add layers**.
+Turn on the categories you want (each shows a green tick) and press **Add layers**.
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
@@ -82,22 +83,24 @@ Put satellite photos, styled maps or terrain under a Web Mercator map.
 
 ## Extract and Bake
 
+Both are at the bottom of the **Layers** section.
+
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
 - **Bake:** select a map layer in the Scene Window and press **Bake** to turn it into a plain
   editable shape at the current frame. Baked shapes stop following the camera.
 
-## Pins and labels
+## Label: pins and labels
 
-- Search for a place in the Pins section (a Map search fills it in for you) and press **Pin here**
-  or **Label here**, or place them at exact coordinates.
+- Search for a place under **Label → Pins** (a Map search fills it in for you) and press
+  **Pin here** or **Label here**, or place them at exact coordinates.
 - Labels hide automatically when their place turns to the far side of a globe.
 
-## Routes
+## Label: routes
 
-- Search stops and press **Add stop** for each place in order — two stops make a flight arc, more
-  make a journey. Set **Lift %** (how high the arcs bow), choose pins and labels at stops, and
-  press **Create route**.
+- Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
+  stops make a flight arc, more make a journey. Set **Lift %** (how high the arcs bow), tick
+  **Pins at stops** and **Labels at stops** if you want them, and press **Create route**.
 - Each leg is its own layer: animate its **Trim** (Stroke tab) to draw it on, and keyframe its
   **lift** to raise or flatten the arc. On a globe, arcs rise off the surface and hide behind it.
 - For a journey, stagger each leg's Trim keys (leg 2 starts where leg 1 ends) to draw the route
@@ -114,7 +117,7 @@ Put satellite photos, styled maps or terrain under a Web Mercator map.
   **Load**. Cavalry Geo finds the country/place, value and year columns (it understands Our World
   in Data and World Bank downloads, latitude/longitude columns and simple tables) and lists rows
   it couldn't match. Tick **Look up unmatched names** to place cities.
-- Tick **Coloured regions**, **Bubbles**, **Value labels** and **Legend**, then **Add to map**.
+- Turn on **Coloured regions**, **Bubbles**, **Value labels** and **Legend**, then **Add to map**.
   Each goes in its own layer inside a `Data: <column>` group and moves with the camera.
 - Keyframe a data layer's **Year** to animate through time; change colours, range and sizes on the
   layers. After editing the sheet, press **Refresh data** — your styling and keyframes are kept.

@@ -18,12 +18,19 @@ function guard(fn) {
 }
 function column(items) {
   var v = new ui.VLayout();
-  v.setMargins(6, 6, 6, 6);
-  items.forEach(function (w) { v.add(w); });
+  v.setMargins(0, 6, 0, 0); // flush left and right: everything shares one left edge
+  if (typeof v.setSpaceBetween === "function") v.setSpaceBetween(4);
+  // A heading sits close to what it introduces (4 px below) and further from what came before (about 8 px above).
+  items.forEach(function (w, i) {
+    if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(4);
+    v.add(w);
+  });
+  if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
   return v;
 }
 function row() {
   var h = new ui.HLayout();
+  if (typeof h.setMargins === "function") h.setMargins(0, 0, 0, 0);
   for (var i = 0; i < arguments.length; i++) h.add(arguments[i]);
   return h;
 }
@@ -34,17 +41,22 @@ function row() {
 var NEW_MAP = "New map";
 var maps = [], results = [];
 var mapPicker = new ui.DropDown();
-var refreshMapsBtn = new ui.Button("Refresh");
+var refreshMapsBtn = GeoStyle.button("Refresh");
 var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name)");
 var projPicker = new ui.DropDown(); PROJECTIONS.forEach(function (p) { projPicker.addEntry(p); });
 var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place, e.g. Notre-Dame, Paris");
-var searchBtn = new ui.Button("Search");
+var searchBtn = GeoStyle.primaryButton("Search");
 var resultPicker = new ui.DropDown();
-var jumpBtn = new ui.Button("Jump here");
+var jumpBtn = GeoStyle.button("Jump here");
 var flyFramesField = new ui.NumericField(100);
 flyFramesField.setType(0);
 flyFramesField.setMin(2);
-var flyBtn = new ui.Button("Fly here");
+var flyBtn = GeoStyle.primaryButton("Fly here");
+
+// Search and Fly here share one width so they line up above each other on the right.
+var MAP_ACTION_WIDTH = 84;
+if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_ACTION_WIDTH);
+if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
 
 // "New map" is always the last entry, and the one selected when the scene has no maps.
 function refreshMaps(selectCameraId) {
@@ -54,10 +66,18 @@ function refreshMaps(selectCameraId) {
   maps.forEach(function (m, i) { mapPicker.addEntry(m.name); if (m.cameraId === selectCameraId) sel = i; });
   mapPicker.addEntry(NEW_MAP);
   mapPicker.setValue(sel);
+  refreshNewMapFields();
 }
 function newMapSelected() {
   var idx = mapPicker.getValue();
   return idx < 0 || idx >= maps.length;
+}
+// The map name and projection only matter when Search is about to make a map.
+function refreshNewMapFields() {
+  var show = newMapSelected();
+  // Real Cavalry only documents setHidden on Button, so check before calling it.
+  if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
+  if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
 }
 function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
@@ -154,12 +174,12 @@ flyBtn.onClick = guard(function () {
 
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Map", column([
-    row(new ui.Label("Map"), mapPicker, refreshMapsBtn),
-    new ui.Label("New map name (used when Search makes the map)"),
+    row(mapPicker, refreshMapsBtn),
     row(nameField, projPicker),
-    new ui.Label("Search"),
+    GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
+    GeoStyle.heading("Camera"),
     row(jumpBtn, new ui.Label("Frames"), flyFramesField, flyBtn)
   ]));
 });
@@ -172,8 +192,9 @@ var NE_SCALES = ["110m", "50m", "10m"];
 var CATEGORY_LABEL = {};
 NE_CATS.concat(OSM_CATS).forEach(function (c) { CATEGORY_LABEL[c[0]] = c[1]; });
 
+// Toggle texts are shorter than the layer names ("States", not "States / provinces").
 var checks = {};
-NE_CATS.concat(OSM_CATS).forEach(function (c) { checks[c[0]] = new ui.Checkbox(false); });
+NE_CATS.concat(OSM_CATS).forEach(function (c) { checks[c[0]] = GeoStyle.toggle(c[1].split(" /")[0], false); });
 var scalePicker = new ui.DropDown();
 ["Low detail (bundled)", "Medium detail (bundled)", "High detail (downloads 10-40 MB once)"].forEach(function (s) { scalePicker.addEntry(s); });
 scalePicker.setValue(1);
@@ -181,15 +202,13 @@ var modePicker = new ui.DropDown();
 modePicker.addEntry("Main features only");
 modePicker.addEntry("Everything");
 var creditCheck = new ui.Checkbox(true);
-var addLayersBtn = new ui.Button("Add layers");
-var clearCacheBtn = new ui.Button("Clear download cache");
-
-function checkRow(cat) { return row(checks[cat[0]], new ui.Label(cat[1])); }
+var addLayersBtn = GeoStyle.primaryButton("Add layers");
+var clearCacheBtn = GeoStyle.quietButton("Clear download cache");
 
 addLayersBtn.onClick = guard(function () {
   var map = currentMap();
   var selected = DRAW_ORDER.filter(function (c) { return checks[c].getValue(); });
-  if (!selected.length) throw new Error("Tick at least one layer.");
+  if (!selected.length) throw new Error("Turn on at least one layer.");
   var isOsm = function (c) { return OSM_CATS.some(function (o) { return o[0] === c; }); };
   var mode = modePicker.getValue() === 1 ? "all" : "main";
   var scale = NE_SCALES[scalePicker.getValue()];
@@ -246,32 +265,17 @@ clearCacheBtn.onClick = guard(function () {
   resetImageryPlan();
 });
 
-TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Layers", column([
-    new ui.Label("World (Natural Earth)"),
-    row(checkRow(NE_CATS[0]), checkRow(NE_CATS[1]), checkRow(NE_CATS[2])),
-    row(checkRow(NE_CATS[3]), checkRow(NE_CATS[4]), checkRow(NE_CATS[5])),
-    scalePicker,
-    new ui.Label("Streets (OpenStreetMap, area = camera view)"),
-    row(checkRow(OSM_CATS[0]), checkRow(OSM_CATS[1]), checkRow(OSM_CATS[2])),
-    row(checkRow(OSM_CATS[3]), checkRow(OSM_CATS[4])),
-    modePicker,
-    row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
-    row(addLayersBtn, clearCacheBtn)
-  ]));
-});
-
-// ---- Extract tab -------------------------------------------------------------
+// ---- Extract and Bake (in the Layers section) ---------------------------------
 var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
-var refreshLayersBtn = new ui.Button("Refresh");
+var refreshLayersBtn = GeoStyle.button("Refresh");
 var featureQuery = new ui.LineEdit(); featureQuery.setPlaceholder("Name, e.g. France or Rue de Rivoli (blank = all named)");
-var findBtn = new ui.Button("Find");
+var findBtn = GeoStyle.button("Find");
 var featureList = new ui.List();
 featureList.setSelectionMode("extended");
-var extractBtn = new ui.Button("Extract selected");
-var bakeBtn = new ui.Button("Bake selected layers to editable shapes");
+var extractBtn = GeoStyle.button("Extract selected");
+var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
 
 // Extract state (groups/groupsEnc/groupsLayer, and the feature list) is only ever
 // valid for the layer it was built from. Any refresh of the source-layer list -
@@ -295,6 +299,7 @@ function clearSourceLayers() {
 refreshLayersBtn.onClick = guard(function () { refreshSourceLayers(); say(sourceLayers.length + " map layer(s) available."); });
 // Picking "New map" is a normal choice, not an error: it just leaves no map to extract from.
 mapPicker.onValueChanged = guard(function () {
+  refreshNewMapFields();
   if (!newMapSelected()) { refreshSourceLayers(); return; }
   clearSourceLayers();
   say("New map: type a place and press Search to make it.");
@@ -319,7 +324,7 @@ findBtn.onClick = guard(function () {
 });
 
 extractBtn.onClick = guard(function () {
-  if (!groupsLayer) throw new Error("Click Find first (Extract tab).");
+  if (!groupsLayer) throw new Error("Click Find first (Layers tab).");
   var sel = featureList.getSelection();
   if (!sel || !sel.length) throw new Error("Select features in the list first.");
   var map = currentMap();
@@ -353,13 +358,27 @@ bakeBtn.onClick = guard(function () {
   say(msg);
 });
 
+// Layers holds the layer categories, then Extract and Bake.
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Extract", column([
-    row(new ui.Label("From layer"), layerPicker, refreshLayersBtn),
+  var toggles = function (cats) { return cats.map(function (c) { return checks[c[0]]; }); };
+  tabs.add("Layers", column([
+    GeoStyle.heading("World · Natural Earth"),
+    GeoStyle.toggleGrid(toggles(NE_CATS), 3),
+    row(new ui.Label("Detail"), scalePicker),
+    GeoStyle.heading("Streets · OpenStreetMap"),
+    GeoStyle.note("Downloads the area the camera shows."),
+    GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
+    modePicker,
+    row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
+    addLayersBtn,
+    GeoStyle.heading("Extract"),
+    row(layerPicker, refreshLayersBtn),
     row(featureQuery, findBtn),
     featureList,
     extractBtn,
-    bakeBtn
+    GeoStyle.heading("Bake"),
+    bakeBtn,
+    clearCacheBtn
   ]));
 });
 
@@ -378,24 +397,24 @@ function fillPlaces(picker, found) {
   if (found.length) picker.setValue(0);
 }
 
-// ---- Pins tab ---------------------------------------------------------------
-// The Pins tab has its own search (a Map tab search fills it in too), so a pin or label
+// ---- Pins (Label section) ---------------------------------------------------
+// The Pins page has its own search (a Map tab search fills it in too), so a pin or label
 // always goes to the place shown right here (never to whatever is picked on the Map tab).
 var pinResults = [];
 var pinSearchField = new ui.LineEdit(); pinSearchField.setPlaceholder("Search a place, e.g. Eiffel Tower");
-var pinSearchBtn = new ui.Button("Search");
+var pinSearchBtn = GeoStyle.primaryButton("Search");
 var pinResultPicker = new ui.DropDown();
 var labelText = new ui.LineEdit(); labelText.setPlaceholder("Label text (blank = place name)");
-var pinHereBtn = new ui.Button("Pin here");
-var labelHereBtn = new ui.Button("Label here");
+var pinHereBtn = GeoStyle.primaryButton("Pin here");
+var labelHereBtn = GeoStyle.primaryButton("Label here");
 var latField = new ui.NumericField(0); latField.setType(1); latField.setMin(-90); latField.setMax(90);
 var lonField = new ui.NumericField(0); lonField.setType(1); lonField.setMin(-180); lonField.setMax(180);
-var pinCoordBtn = new ui.Button("Pin at coordinates");
-var labelCoordBtn = new ui.Button("Label at coordinates");
+var pinCoordBtn = GeoStyle.button("Pin at coordinates");
+var labelCoordBtn = GeoStyle.button("Label at coordinates");
 
 function labelOr(fallback) { return labelText.getText().trim() || fallback; }
 function coordName() { return latField.getValue().toFixed(4) + ", " + lonField.getValue().toFixed(4); }
-// A Map tab search fills the Pins tab too, so Pin here works without searching again.
+// A Map tab search fills the Pins page too, so Pin here works without searching again.
 function prefillPins(q, found) {
   pinSearchField.setText(q);
   pinResults = found.slice();
@@ -403,7 +422,7 @@ function prefillPins(q, found) {
 }
 function pinPlace() {
   var idx = pinResultPicker.getValue();
-  if (!pinResults.length || idx < 0 || idx >= pinResults.length) throw new Error("Search for a place in the Pins tab first.");
+  if (!pinResults.length || idx < 0 || idx >= pinResults.length) throw new Error("Search for a place under Label → Pins first.");
   return pinResults[idx];
 }
 
@@ -431,33 +450,20 @@ labelCoordBtn.onClick = guard(function () {
   say("Label \"" + text + "\" added at " + coordName() + ".");
 });
 
-TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Pins", column([
-    new ui.Label("Place"),
-    row(pinSearchField, pinSearchBtn),
-    pinResultPicker,
-    labelText,
-    row(pinHereBtn, labelHereBtn),
-    new ui.Label("Or at coordinates"),
-    row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
-    row(pinCoordBtn, labelCoordBtn)
-  ]));
-});
-
-// ---- Routes tab ---------------------------------------------------------------
+// ---- Routes (Label section) -------------------------------------------------
 // A flight arc is a route with two stops; a journey has more. One leg layer per pair.
 var routeResults = [], stops = [];
 var routeSearchField = new ui.LineEdit(); routeSearchField.setPlaceholder("Search a stop, e.g. London");
-var routeSearchBtn = new ui.Button("Search");
+var routeSearchBtn = GeoStyle.primaryButton("Search");
 var routeResultPicker = new ui.DropDown();
-var addStopBtn = new ui.Button("Add stop");
+var addStopBtn = GeoStyle.button("Add stop");
 var stopsList = new ui.List(); stopsList.setSelectionMode("extended");
-var removeStopBtn = new ui.Button("Remove selected");
-var clearStopsBtn = new ui.Button("Clear");
+var removeStopBtn = GeoStyle.button("Remove selected");
+var clearStopsBtn = GeoStyle.button("Clear");
 var liftField = new ui.NumericField(30); liftField.setType(1); liftField.setMin(0); liftField.setMax(100);
 var pinsAtStops = new ui.Checkbox(true);
 var labelsAtStops = new ui.Checkbox(false);
-var createRouteBtn = new ui.Button("Create route");
+var createRouteBtn = GeoStyle.primaryButton("Create route");
 
 function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
@@ -469,7 +475,7 @@ routeSearchBtn.onClick = guard(function () {
 });
 addStopBtn.onClick = guard(function () {
   var idx = routeResultPicker.getValue();
-  if (!routeResults.length || idx < 0 || idx >= routeResults.length) throw new Error("Search for a stop in the Routes tab first.");
+  if (!routeResults.length || idx < 0 || idx >= routeResults.length) throw new Error("Search for a stop under Label → Routes first.");
   var r = routeResults[idx];
   var last = stops[stops.length - 1];
   if (last && Math.abs(last.lon - r.lon) < 1e-9 && Math.abs(last.lat - r.lat) < 1e-9) {
@@ -497,30 +503,59 @@ createRouteBtn.onClick = guard(function () {
   say("Route created: " + r.legs.length + " leg(s). Animate each leg's Trim to draw it on.");
 });
 
+// ---- Label section: Pins and Routes, switched by a small tab bar -----------------
+var LABEL_PAGES = ["Pins", "Routes"];
+var labelTabs = null, labelPages = null;
+function showLabelPage(name) {
+  var i = LABEL_PAGES.indexOf(name);
+  if (i < 0 || !labelPages) return;
+  labelTabs.select(name);
+  labelPages.setPage(i);
+}
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Routes", column([
-    new ui.Label("Stops"),
+  labelPages = GeoStyle.pageStack();
+  labelPages.add(column([
+    GeoStyle.heading("Place"),
+    row(pinSearchField, pinSearchBtn),
+    pinResultPicker,
+    labelText,
+    row(pinHereBtn, labelHereBtn),
+    GeoStyle.heading("At coordinates"),
+    row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
+    row(pinCoordBtn, labelCoordBtn)
+  ]));
+  labelPages.add(column([
+    GeoStyle.heading("Stops"),
     row(routeSearchField, routeSearchBtn),
     row(routeResultPicker, addStopBtn),
     stopsList,
     row(removeStopBtn, clearStopsBtn),
+    GeoStyle.heading("Style"),
     row(new ui.Label("Lift %"), liftField),
     row(pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
     createRouteBtn
   ]));
+  labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
+  // No margins here: the page columns already carry theirs.
+  var labelColumn = new ui.VLayout();
+  labelColumn.setMargins(0, 0, 0, 0);
+  labelColumn.add(labelTabs.widget);
+  labelColumn.add(labelPages.widget);
+  tabs.add("Label", labelColumn);
 });
 
 // ---- Data tab -------------------------------------------------------------------
 var dataLoaded = null; // { url, table, detection }
 var dataLinkField = new ui.LineEdit(); dataLinkField.setPlaceholder("Google Sheet link (shared: Anyone with the link) or CSV link");
-var dataLoadBtn = new ui.Button("Load");
+var dataLoadBtn = GeoStyle.button("Load");
 var placePicker = new ui.DropDown(), valuePicker = new ui.DropDown(), yearPicker = new ui.DropDown();
 var prefixField = new ui.LineEdit(); prefixField.setPlaceholder("Prefix, e.g. $");
 var suffixField = new ui.LineEdit(); suffixField.setPlaceholder("Suffix, e.g. %");
-var regionsCheck = new ui.Checkbox(true), bubblesCheck = new ui.Checkbox(false), labelsCheck = new ui.Checkbox(false), legendCheck = new ui.Checkbox(true);
+var regionsCheck = GeoStyle.toggle("Coloured regions", true), bubblesCheck = GeoStyle.toggle("Bubbles", false);
+var labelsCheck = GeoStyle.toggle("Value labels", false), legendCheck = GeoStyle.toggle("Legend", true);
 var lookupCheck = new ui.Checkbox(false);
-var addDataBtn = new ui.Button("Add to map");
-var refreshDataBtn = new ui.Button("Refresh data");
+var addDataBtn = GeoStyle.primaryButton("Add to map");
+var refreshDataBtn = GeoStyle.button("Refresh data");
 var dataUnmatchedList = new ui.List();
 var NO_YEAR = "(none)", WIDE_YEARS = "(one column per year)";
 
@@ -586,7 +621,7 @@ addDataBtn.onClick = guard(function () {
   }
   if (!prepared.matched) throw new Error("No places matched, so nothing was added. Check the Place column.");
   var opts = { regions: regionsCheck.getValue(), bubbles: bubblesCheck.getValue(), labels: labelsCheck.getValue(), legend: legendCheck.getValue(), prefix: prefixField.getText(), suffix: suffixField.getText() };
-  if (!opts.regions && !opts.bubbles && !opts.labels) throw new Error("Tick at least one of Coloured regions, Bubbles or Value labels.");
+  if (!opts.regions && !opts.bubbles && !opts.labels) throw new Error("Turn on at least one of Coloured regions, Bubbles or Value labels.");
   var source = { url: dataLoaded.url, choice: choice, scale: "50m" };
   if (usedLookup) source.lookup = true;
   var r = GeoScene.createDataLayers(map, source, prepared, opts);
@@ -604,15 +639,17 @@ refreshDataBtn.onClick = guard(function () {
 
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Data", column([
+    GeoStyle.heading("Sheet"),
     row(dataLinkField, dataLoadBtn),
+    GeoStyle.heading("Columns"),
     row(new ui.Label("Place"), placePicker, new ui.Label("Value"), valuePicker),
     row(new ui.Label("Year"), yearPicker),
     row(prefixField, suffixField),
-    row(regionsCheck, new ui.Label("Coloured regions"), bubblesCheck, new ui.Label("Bubbles")),
-    row(labelsCheck, new ui.Label("Value labels"), legendCheck, new ui.Label("Legend")),
+    GeoStyle.heading("Show"),
+    GeoStyle.toggleGrid([regionsCheck, bubblesCheck, labelsCheck, legendCheck], 2),
     row(lookupCheck, new ui.Label("Look up unmatched names as places (cities)")),
     row(addDataBtn, refreshDataBtn),
-    new ui.Label("Unmatched rows"),
+    GeoStyle.heading("Unmatched rows"),
     dataUnmatchedList
   ]));
 });
@@ -630,17 +667,17 @@ var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1
 var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null };
 var sourcePicker = new ui.DropDown();
 GeoSources.list().forEach(function (s) { sourcePicker.addEntry(s.label); });
-var licenceLabel = new ui.Label("");
+var licenceLabel = GeoStyle.note("");
 var maptilerKeyField = new ui.LineEdit(); maptilerKeyField.setPlaceholder("MapTiler key (free at maptiler.com)");
 var mapboxKeyField = new ui.LineEdit(); mapboxKeyField.setPlaceholder("Mapbox access token (free at mapbox.com)");
 var styleField = new ui.LineEdit(); styleField.setPlaceholder("MapTiler Map ID or Mapbox style (blank = default)");
 var stylePicker = new ui.DropDown();
 var customUrlField = new ui.LineEdit(); customUrlField.setPlaceholder("Custom tile link with {z}, {x} and {y}");
 var customAttrField = new ui.LineEdit(); customAttrField.setPlaceholder("Credit for the custom tiles");
-var buildImageryBtn = new ui.Button("Build imagery");
-var cancelImageryBtn = new ui.Button("Cancel");
-var imageryAttrBtn = new ui.Button("Add attribution");
-var clearTilesBtn = new ui.Button("Clear imagery tiles");
+var buildImageryBtn = GeoStyle.primaryButton("Build imagery");
+var cancelImageryBtn = GeoStyle.button("Cancel");
+var imageryAttrBtn = GeoStyle.button("Add attribution");
+var clearTilesBtn = GeoStyle.quietButton("Clear imagery tiles");
 var imageryProgress = new ui.ProgressBar();
 
 maptilerKeyField.setText(imagerySettings.maptilerKey || "");
@@ -948,36 +985,36 @@ clearTilesBtn.onClick = guard(function () {
 
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Imagery", column([
-    row(new ui.Label("Source"), sourcePicker),
+    GeoStyle.heading("Source"),
+    sourcePicker,
     licenceLabel,
     row(new ui.Label("MapTiler key"), maptilerKeyField),
     row(new ui.Label("Mapbox token"), mapboxKeyField),
     row(new ui.Label("Map ID / style"), styleField, stylePicker),
     row(new ui.Label("Custom link"), customUrlField),
     row(new ui.Label("Custom credit"), customAttrField),
+    GeoStyle.heading("Build"),
     row(buildImageryBtn, cancelImageryBtn),
     imageryProgress,
-    row(imageryAttrBtn, clearTilesBtn)
+    imageryAttrBtn,
+    clearTilesBtn
   ]));
 });
 
 // ---- Other tabs are appended above this line by later tasks ---------------
 
-// Sections are shown as a row of buttons above one page per section: Cavalry's tab strip
-// scrolls awkwardly in a narrow panel, while the buttons wrap onto a second row. Builders
-// register (name, layout) as before; SECTION_ORDER sets the order (unlisted ones go last).
-var SECTION_ORDER = ["Map", "Layers", "Imagery", "Extract", "Pins", "Routes", "Data"];
-var SECTION_CURRENT = "#2f6f4f";
-var sectionNames = [], sectionButtons = [], sectionPages = null;
-function themeColor(name, fallback) {
-  try { return (typeof ui.getThemeColor === "function" && ui.getThemeColor(name)) || fallback; } catch (e) { return fallback; }
-}
+// Sections: one tab bar above one page per section. Builders register (name, layout);
+// SECTION_ORDER sets the order (unlisted ones go last). The old section names still work in
+// showSection: Extract lives in Layers, Pins and Routes in Label.
+var SECTION_ORDER = ["Map", "Layers", "Imagery", "Label", "Data"];
+var SECTION_ALIASES = { Extract: ["Layers"], Pins: ["Label", "Pins"], Routes: ["Label", "Routes"] };
+var sectionNames = [], sectionTabs = null, sectionPages = null;
 function showSection(name) {
-  var i = sectionNames.indexOf(name);
+  var target = SECTION_ALIASES[name] || [name], i = sectionNames.indexOf(target[0]);
   if (i < 0) return;
+  sectionTabs.select(target[0]);
   sectionPages.setPage(i);
-  var other = themeColor("Mid", "#3a3a3a");
-  sectionButtons.forEach(function (b, j) { b.setBackgroundColor(j === i ? SECTION_CURRENT : other); });
+  if (target[1]) showLabelPage(target[1]);
 }
 
 function buildUi() {
@@ -990,21 +1027,16 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
-  var bar = new ui.FlowLayout(4, 4);
-  bar.setMargins(0, 0, 0, 0);
-  sectionPages = new ui.PageView();
-  sectionNames.forEach(function (name) {
-    var b = new ui.Button(name);
-    b.onClick = function () { showSection(name); };
-    sectionButtons.push(b);
-    bar.add(b);
-    sectionPages.add(layouts[name]);
-  });
+  sectionPages = GeoStyle.pageStack();
+  sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
+  sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
   root.setMargins(4, 4, 4, 4);
-  root.add(bar);
-  root.add(sectionPages);
+  root.add(sectionTabs.widget);
+  root.add(sectionPages.widget);
+  // The stretch keeps the status line at the bottom when the page is shorter than the window.
+  if (typeof root.addStretch === "function") root.addStretch();
   root.add(statusLabel);
   ui.add(root);
   ui.show();
