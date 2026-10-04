@@ -217,6 +217,15 @@ function makeFakeUi() {
   Container.prototype.setLayout = function (l) { this._layout = l; };
   Container.prototype.setRadius = function (a, b, c, d) { this._radius = [a, b, c, d]; };
 
+  // Like Cavalry's Draw: paths are recorded; tests fire the mouse callbacks directly.
+  function Draw() { this._paths = []; this._size = [0, 0]; this._redraws = 0; }
+  Draw.prototype.setSize = function (w, h) { this._size = [w, h]; };
+  Draw.prototype.addPath = function (p, paint) { this._paths.push({ path: p, paint: paint }); };
+  Draw.prototype.clearPaths = function () { this._paths = []; };
+  Draw.prototype.redraw = function () { this._redraws++; };
+  Draw.prototype.useHoverEvents = function () {};
+  Container.prototype.geometry = function () { return { x: 0, y: 0, width: this._width || 320, height: 24 }; };
+
   // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
   // with withModal().
 
@@ -226,7 +235,7 @@ function makeFakeUi() {
   ProgressBar.prototype.setMaximum = function (m) { this._max = m; };
 
   // Every Cavalry widget shares these.
-  [Label, Button, LineEdit, DropDown, Checkbox, NumericField, List, ProgressBar, Container].forEach(function (W) {
+  [Label, Button, LineEdit, DropDown, Checkbox, NumericField, List, ProgressBar, Container, Draw].forEach(function (W) {
     W.prototype.setHidden = function (h) { this._hidden = !!h; };
     W.prototype.isHidden = function () { return !!this._hidden; };
     W.prototype.setEnabled = function (e) { this._enabled = !!e; };
@@ -234,6 +243,8 @@ function makeFakeUi() {
     W.prototype.setToolTip = function (t) { this._toolTip = t; };
     W.prototype.setFixedWidth = function (w) { this._fixedWidth = w; };
     W.prototype.setFixedHeight = function (h) { this._fixedHeight = h; };
+    W.prototype.setMinimumWidth = function (w) { this._minWidth = w; };
+    W.prototype.setMinimumHeight = function (h) { this._minHeight = h; };
     W.prototype.setFontSize = function (s) { this._fontSize = s; };
   });
 
@@ -241,7 +252,7 @@ function makeFakeUi() {
   return {
     Label: Label, Button: Button, LineEdit: LineEdit, DropDown: DropDown, Checkbox: Checkbox,
     NumericField: NumericField, List: List, PageView: PageView, FlowLayout: FlowLayout, HLayout: HLayout, VLayout: VLayout,
-    ProgressBar: ProgressBar, Container: Container,
+    ProgressBar: ProgressBar, Container: Container, Draw: Draw,
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
@@ -250,13 +261,11 @@ function makeFakeUi() {
 }
 
 function makeFakeCavalry() {
-  function Path() {
-    this.moveTo = function () {};
-    this.lineTo = function () {};
-    this.close = function () {};
-    this.addEllipse = function () {};
-    this.addText = function () {};
-  }
+  function Path() { this._cmds = []; }
+  ["moveTo", "lineTo", "close", "addEllipse", "addText", "addRect"].forEach(function (m) {
+    Path.prototype[m] = function () { this._cmds.push([m].concat(Array.prototype.slice.call(arguments))); };
+  });
+  Path.prototype.toObject = function () { return { cmds: this._cmds.slice() }; };
   return { Path: Path };
 }
 
@@ -270,6 +279,11 @@ function buildSandbox(options = {}) {
   const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
   const context = vm.createContext(sandbox);
   vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
+  // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
+  // the timers they cause (downloads, builds, a preview they create), so leave that one out
+  // (found by asking the preview for its timer).
+  const own = context.preview && context.preview._timer && context.preview._timer();
+  if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
   return { context: context, api: api, ui: ui };
 }
 
@@ -286,6 +300,18 @@ function walkUi(node, fn) {
   (node._items || []).forEach((n) => walkUi(n, fn));
   (node._pages || []).forEach((n) => walkUi(n, fn));
   if (node._layout) walkUi(node._layout, fn);
+}
+
+// Writes small encoded countries/lakes layers where GeoNet.neLayer looks for bundled data.
+function installNe(api) {
+  const C = require("../src/core/codec.js");
+  const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
+  const layer = { kind: "polygon", features: [{ name: "Here", rings: [sq(-5, 40, 15)] }, { name: "There", rings: [sq(100, -10, 20)] }] };
+  const lakes = { kind: "polygon", features: [{ name: "Lake", rings: [sq(0, 45, 3)] }] };
+  ["110m", "50m"].forEach((s) => {
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/countries.json`] = JSON.stringify(C.encodeLayer(layer));
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/lakes.json`] = JSON.stringify(C.encodeLayer(lakes));
+  });
 }
 
 // A world-view map made through the panel's own map-making path (tests that just need a map).
@@ -429,7 +455,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "−", "+", "Jump here", "Fly here", "Create map here"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -531,6 +557,7 @@ test("Fly to keys the camera from the current frame to the selected place", () =
   context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
   context.refreshResultPicker();
   context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged(); // the preview follows the pick, so Fly here goes there
   context.flyFramesField.setValue(10);
   api.setFrame(20);
   context.flyBtn.onClick();
@@ -549,6 +576,7 @@ test("Fly to the world view", () => {
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(5);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view: frames 0–4\./);
@@ -562,6 +590,7 @@ test("Fly to notes when the flight ends after the composition's last frame (F9)"
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(15);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /Note: the flight ends after the composition's last frame \(9\)\./);
@@ -571,6 +600,7 @@ test("Fly to says nothing extra when the flight stays inside the composition (F9
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(5);
   context.flyBtn.onClick();
   assert.doesNotMatch(context.statusLabel.getText(), /Note: the flight ends/);
@@ -2912,7 +2942,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Camera"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -3038,4 +3068,551 @@ test("GeoStyle.tabBar without ui.Container is a plain HLayout of the buttons, an
   bar.buttons[1].onClick();
   assert.equal(bar.selected(), "Routes");
   assert.deepEqual(plain(picked), ["Routes:1"]);
+});
+
+// ---- Map preview widget ------------------------------------------------------------
+function makePreview(context, opts = {}) {
+  const picks = [];
+  const p = context.GeoPreviewPanel.create(Object.assign({ compSize: () => ({ width: 1920, height: 1080 }), onPick: (i) => picks.push(i), yUp: false, dim: true, redraw: "timer" }, opts));
+  return { p, picks };
+}
+const fills = (draw, color) => draw._paths.filter((x) => x.paint.color === color && !x.paint.stroke);
+const strokes = (draw, color) => draw._paths.filter((x) => x.paint.color === color && x.paint.stroke);
+
+test("preview: draws land as one fill plus one border, the frame, and sizes to 16:9", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p.available(), true);
+  p.setWidth(320);
+  assert.deepEqual(plain(p._draw._size), [320, 180]);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  assert.equal(fills(p._draw, "#4a5a50").length, 1, "one land fill");
+  assert.equal(strokes(p._draw, "#2a3530").length, 1, "one border path");
+  assert.equal(strokes(p._draw, "#33CE70").length, 1, "the green frame");
+  assert.equal(p._draw._background, "#1d2a33");
+  const f = p.frameCamera();
+  assert.ok(Math.abs(f.zoom - 5) < 1e-9 && Math.abs(f.lat - 45) < 1e-9 && Math.abs(f.lon - 2) < 1e-9);
+  assert.equal(p.source(), "camera");
+});
+
+test("preview: the Draw gets a small minimum size so the panel can shrink back", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 180);
+  p.setWidth(320);
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 180);
+  p.setWidth(480);
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 270);
+});
+
+test("preview: two near-identical places draw one dot, and a click reports the picked place's index", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 48.86, lon: 2.35, zoom: 8 }, "result");
+  const count = (list) => list.reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "addEllipse").length, 0);
+  const ellipses = () => count(fills(p._draw, "#33CE70")) + count(strokes(p._draw, "#33CE70"));
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 48.86, lon: 2.35, name: "Paris, Ile-de-France" }], 1);
+  p._render();
+  assert.equal(ellipses(), 1, "one dot for one place");
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.deepEqual(picks, [1], "the original index of the kept (picked) place");
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 48.86, lon: 2.35, name: "Paris, Ile-de-France" }], 0);
+  p._render();
+  assert.equal(ellipses(), 1);
+  p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 51.5, lon: -0.12, name: "London" }], 0);
+  p._render();
+  assert.equal(ellipses(), 2, "far apart places keep both dots");
+});
+
+const ellipseCmds = (list) => list.reduce((a, x) => a.concat(x.path.cmds.filter((c) => c[0] === "addEllipse")), []);
+const textCmds = (list) => list.reduce((a, x) => a.concat(x.path.cmds.filter((c) => c[0] === "addText")), []);
+const PARIS_DOT = { lat: 48.8566, lon: 2.3522, name: "Paris, Ile-de-France, France" };
+const TEXAS_DOT = { lat: 33.66, lon: -95.55, name: "Paris, Texas, United States" };
+
+test("preview: the picked place is a solid dot with a white name, the others are labelled green rings", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], 0);
+  p._render();
+  const solid = fills(p._draw, "#33CE70");
+  assert.equal(solid.length, 1, "one solid green fill");
+  assert.equal(ellipseCmds(solid).length, 1, "only the picked dot");
+  assert.equal(ellipseCmds(solid)[0][3], 4);
+  const rings = strokes(p._draw, "#33CE70").filter((x) => ellipseCmds([x]).length);
+  assert.equal(rings.length, 1, "one hollow ring path");
+  assert.equal(rings[0].paint.strokeWidth, 1.2);
+  assert.equal(ellipseCmds(rings).length, 1);
+  assert.equal(ellipseCmds(rings)[0][3], 3, "ring radius 3");
+  const white = textCmds(fills(p._draw, "#ffffff"));
+  assert.equal(white.length, 1);
+  assert.equal(white[0][1], "Paris");
+  const grey = textCmds(fills(p._draw, "#a6a6a6"));
+  assert.equal(grey.length, 1);
+  assert.equal(grey[0][1], "Paris, Texas");
+  assert.equal(grey[0][2], 10, "grey label is 10 px");
+  // the ring's label sits right of the ring like the picked label does
+  assert.equal(grey[0][3], ellipseCmds(rings)[0][1] + 7);
+  assert.equal(grey[0][4], ellipseCmds(rings)[0][2] - 4);
+});
+
+test("preview: a one-part name gives a one-part grey label", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, { lat: 33.66, lon: -95.55, name: "Texasville" }], 0);
+  p._render();
+  assert.equal(textCmds(fills(p._draw, "#a6a6a6"))[0][1], "Texasville");
+});
+
+test("preview: with nothing picked every place is a green ring", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], -1);
+  p._render();
+  assert.equal(ellipseCmds(fills(p._draw, "#33CE70")).length, 0, "no solid dot");
+  assert.equal(ellipseCmds(strokes(p._draw, "#33CE70")).length, 2, "two rings");
+  assert.equal(textCmds(fills(p._draw, "#ffffff")).length, 0);
+  assert.equal(textCmds(fills(p._draw, "#a6a6a6")).length, 2);
+});
+
+test("preview: clicking a ring picks that place with its own index", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], 0);
+  p._render();
+  const ring = ellipseCmds(strokes(p._draw, "#33CE70"))[0];
+  p._draw.onMousePress({ x: ring[1], y: ring[2] }, "left");
+  assert.deepEqual(picks, [1]);
+});
+
+test("preview: dragging pans the map, marks the source as moved, and redraws on the timer", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "result");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  p._draw.onMouseRelease({ x: 140, y: 100 }, "left");
+  assert.ok(p.frameCamera().lon < before.lon, "dragging right moves the frame west");
+  assert.equal(p.source(), null);
+  const redraws = p._draw._redraws;
+  runTimersOnce(api);
+  assert.ok(p._draw._redraws > redraws);
+});
+
+test("preview: y-up Draw coordinates are flipped", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { yUp: true });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 100, y: 130 }); // up the screen in y-up coordinates
+  assert.ok(p.frameCamera().lat < before.lat, "dragging the map up moves the frame south");
+});
+
+test("preview: double-click and +/- zoom; zoom stays within camera 0–18", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9);
+  p.zoomBy(-3);
+  assert.ok(Math.abs(p.frameCamera().zoom - 3) < 1e-9);
+  p.zoomBy(50);
+  assert.ok(Math.abs(p.frameCamera().zoom - 18) < 1e-9);
+});
+
+test("preview: clicking a place dot picks it instead of dragging", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }, { lat: 46, lon: 4, name: "Nearby" }], 0);
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 161, y: 89 }, "left");
+  assert.deepEqual(picks, [0]);
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "the press doesn't pan");
+  p._draw.onMouseMove({ x: 200, y: 120 }); // no drag started, so moving doesn't pan either
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "nor does a move before release");
+  p._render();
+  assert.equal(fills(p._draw, "#33CE70").length >= 1, true, "dots drawn");
+});
+
+test("preview: the current camera shows as a dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setCurrentCamera({ lat: 45, lon: 2, zoom: 4 });
+  p._render();
+  assert.equal(strokes(p._draw, "#e6e6e6").length, 1);
+});
+
+test("preview: without ui.Draw, or with the data missing, it says so and is unavailable", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Draw;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const a = context.GeoPreviewPanel.create({ compSize: () => ({ width: 1920, height: 1080 }), onPick() {}, yUp: false, dim: true, redraw: "timer" });
+  assert.equal(a.available(), false);
+  const { context: c2 } = buildSandbox(); // no bundled data installed
+  const { p } = makePreview(c2);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  assert.equal(p.available(), false);
+});
+
+test("preview: a Draw missing a method doesn't break the panel; the preview says so and is unavailable", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  ui.Draw.prototype.setBackgroundColor = undefined;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  assert.ok(ui._root(), "the panel was built");
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(context.preview.available(), false);
+  let message = null;
+  walkUi(context.preview.layout, (n) => { if (n.getText && /Map preview unavailable/.test(n.getText())) message = n.getText(); });
+  assert.ok(message, "the preview's note explains");
+  assert.equal(context.createHereBtn.isHidden(), true, "no frame to make a map from");
+});
+
+test("preview: setWidth ignores an un-laid-out width of 0 and keeps the view", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(0);
+  p.setWidth(-5);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setWidth(320);
+  const f = p.frameCamera();
+  assert.ok(Number.isFinite(f.lat) && Number.isFinite(f.lon) && Number.isFinite(f.zoom), JSON.stringify(f));
+  assert.ok(Math.abs(f.zoom - 5) < 1e-9 && Math.abs(f.lat - 45) < 1e-9 && Math.abs(f.lon - 2) < 1e-9);
+  assert.deepEqual(plain(p._draw._size), [320, 180]);
+});
+
+test("preview: the redraw timer is tracked by the widget (no isActive), started once and stopped when idle", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    installNe(a);
+    const T = a.Timer;
+    let starts = 0;
+    a.Timer = function (cb) { const t = T(cb); delete t.isActive; const s = t.start; t.start = function () { starts++; s(); }; a._starts = () => starts; return t; };
+  } });
+  const startsBefore = api._starts(); // the panel's own preview has already started its timer
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 110, y: 100 });
+  p._draw.onMouseMove({ x: 120, y: 100 });
+  assert.equal(api._starts() - startsBefore, 1, "start() once while running");
+  assert.equal(api._timers.filter((t) => t.active).length, 1);
+  const redraws = p._draw._redraws;
+  runTimersOnce(api);
+  assert.ok(p._draw._redraws > redraws, "rendered");
+  p._draw.onMouseRelease({ x: 120, y: 100 }, "left");
+  runTimersOnce(api);
+  runTimersOnce(api);
+  runTimersOnce(api);
+  assert.equal(api._timers.filter((t) => t.active).length, 0, "idle: stopped");
+  p.zoomBy(1);
+  assert.equal(api._timers.filter((t) => t.active).length, 1, "a change starts it again");
+  assert.equal(api._starts() - startsBefore, 2);
+});
+
+test("preview: an onPick that throws does not take the preview down", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const log = context.console.log;
+  context.console = { log() {} };
+  const { p } = makePreview(context, { onPick() { throw new Error("boom"); } });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.equal(p.available(), true);
+  p._render();
+  assert.equal(p.available(), true);
+});
+
+test("preview: a drag that paused before release renders full detail once, not twice", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  runTimersOnce(api);
+  runTimersOnce(api);
+  const realNow = vm.runInContext("Date.now", context);
+  try {
+    p._draw.onMousePress({ x: 100, y: 100 }, "left");
+    p._draw.onMouseMove({ x: 120, y: 100 });
+    const t0 = realNow();
+    vm.runInContext("Date.now = function () { return " + (t0 + 500) + "; }", context);
+    p._draw.onMouseRelease({ x: 120, y: 100 }, "left");
+    const before = p._draw._redraws;
+    runTimersOnce(api);
+    assert.equal(p._draw._redraws, before + 1, "the release render");
+    runTimersOnce(api);
+    assert.equal(p._draw._redraws, before + 1, "no redundant second render");
+  } finally {
+    context.__now = realNow;
+    vm.runInContext("Date.now = __now", context);
+  }
+});
+
+// ---- Preview in the Map tab ----------------------------------------------------------
+function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
+
+test("Map tab: the preview sits between Search and Camera", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const items = context.sectionPages.pages[0]._items;
+  const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
+  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview"), iCamera = texts.indexOf("Camera");
+  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iCamera);
+  assert.ok(mapPageHas(context, context.preview._draw));
+});
+
+test("Map tab: a search centres the preview on the first result and shows the results as dots", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  const f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS.lat) < 1e-6 && Math.abs(f.lon - PARIS.lon) < 1e-6);
+  assert.equal(context.preview.source(), "result");
+});
+
+test("Map tab: picking a map centres the preview on its camera and shows the dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.mapPicker.setValue(0);
+  context.mapPicker.onValueChanged();
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  const f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.zoom - cam.zoom) < 1e-6);
+  assert.equal(context.preview.source(), "camera");
+});
+
+test("Map tab: after moving the preview, Jump here goes to the green frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
+  context.preview.zoomBy(1); // the user moved it: source becomes null
+  context.jumpBtn.onClick();
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  assert.ok(Math.abs(cam.lat - 10) < 1e-6 && Math.abs(cam.lon - 20) < 1e-6 && Math.abs(cam.zoom - 7) < 1e-6);
+  assert.match(context.statusLabel.getText(), /the preview frame/);
+});
+
+test("Map tab: while the preview follows a result, Jump here still names the place", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+});
+
+test("Map tab: Create map here appears only for New map and makes a map at the frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  assert.equal(context.createHereBtn.isHidden(), false, "empty scene: New map");
+  assert.equal(context.jumpBtn.isHidden(), true);
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  const map = context.currentMap(), cam = context.GeoScene.readCamera(map.cameraId);
+  assert.ok(Math.abs(cam.lat - 35) < 1e-6 && Math.abs(cam.lon - 139) < 1e-6 && Math.abs(cam.zoom - 8) < 1e-6);
+  assert.equal(map.name, "Map");
+  assert.equal(context.createHereBtn.isHidden(), true, "a map is picked now");
+  assert.equal(context.jumpBtn.isHidden(), false);
+});
+
+test("Map tab: with the preview unavailable, Jump here and Fly here work as before", () => {
+  const { context } = buildSandbox(); // no bundled data → preview fails on first render
+  context.preview._render();
+  assert.equal(context.preview.available(), false);
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+});
+
+test("Map tab: an empty search clears the preview's dots and it follows the World view again", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.preview._render();
+  const withDots = fills(context.preview._draw, "#33CE70").length;
+  assert.ok(withDots > 0, "a result dot is drawn");
+  searchFinds(context, []);
+  mapSearch(context, "Nowhere");
+  context.preview._render();
+  assert.equal(fills(context.preview._draw, "#33CE70").length, 0, "no dots left");
+  assert.equal(context.preview.source(), "world");
+  context.preview._draw.onMousePress({ x: 160, y: 90 }, "left"); // a stale dot would have been clickable
+  assert.equal(context.resultPicker.getValue(), 0);
+});
+
+test("Map tab: clicking a preview dot that is not one of the results is ignored", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const f = context.preview.frameCamera();
+  // two extra dots the results don't have; the second sits at the centre of the view
+  context.preview.setPlaces([{ lat: PARIS.lat, lon: PARIS.lon, name: "a" }, { lat: 0, lon: 0, name: "b" }, { lat: f.lat, lon: f.lon, name: "c" }], 0);
+  context.preview._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.equal(context.resultPicker.getValue(), 1);
+  assert.equal(context.preview.source(), "result");
+  assert.match(context.statusLabel.getText(), /result\(s\)/);
+});
+
+test("Map tab: with New map picked and the preview unavailable, Create map here is hidden", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.createHereBtn.isHidden(), false, "shown while the preview works");
+  context.preview._render(); // no bundled data: the preview fails, and hides the button itself
+  assert.equal(context.preview.available(), false);
+  assert.equal(context.createHereBtn.isHidden(), true);
+  assert.equal(context.jumpBtn.isHidden(), true);
+});
+
+test("Map tab: after moving the preview, Fly here goes to the green frame", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
+  context.preview.zoomBy(1);
+  context.flyFramesField.setValue(10);
+  api.setFrame(20);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to the preview frame: frames 20–29\./);
+  api.setFrame(29);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.0") - 10) < 1e-6);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.1") - 20) < 1e-6);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.2") - 7) < 1e-6);
+});
+
+test("Map tab: with the preview unavailable, Fly here still names the picked result", () => {
+  const { context, api } = buildSandbox();
+  context.preview._render();
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.flyFramesField.setValue(10);
+  api.setFrame(20);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
+});
+
+const close = (a, b) => Math.abs(a - b) < 1e-9;
+function sameCam(a, b) { return close(a.lat, b.lat) && close(a.lon, b.lon) && close(a.zoom, b.zoom); }
+
+test("Map tab: opening on a scene with a map, Jump here goes to the green frame, which is on the map's camera", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.makeMap("Map", { lat: 35, lon: 139, zoom: 8, rotation: 0, projection: 0 });
+  context.refreshMaps(); context.previewFollowPicked(); context.previewShowMap(); // the panel's startup hooks
+  const map = context.currentMap(), before = context.GeoScene.readCamera(map.cameraId);
+  context.jumpBtn.onClick();
+  assert.ok(sameCam(context.GeoScene.readCamera(map.cameraId), before), "the camera stays where it was");
+  assert.match(context.statusLabel.getText(), /^Camera jumped to the preview frame \(zoom 8\.0\)\.$/);
+});
+
+test("Map tab: Jump here twice after moving the frame goes to the same frame both times", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.preview.zoomBy(2);
+  const frame = context.preview.frameCamera();
+  context.jumpBtn.onClick();
+  const first = context.GeoScene.readCamera(map.cameraId);
+  assert.ok(sameCam(first, frame), "the first Jump goes to the frame");
+  context.jumpBtn.onClick();
+  assert.ok(sameCam(context.GeoScene.readCamera(map.cameraId), first), "the second Jump doesn't move the camera");
+  assert.match(context.statusLabel.getText(), /the preview frame/);
+});
+
+test("Map tab: Jump here and Fly here leave the preview where it is and only move the dashed frame", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const frame = context.preview.frameCamera();
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+  assert.deepEqual(plain(context.preview.frameCamera()), plain(frame), "no recentre after Jump");
+  assert.equal(context.preview.source(), "result", "still following the result");
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1, "the dashed frame shows the camera");
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  const world = context.preview.frameCamera();
+  context.flyFramesField.setValue(5);
+  api.setFrame(0);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to the world view/);
+  assert.deepEqual(plain(context.preview.frameCamera()), plain(world), "no recentre after Fly");
+  assert.equal(context.preview.source(), "world");
+});
+
+test("Map tab: picking a result centres the preview on it; picking World view follows the world view", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  context.resultPicker.setValue(2);
+  context.resultPicker.onValueChanged();
+  let f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS_TX.lat) < 1e-6 && Math.abs(f.lon - PARIS_TX.lon) < 1e-6);
+  assert.equal(context.preview.source(), "result");
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - 20) < 1e-6 && Math.abs(f.lon) < 1e-6);
+  assert.equal(context.preview.source(), "world");
+});
+
+test("Map tab: the preview follows the tab bar's width when the panel is resized", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  assert.equal(typeof ui.onResize, "function");
+  context.sectionTabs.widget._width = 480;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
+  context.sectionTabs.widget._width = 300;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [300, 169]);
+});
+
+test("Map tab: the preview shrinks back when the panel gets narrower", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  context.sectionTabs.widget._width = 480;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
+  context.sectionTabs.widget._width = 260;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [260, 146]);
+});
+
+test("Map tab: Refresh shows the picked map's camera as the dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.GeoScene.createMap("Map", { lat: 35, lon: 139, zoom: 8, rotation: 0, projection: 0 }); // made outside the panel
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 0);
+  context.refreshMapsBtn.onClick();
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
 });

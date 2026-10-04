@@ -9,9 +9,9 @@ const IMAGERY_RUNTIME_FILES = ["src/core/tiles.js"];
 const CORE_FILES = [
   "src/core/projection.js", "src/core/routes.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js",
   "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js",
-  "src/core/update.js"
+  "src/core/update.js", "src/core/preview.js"
 ];
-const CAVALRY_FILES = ["src/cavalry/attrs.js", "src/cavalry/net.js", "src/cavalry/fetch.js", "src/cavalry/scene.js", "src/cavalry/updatecheck.js", "src/cavalry/style.js", "src/cavalry/panel.js"];
+const CAVALRY_FILES = ["src/cavalry/attrs.js", "src/cavalry/net.js", "src/cavalry/fetch.js", "src/cavalry/scene.js", "src/cavalry/updatecheck.js", "src/cavalry/style.js", "src/cavalry/preview.js", "src/cavalry/panel.js"];
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
 
