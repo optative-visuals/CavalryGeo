@@ -25,7 +25,8 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press
   **Search**. The map is made centred on the first result and named after the place (or your
   name). If that name is taken, a number is added. The name and projection fields only show
-  while **New map** is picked.
+  while **New map** is picked. New maps start with **Countries** and **Coastlines** (and the
+  **Ocean** layer) already added; add more on **Layers**.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
   like any layer. The default colours match the preview.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press

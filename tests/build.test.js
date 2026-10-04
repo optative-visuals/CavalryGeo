@@ -310,7 +310,9 @@ function installNe(api) {
   const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
   const layer = { kind: "polygon", features: [{ name: "Here", rings: [sq(-5, 40, 15)] }, { name: "There", rings: [sq(100, -10, 20)] }] };
   const lakes = { kind: "polygon", features: [{ name: "Lake", rings: [sq(0, 45, 3)] }] };
+  const coast = { kind: "line", features: [{ name: "Coast", rings: [[[-5, 40], [10, 40], [10, 55]]] }] };
   ["110m", "50m"].forEach((s) => {
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/coastlines.json`] = JSON.stringify(C.encodeLayer(coast));
     api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/countries.json`] = JSON.stringify(C.encodeLayer(layer));
     api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/lakes.json`] = JSON.stringify(C.encodeLayer(lakes));
   });
@@ -468,12 +470,12 @@ test("Map tab: Search and Fly here buttons share the same fixed width", () => {
 });
 
 test("Map tab: Search with \"New map\" selected creates the map, named from the name field and centred on the first result", () => {
-  const { context } = buildSandbox();
+  const { context } = buildSandbox({ setup: installNe });
   searchFinds(context, [PARIS, PARIS_TX]);
   context.nameField.setText("Trip");
   context.projPicker.setValue(1);
   mapSearch(context, "Paris");
-  assert.equal(context.statusLabel.getText(), "Created map \"Trip\" centred on Paris. 2 result(s): pick one, then Jump here or Fly here.");
+  assert.equal(context.statusLabel.getText(), "Created map \"Trip\" with countries and coastlines, centred on Paris. 2 result(s): pick one, then Jump here or Fly here.");
   assert.deepEqual(plain(context.mapPicker._entries), ["Trip", "New map"]);
   assert.equal(context.mapPicker.getValue(), 0);
   const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
@@ -485,7 +487,7 @@ test("Map tab: Search with \"New map\" selected creates the map, named from the 
 });
 
 test("Map tab: Search names the new map after the place when the name field is blank, made unique", () => {
-  const { context } = buildSandbox();
+  const { context } = buildSandbox({ setup: installNe });
   searchFinds(context, [PARIS]);
   mapSearch(context, "Paris");
   assert.equal(context.currentMap().name, "Paris");
@@ -496,7 +498,40 @@ test("Map tab: Search names the new map after the place when the name field is b
   mapSearch(context, "Paris");
   assert.equal(context.currentMap().name, "Paris 3");
   assert.deepEqual(plain(context.mapPicker._entries).sort(), ["New map", "Paris", "Paris 2", "Paris 3"]);
-  assert.match(context.statusLabel.getText(), /^Created map "Paris 3" centred on Paris\. 1 result\(s\)/);
+  assert.match(context.statusLabel.getText(), /^Created map "Paris 3" with countries and coastlines, centred on Paris\. 1 result\(s\)/);
+});
+
+test("Map tab: Search that creates a map also adds Countries and Coastlines", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const names = api.getChildren(context.currentMap().groupId).map((id) => api.getNiceName(id));
+  assert.ok(names.includes("Paris: Countries"), names.join(", "));
+  assert.ok(names.includes("Paris: Coastlines"), names.join(", "));
+  assert.equal(context.statusLabel.getText(), "Created map \"Paris\" with countries and coastlines, centred on Paris. 1 result(s): pick one, then Jump here or Fly here.");
+});
+
+test("Map tab: Create map here also adds Countries and Coastlines", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  const names = api.getChildren(context.currentMap().groupId).map((id) => api.getNiceName(id));
+  assert.ok(names.includes("Map: Countries"), names.join(", "));
+  assert.ok(names.includes("Map: Coastlines"), names.join(", "));
+  assert.equal(context.statusLabel.getText(), "Created map \"Map\" with countries and coastlines at the preview frame.");
+});
+
+test("Map tab: without bundled data the map is still created and the message says why there are no starter layers", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.equal(context.GeoScene.findMaps().length, 1);
+  assert.match(context.statusLabel.getText(), /^Created map "Paris" centred on Paris\. 1 result\(s\): pick one, then Jump here or Fly here\. \(Countries and coastlines couldn't be added: .+\)$/);
+  context.mapPicker.setValue(context.maps.length);
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  assert.equal(context.GeoScene.findMaps().length, 2);
+  assert.match(context.statusLabel.getText(), /^Created map "Map" at the preview frame\. \(Countries and coastlines couldn't be added: .+\)$/);
 });
 
 test("Map tab: Search with a map selected only finds places", () => {
