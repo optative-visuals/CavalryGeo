@@ -56,7 +56,7 @@ Tested with Cavalry on Windows; macOS hasn't been tried yet.
 
 1. Open the panel in a new scene. On **Map**, type a place — say `Paris` — and press **Search**.
    That makes a map centred on Paris.
-2. On **Layers**, tick **Countries** and **Coastlines** and press **Add layers**.
+2. On **Layers**, turn on **Countries** and **Coastlines** and press **Add layers**.
 3. With the playhead at the start, pick **World view** in the place list on **Map** and press
    **Jump here**, then pick Paris again and press **Fly here**. The camera now flies from the
    world into Paris.

@@ -7,9 +7,9 @@ fixed before release.
 
 ## Map tab
 
-- [ ] 1. The panel opens on the Map section, with section buttons along the top (Map,
-      Layers, Imagery, Extract, Pins, Routes, Data; Map highlighted) and a status line.
-      Clicking a button shows that section and moves the highlight; the button text has
+- [ ] 1. The panel opens on the Map section, with section tabs along the top (Map,
+      Layers, Imagery, Label, Data; Map highlighted) and a status line.
+      Clicking a tab shows that section and moves the highlight; the tab text has
       no extra symbols.
 - [ ] 1b. Narrow the panel until the section buttons don't fit on one row → they wrap onto
       a second row (no scrolling tab strip); widen it again → back to one row.
@@ -23,7 +23,7 @@ fixed before release.
       renaming turned out to be display-only). Pick "New map" again → no error ("New map:
       type a place and press Search to make it."); search the same place → the new map is
       named "… 2". Type a name and search again with "New map" picked → the map takes that name.
-- [ ] 4. Pins tab → the search field and result list already show the Map tab's search →
+- [ ] 4. Label → Pins → the search field and result list already show the Map tab's search →
       **Pin here** → a red dot at the centre of the frame.
 - [ ] 5. Keyframe the camera's zoom from ~16 to ~19 over 50 frames → the pin stays
       centred; change centerLon slightly → the pin moves.
@@ -48,7 +48,7 @@ adding street layers.
       checkbox on, the "© OpenStreetMap contributors" text sits bottom-left and is
       fully inside the frame (not clipped or spilling off the edge), and is readable
       at its font size.
-- [ ] 6d. Add a pin (Pins tab → Pin here) on a map *before* adding any layers, then Add layers (e.g.
+- [ ] 6d. Add a pin (Label → Pins → Pin here) on a map *before* adding any layers, then Add layers (e.g.
       Buildings + Roads) → the pin stays visible on top of the new base layers instead
       of being buried underneath.
 - [ ] 6e. Find a courtyard building (an OSM building with an inner ring, e.g. a large
@@ -76,7 +76,7 @@ adding street layers.
 - [ ] 12. Disconnect the network (optional) and add an uncached street layer → an error
       in the status line, nothing added.
 
-## Extract tab
+## Extract (Layers)
 
 - [ ] 13. World map with Countries → Extract: pick the Countries layer, find "France",
       Extract → an orange France layer appears on top and stays aligned while the
@@ -89,11 +89,11 @@ adding street layers.
       camera no longer moves it.
 - [ ] 16. Bake with a non-map layer selected → a clear error, nothing created.
 
-## Pins tab
+## Label → Pins
 
 - [ ] 16b. Search results come back in English (e.g. "Tokyo, Japan"), so layer names
       show correctly in Cavalry's timeline.
-- [ ] 17. On the Paris map, in the **Pins** tab search "Eiffel Tower", pick the result,
+- [ ] 17. On the Paris map, under **Label → Pins** search "Eiffel Tower", pick the result,
       **Label here** → a text label appears at the tower (zoom the camera out to ~13 to
       see it) and stays there while the camera zooms and pans. **Pin here** puts a pin
       at the same place.
@@ -109,21 +109,21 @@ adding street layers.
 - [ ] 19c. Layers tab → **Clear download cache** → the status line reports how many
       files and how much space were freed; adding a street layer again re-downloads it.
 
-## Routes tab
+## Label → Routes
 
-- [ ] 22. World map (Web Mercator): Routes tab → add London and New York → Create route →
+- [ ] 22. World map (Web Mercator): Label → Routes → add London and New York → Create route →
       an orange arc bowing upward between them; turn on Trim and animate End 0 → 100 →
       it draws from London to New York; leg ends are round.
 - [ ] 23. Keyframe the leg's **lift** 0 → 60 → the arc rises smoothly; the ends stay put.
 - [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the
       globe → it hides behind the globe, and a high arc peeks over the edge.
-- [ ] 25. Journey: Paris, Lyon, Marseille with Pins and Labels on → a "Route: Paris → Lyon →
+- [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops ticked → a "Route: Paris → Lyon →
       Marseille" group with 2 legs, 3 pins, 3 labels; routes stay above map layers after
       Add layers.
 - [ ] 26. Bake a leg → an editable path with the same shape as the current frame (stroke
       style is not copied).
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
-- [ ] 27b. Routes tab: add 3 stops, select #2, **Remove selected** → list renumbers to
+- [ ] 27b. Label → Routes: add 3 stops, select #2, **Remove selected** → list renumbers to
       1. A, 2. C; **Clear** empties it.
 - [ ] 27c. Adding the same place twice in a row is refused (status: "That's already the
       last stop."), and the stop is not added again.
@@ -132,7 +132,7 @@ adding street layers.
 
 - [ ] 28. World map (Equal Earth). Data tab → paste the test sheet link → Load → "6 rows, 3 place(s)
       matched, 0 unmatched"; Place = Code, Value = Population, Year = Year.
-- [ ] 29. Tick Coloured regions + Legend → Add to map → France, Japan and Brazil coloured, every other
+- [ ] 29. Turn on Coloured regions + Legend → Add to map → France, Japan and Brazil coloured, every other
       country light grey; legend bottom-right with "Population", min and max.
 - [ ] 30. Keyframe the regions layer's Year 2000 → 2020 → colours change smoothly; the legend doesn't
       change (auto range covers all years).
@@ -145,7 +145,7 @@ adding street layers.
       in the Unmatched list.
 - [ ] 35. A private (not shared) sheet link → Load → the "Anyone with the link" message.
 - [ ] 36. Regions off, Bubbles + Legend on → the bubble legend shows two reference circles with their values.
-- [ ] 37. With data layers present, the Extract tab's source list doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
+- [ ] 37. With data layers present, the Extract source list (bottom of Layers) doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
 - [ ] 38. A city list (e.g. "Location,Visitors" with Paris, Lyon) with "Look up unmatched names" ticked → bubbles at the cities; Refresh data keeps them.
 - [ ] 39. A World Bank download (API_…csv from data.worldbank.org, hosted at a public link) → Load detects Country Code and the year columns.
 
