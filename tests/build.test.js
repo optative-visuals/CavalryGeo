@@ -217,6 +217,15 @@ function makeFakeUi() {
   Container.prototype.setLayout = function (l) { this._layout = l; };
   Container.prototype.setRadius = function (a, b, c, d) { this._radius = [a, b, c, d]; };
 
+  // Like Cavalry's Draw: paths are recorded; tests fire the mouse callbacks directly.
+  function Draw() { this._paths = []; this._size = [0, 0]; this._redraws = 0; }
+  Draw.prototype.setSize = function (w, h) { this._size = [w, h]; };
+  Draw.prototype.addPath = function (p, paint) { this._paths.push({ path: p, paint: paint }); };
+  Draw.prototype.clearPaths = function () { this._paths = []; };
+  Draw.prototype.redraw = function () { this._redraws++; };
+  Draw.prototype.useHoverEvents = function () {};
+  Container.prototype.geometry = function () { return { x: 0, y: 0, width: this._width || 320, height: 24 }; };
+
   // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
   // with withModal().
 
@@ -226,7 +235,7 @@ function makeFakeUi() {
   ProgressBar.prototype.setMaximum = function (m) { this._max = m; };
 
   // Every Cavalry widget shares these.
-  [Label, Button, LineEdit, DropDown, Checkbox, NumericField, List, ProgressBar, Container].forEach(function (W) {
+  [Label, Button, LineEdit, DropDown, Checkbox, NumericField, List, ProgressBar, Container, Draw].forEach(function (W) {
     W.prototype.setHidden = function (h) { this._hidden = !!h; };
     W.prototype.isHidden = function () { return !!this._hidden; };
     W.prototype.setEnabled = function (e) { this._enabled = !!e; };
@@ -241,7 +250,7 @@ function makeFakeUi() {
   return {
     Label: Label, Button: Button, LineEdit: LineEdit, DropDown: DropDown, Checkbox: Checkbox,
     NumericField: NumericField, List: List, PageView: PageView, FlowLayout: FlowLayout, HLayout: HLayout, VLayout: VLayout,
-    ProgressBar: ProgressBar, Container: Container,
+    ProgressBar: ProgressBar, Container: Container, Draw: Draw,
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
@@ -250,13 +259,11 @@ function makeFakeUi() {
 }
 
 function makeFakeCavalry() {
-  function Path() {
-    this.moveTo = function () {};
-    this.lineTo = function () {};
-    this.close = function () {};
-    this.addEllipse = function () {};
-    this.addText = function () {};
-  }
+  function Path() { this._cmds = []; }
+  ["moveTo", "lineTo", "close", "addEllipse", "addText", "addRect"].forEach(function (m) {
+    Path.prototype[m] = function () { this._cmds.push([m].concat(Array.prototype.slice.call(arguments))); };
+  });
+  Path.prototype.toObject = function () { return { cmds: this._cmds.slice() }; };
   return { Path: Path };
 }
 
@@ -286,6 +293,18 @@ function walkUi(node, fn) {
   (node._items || []).forEach((n) => walkUi(n, fn));
   (node._pages || []).forEach((n) => walkUi(n, fn));
   if (node._layout) walkUi(node._layout, fn);
+}
+
+// Writes small encoded countries/lakes layers where GeoNet.neLayer looks for bundled data.
+function installNe(api) {
+  const C = require("../src/core/codec.js");
+  const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
+  const layer = { kind: "polygon", features: [{ name: "Here", rings: [sq(-5, 40, 15)] }, { name: "There", rings: [sq(100, -10, 20)] }] };
+  const lakes = { kind: "polygon", features: [{ name: "Lake", rings: [sq(0, 45, 3)] }] };
+  ["110m", "50m"].forEach((s) => {
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/countries.json`] = JSON.stringify(C.encodeLayer(layer));
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/lakes.json`] = JSON.stringify(C.encodeLayer(lakes));
+  });
 }
 
 // A world-view map made through the panel's own map-making path (tests that just need a map).
@@ -3038,4 +3057,107 @@ test("GeoStyle.tabBar without ui.Container is a plain HLayout of the buttons, an
   bar.buttons[1].onClick();
   assert.equal(bar.selected(), "Routes");
   assert.deepEqual(plain(picked), ["Routes:1"]);
+});
+
+// ---- Map preview widget ------------------------------------------------------------
+function makePreview(context, opts = {}) {
+  const picks = [];
+  const p = context.GeoPreviewPanel.create(Object.assign({ compSize: () => ({ width: 1920, height: 1080 }), onPick: (i) => picks.push(i), yUp: false, dim: true, redraw: "timer" }, opts));
+  return { p, picks };
+}
+const fills = (draw, color) => draw._paths.filter((x) => x.paint.color === color && !x.paint.stroke);
+const strokes = (draw, color) => draw._paths.filter((x) => x.paint.color === color && x.paint.stroke);
+
+test("preview: draws land as one fill plus one border, the frame, and sizes to 16:9", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p.available(), true);
+  p.setWidth(320);
+  assert.deepEqual(plain(p._draw._size), [320, 180]);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  assert.equal(fills(p._draw, "#4a5a50").length, 1, "one land fill");
+  assert.equal(strokes(p._draw, "#2a3530").length, 1, "one border path");
+  assert.equal(strokes(p._draw, "#33CE70").length, 1, "the green frame");
+  assert.equal(p._draw._background, "#1d2a33");
+  const f = p.frameCamera();
+  assert.ok(Math.abs(f.zoom - 5) < 1e-9 && Math.abs(f.lat - 45) < 1e-9 && Math.abs(f.lon - 2) < 1e-9);
+  assert.equal(p.source(), "camera");
+});
+
+test("preview: dragging pans the map, marks the source as moved, and redraws on the timer", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "result");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  p._draw.onMouseRelease({ x: 140, y: 100 }, "left");
+  assert.ok(p.frameCamera().lon < before.lon, "dragging right moves the frame west");
+  assert.equal(p.source(), null);
+  const redraws = p._draw._redraws;
+  runTimersOnce(api);
+  assert.ok(p._draw._redraws > redraws);
+});
+
+test("preview: y-up Draw coordinates are flipped", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { yUp: true });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 100, y: 130 }); // up the screen in y-up coordinates
+  assert.ok(p.frameCamera().lat < before.lat, "dragging the map up moves the frame south");
+});
+
+test("preview: double-click and +/- zoom; zoom stays within camera 0–18", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9);
+  p.zoomBy(-3);
+  assert.ok(Math.abs(p.frameCamera().zoom - 3) < 1e-9);
+  p.zoomBy(50);
+  assert.ok(Math.abs(p.frameCamera().zoom - 18) < 1e-9);
+});
+
+test("preview: clicking a place dot picks it instead of dragging", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }, { lat: 46, lon: 4, name: "Nearby" }], 0);
+  p._draw.onMousePress({ x: 161, y: 89 }, "left");
+  assert.deepEqual(picks, [0]);
+  p._render();
+  assert.equal(fills(p._draw, "#33CE70").length >= 1, true, "dots drawn");
+});
+
+test("preview: the current camera shows as a dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setCurrentCamera({ lat: 45, lon: 2, zoom: 4 });
+  p._render();
+  assert.equal(strokes(p._draw, "#e6e6e6").length, 1);
+});
+
+test("preview: without ui.Draw, or with the data missing, it says so and is unavailable", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Draw;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const a = context.GeoPreviewPanel.create({ compSize: () => ({ width: 1920, height: 1080 }), onPick() {}, yUp: false, dim: true, redraw: "timer" });
+  assert.equal(a.available(), false);
+  const { context: c2 } = buildSandbox(); // no bundled data installed
+  const { p } = makePreview(c2);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  assert.equal(p.available(), false);
 });
