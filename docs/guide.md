@@ -24,7 +24,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press
   **Search**. The map is made centred on the first result and named after the place (or your
-  name). If that name is taken, a number is added The name and projection fields only show
+  name). If that name is taken, a number is added. The name and projection fields only show
   while **New map** is picked.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole

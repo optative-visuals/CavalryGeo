@@ -8,11 +8,11 @@ fixed before release.
 ## Map tab
 
 - [ ] 1. The panel opens on the Map section, with section tabs along the top (Map,
-      Layers, Imagery, Label, Data; Map highlighted) and a status line.
-      Clicking a tab shows that section and moves the highlight; the tab text has
+      Layers, Imagery, Label, Data; Map selected, lighter than the other tabs) and a status
+      line. Clicking a tab shows that section and moves the selection; the tab text has
       no extra symbols.
-- [ ] 1b. Narrow the panel until the section buttons don't fit on one row → they wrap onto
-      a second row (no scrolling tab strip); widen it again → back to one row.
+- [ ] 1b. Narrow the panel → the tab bar stays on one row and the tab text stays centred
+      (check nothing is clipped at the narrowest width); widen it again.
 - [ ] 2. The Map dropdown shows only "New map", and there is no Create map, Drop pin or
       Centre button. Press Jump here or Fly here → "Pick a map, or search for a place
       first — that creates the map (Map tab)."
@@ -117,9 +117,9 @@ adding street layers.
 - [ ] 23. Keyframe the leg's **lift** 0 → 60 → the arc rises smoothly; the ends stay put.
 - [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the
       globe → it hides behind the globe, and a high arc peeks over the edge.
-- [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops ticked → a "Route: Paris → Lyon →
-      Marseille" group with 2 legs, 3 pins, 3 labels; routes stay above map layers after
-      Add layers.
+- [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops
+      ticked → a "Route: Paris → Lyon → Marseille" group with 2 legs, 3 pins, 3 labels;
+      routes stay above map layers after Add layers.
 - [ ] 26. Bake a leg → an editable path with the same shape as the current frame (stroke
       style is not copied).
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
