@@ -5,7 +5,7 @@
 // lower while dragging), and 50m data is read the first time it's needed.
 var GeoPreviewPanel = (function () {
   var WATER = "#1d2a33", LAND = "#4a5a50", BORDER = "#2a3530", FRAME = "#33CE70", DIM = "#00000059";
-  var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff";
+  var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff", OTHER_NAME = "#a6a6a6";
   var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5;
 
   function create(opts) {
@@ -98,14 +98,28 @@ var GeoPreviewPanel = (function () {
         draw.addPath(dash.toObject(), { color: CAMERA, stroke: true, strokeWidth: 1.2 });
       }
       if (places.length) {
-        var dots = new cavalry.Path();
-        shown().forEach(function (i) { var q = GeoPreview.toPx(view, places[i].lon, places[i].lat); dots.addEllipse(q[0], sy(q[1]), 4, 4); });
-        var dotObj = dots.toObject();
-        draw.addPath(dotObj, { color: DOT });
-        draw.addPath(dotObj, { color: RING, stroke: true, strokeWidth: 1 });
-        if (picked >= 0 && places[picked]) {
-          var q = GeoPreview.toPx(view, places[picked].lon, places[picked].lat), label = new cavalry.Path();
-          label.addText(String(places[picked].name || "").split(",")[0], 11, q[0] + 7, sy(q[1] - 4));
+        var dot = new cavalry.Path(), rings = new cavalry.Path(), names = new cavalry.Path(), label = new cavalry.Path();
+        var hasDot = false, hasRing = false;
+        shown().forEach(function (i) {
+          var q = GeoPreview.toPx(view, places[i].lon, places[i].lat), name = String(places[i].name || "");
+          if (i === picked) {
+            dot.addEllipse(q[0], sy(q[1]), 4, 4);
+            label.addText(name.split(",")[0], 11, q[0] + 7, sy(q[1] - 4));
+            hasDot = true;
+          } else {
+            rings.addEllipse(q[0], sy(q[1]), 3, 3);
+            names.addText(name.split(",").slice(0, 2).join(",").replace(/\s+/g, " ").trim(), 10, q[0] + 7, sy(q[1] - 4));
+            hasRing = true;
+          }
+        });
+        if (hasRing) {
+          draw.addPath(rings.toObject(), { color: DOT, stroke: true, strokeWidth: 1.2 });
+          draw.addPath(names.toObject(), { color: OTHER_NAME });
+        }
+        if (hasDot) {
+          var dotObj = dot.toObject();
+          draw.addPath(dotObj, { color: DOT });
+          draw.addPath(dotObj, { color: RING, stroke: true, strokeWidth: 1 });
           draw.addPath(label.toObject(), { color: NAME });
         }
       }

@@ -3110,7 +3110,8 @@ test("preview: two near-identical places draw one dot, and a click reports the p
   const { p, picks } = makePreview(context);
   p.setWidth(320);
   p.showCamera({ lat: 48.86, lon: 2.35, zoom: 8 }, "result");
-  const ellipses = () => fills(p._draw, "#33CE70").reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "addEllipse").length, 0);
+  const count = (list) => list.reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "addEllipse").length, 0);
+  const ellipses = () => count(fills(p._draw, "#33CE70")) + count(strokes(p._draw, "#33CE70"));
   p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 48.86, lon: 2.35, name: "Paris, Ile-de-France" }], 1);
   p._render();
   assert.equal(ellipses(), 1, "one dot for one place");
@@ -3122,6 +3123,74 @@ test("preview: two near-identical places draw one dot, and a click reports the p
   p.setPlaces([{ lat: 48.8566, lon: 2.3522, name: "Paris" }, { lat: 51.5, lon: -0.12, name: "London" }], 0);
   p._render();
   assert.equal(ellipses(), 2, "far apart places keep both dots");
+});
+
+const ellipseCmds = (list) => list.reduce((a, x) => a.concat(x.path.cmds.filter((c) => c[0] === "addEllipse")), []);
+const textCmds = (list) => list.reduce((a, x) => a.concat(x.path.cmds.filter((c) => c[0] === "addText")), []);
+const PARIS_DOT = { lat: 48.8566, lon: 2.3522, name: "Paris, Ile-de-France, France" };
+const TEXAS_DOT = { lat: 33.66, lon: -95.55, name: "Paris, Texas, United States" };
+
+test("preview: the picked place is a solid dot with a white name, the others are labelled green rings", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], 0);
+  p._render();
+  const solid = fills(p._draw, "#33CE70");
+  assert.equal(solid.length, 1, "one solid green fill");
+  assert.equal(ellipseCmds(solid).length, 1, "only the picked dot");
+  assert.equal(ellipseCmds(solid)[0][3], 4);
+  const rings = strokes(p._draw, "#33CE70").filter((x) => ellipseCmds([x]).length);
+  assert.equal(rings.length, 1, "one hollow ring path");
+  assert.equal(rings[0].paint.strokeWidth, 1.2);
+  assert.equal(ellipseCmds(rings).length, 1);
+  assert.equal(ellipseCmds(rings)[0][3], 3, "ring radius 3");
+  const white = textCmds(fills(p._draw, "#ffffff"));
+  assert.equal(white.length, 1);
+  assert.equal(white[0][1], "Paris");
+  const grey = textCmds(fills(p._draw, "#a6a6a6"));
+  assert.equal(grey.length, 1);
+  assert.equal(grey[0][1], "Paris, Texas");
+  assert.equal(grey[0][2], 10, "grey label is 10 px");
+  // the ring's label sits right of the ring like the picked label does
+  assert.equal(grey[0][3], ellipseCmds(rings)[0][1] + 7);
+  assert.equal(grey[0][4], ellipseCmds(rings)[0][2] - 4);
+});
+
+test("preview: a one-part name gives a one-part grey label", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, { lat: 33.66, lon: -95.55, name: "Texasville" }], 0);
+  p._render();
+  assert.equal(textCmds(fills(p._draw, "#a6a6a6"))[0][1], "Texasville");
+});
+
+test("preview: with nothing picked every place is a green ring", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], -1);
+  p._render();
+  assert.equal(ellipseCmds(fills(p._draw, "#33CE70")).length, 0, "no solid dot");
+  assert.equal(ellipseCmds(strokes(p._draw, "#33CE70")).length, 2, "two rings");
+  assert.equal(textCmds(fills(p._draw, "#ffffff")).length, 0);
+  assert.equal(textCmds(fills(p._draw, "#a6a6a6")).length, 2);
+});
+
+test("preview: clicking a ring picks that place with its own index", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p, picks } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 40, lon: -45, zoom: 1 }, "result");
+  p.setPlaces([PARIS_DOT, TEXAS_DOT], 0);
+  p._render();
+  const ring = ellipseCmds(strokes(p._draw, "#33CE70"))[0];
+  p._draw.onMousePress({ x: ring[1], y: ring[2] }, "left");
+  assert.deepEqual(picks, [1]);
 });
 
 test("preview: dragging pans the map, marks the source as moved, and redraws on the timer", () => {
