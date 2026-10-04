@@ -64,7 +64,7 @@ var framesLabel = new ui.Label("Frames");
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
-  onPick: function (i) { resultPicker.setValue(i + 1); previewFollowPicked(); },
+  onPick: function (i) { if (i < 0 || i >= results.length) return; resultPicker.setValue(i + 1); previewFollowPicked(); },
   yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM, redraw: PREVIEW_REDRAW
 });
 // Centres the preview on the picked result (or the world view) — the preview then "follows" it.
@@ -104,7 +104,8 @@ function refreshNewMapFields() {
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
   [jumpBtn, framesLabel, flyFramesField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
-  if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show);
+  // With the preview gone there is no frame to make a map from; Search still does it.
+  if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
 }
 function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
@@ -175,6 +176,7 @@ searchBtn.onClick = guard(function () {
   var creating = newMapSelected();
   results = GeoNet.search(q);
   refreshResultPicker();
+  previewFollowPicked(); // clears old dots when nothing was found
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
   resultPicker.setValue(1);
   previewFollowPicked();

@@ -147,6 +147,7 @@ var GeoPreviewPanel = (function () {
     p.source = function () { return source; };
     p.zoomBy = guarded(function (steps) { var c = comp(); setView(GeoPreview.zoomAt(view, steps, view.width / 2, view.height / 2, c.width, c.height), null); });
     p._render = guarded(function () { render(); });
+    p._timer = function () { return timer; }; // test hook
 
     if (typeof ui.Draw !== "function" || typeof cavalry === "undefined" || typeof cavalry.Path !== "function") {
       p.layout.add(error);

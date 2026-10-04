@@ -278,8 +278,10 @@ function buildSandbox(options = {}) {
   const context = vm.createContext(sandbox);
   vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
   // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
-  // the timers they cause (downloads, builds, a preview they create), so leave that one out.
-  for (let i = api._timers.length - 1; i >= 0; i--) if (api._timers[i].interval === 40) api._timers.splice(i, 1);
+  // the timers they cause (downloads, builds, a preview they create), so leave that one out
+  // (found by asking the preview for its timer).
+  const own = context.preview && context.preview._timer && context.preview._timer();
+  if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
   return { context: context, api: api, ui: ui };
 }
 
@@ -3321,4 +3323,72 @@ test("Map tab: with the preview unavailable, Jump here and Fly here work as befo
   mapSearch(context, "Paris");
   context.jumpBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+});
+
+test("Map tab: an empty search clears the preview's dots and it follows the World view again", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.preview._render();
+  const withDots = fills(context.preview._draw, "#33CE70").length;
+  assert.ok(withDots > 0, "a result dot is drawn");
+  searchFinds(context, []);
+  mapSearch(context, "Nowhere");
+  context.preview._render();
+  assert.equal(fills(context.preview._draw, "#33CE70").length, 0, "no dots left");
+  assert.equal(context.preview.source(), "world");
+  context.preview._draw.onMousePress({ x: 160, y: 90 }, "left"); // a stale dot would have been clickable
+  assert.equal(context.resultPicker.getValue(), 0);
+});
+
+test("Map tab: clicking a preview dot that is not one of the results is ignored", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const f = context.preview.frameCamera();
+  // two extra dots the results don't have; the second sits at the centre of the view
+  context.preview.setPlaces([{ lat: PARIS.lat, lon: PARIS.lon, name: "a" }, { lat: 0, lon: 0, name: "b" }, { lat: f.lat, lon: f.lon, name: "c" }], 0);
+  context.preview._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.equal(context.resultPicker.getValue(), 1);
+  assert.equal(context.preview.source(), "result");
+  assert.match(context.statusLabel.getText(), /result\(s\)/);
+});
+
+test("Map tab: with New map picked and the preview unavailable, Create map here is hidden", () => {
+  const { context } = buildSandbox();
+  context.preview._render();
+  assert.equal(context.preview.available(), false);
+  context.refreshNewMapFields();
+  assert.equal(context.createHereBtn.isHidden(), true);
+  assert.equal(context.jumpBtn.isHidden(), true);
+});
+
+test("Map tab: Fly here goes to the preview frame once the user has moved it", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
+  context.preview.zoomBy(1);
+  context.flyFramesField.setValue(10);
+  api.setFrame(20);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to the preview frame: frames 20–29\./);
+  api.setFrame(29);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.0") - 10) < 1e-6);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.1") - 20) < 1e-6);
+  assert.ok(Math.abs(api.get(map.cameraId, "array.2") - 7) < 1e-6);
+});
+
+test("Map tab: with the preview unavailable, Fly here still names the picked result", () => {
+  const { context, api } = buildSandbox();
+  context.preview._render();
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.flyFramesField.setValue(10);
+  api.setFrame(20);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
 });
