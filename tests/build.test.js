@@ -2745,3 +2745,69 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
   assert.equal(bar.selected(), "Pins");
   assert.deepEqual(plain(picked), ["Routes:1"], "select() only repaints");
 });
+
+// ---- Restyled sections -------------------------------------------------------------
+test("main actions are green and housekeeping buttons quiet", () => {
+  const { context } = buildSandbox();
+  ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
+    "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"].forEach((n) => assert.equal(context[n]._background, "#33CE70", n));
+  ["clearCacheBtn", "clearTilesBtn"].forEach((n) => {
+    assert.equal(context[n]._background, "#272727", n);
+    assert.equal(context[n]._stroke, false, n);
+  });
+  ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn"]
+    .forEach((n) => assert.equal(context[n]._background, undefined, n + " stays a plain button"));
+});
+
+test("each section has grey headings in order", () => {
+  const { ui } = buildSandbox();
+  const pages = ui._root()._items[1]._pages;
+  const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#8a8a8a" && n._fontSize === 10) out.push(n.getText()); }); return out; };
+  assert.deepEqual(headings(pages[0]), ["SEARCH", "CAMERA"]);
+  assert.deepEqual(headings(pages[1]), ["WORLD · NATURAL EARTH", "STREETS · OPENSTREETMAP", "EXTRACT", "BAKE"]);
+  assert.deepEqual(headings(pages[2]), ["SOURCE", "BUILD"]);
+  assert.deepEqual(headings(pages[3]), ["PLACE", "AT COORDINATES", "STOPS", "STYLE"]);
+  assert.deepEqual(headings(pages[4]), ["SHEET", "COLUMNS", "SHOW", "UNMATCHED ROWS"]);
+});
+
+test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
+  const { context, ui } = buildSandbox();
+  const pages = ui._root()._items[1]._pages;
+  const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && (n._background === "#33CE70" || n._background === "#373737") && n.getText() !== "Layers") out.push(n.getText()); }); return out; };
+  assert.deepEqual(toggleTexts(pages[1]).filter((t) => t !== "Add layers"),
+    ["Countries", "States", "Coastlines", "Lakes", "Rivers", "Cities", "Buildings", "Roads", "Water", "Parks", "Railways"]);
+  assert.deepEqual(toggleTexts(pages[4]).filter((t) => t !== "Add to map"), ["Coloured regions", "Bubbles", "Value labels", "Legend"]);
+  assert.equal(context.regionsCheck.getValue(), true);
+  assert.equal(context.legendCheck.getValue(), true);
+  assert.equal(context.bubblesCheck.getValue(), false);
+  [context.creditCheck, context.lookupCheck, context.pinsAtStops, context.labelsAtStops].forEach((c) => assert.ok(c instanceof ui.Checkbox));
+});
+
+test("Add layers reads the toggles, and asks to turn one on when none are", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.addLayersBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Turn on at least one layer.");
+  context.checks.countries.widget.onClick();
+  assert.equal(context.checks.countries.getValue(), true);
+  // The fake has no bundled Natural Earth files, so loading may fail later on — but not on
+  // the "nothing picked" check: the toggle was read.
+  context.statusLabel.setText("");
+  context.addLayersBtn.onClick();
+  assert.notEqual(context.statusLabel.getText(), "Error: Turn on at least one layer.");
+});
+
+test("Map: the map name and projection only show while \"New map\" is picked", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.nameField.isHidden(), false, "empty scene: New map is picked");
+  assert.equal(context.projPicker.isHidden(), false);
+  createWorldMap(context);
+  assert.equal(context.nameField.isHidden(), true, "a map is picked after making one");
+  assert.equal(context.projPicker.isHidden(), true);
+  context.mapPicker.setValue(1);
+  context.mapPicker.onValueChanged();
+  assert.equal(context.nameField.isHidden(), false);
+  context.mapPicker.setValue(0);
+  context.mapPicker.onValueChanged();
+  assert.equal(context.nameField.isHidden(), true);
+});
