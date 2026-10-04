@@ -277,6 +277,9 @@ function buildSandbox(options = {}) {
   const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
   const context = vm.createContext(sandbox);
   vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
+  // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
+  // the timers they cause (downloads, builds, a preview they create), so leave that one out.
+  for (let i = api._timers.length - 1; i >= 0; i--) if (api._timers[i].interval === 40) api._timers.splice(i, 1);
   return { context: context, api: api, ui: ui };
 }
 
@@ -448,7 +451,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "−", "+", "Jump here", "Fly here", "Create map here"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -2931,7 +2934,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Camera"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -3182,13 +3185,14 @@ test("preview: the redraw timer is tracked by the widget (no isActive), started 
     let starts = 0;
     a.Timer = function (cb) { const t = T(cb); delete t.isActive; const s = t.start; t.start = function () { starts++; s(); }; a._starts = () => starts; return t; };
   } });
+  const startsBefore = api._starts(); // the panel's own preview has already started its timer
   const { p } = makePreview(context);
   p.setWidth(320);
   p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
   p._draw.onMousePress({ x: 100, y: 100 }, "left");
   p._draw.onMouseMove({ x: 110, y: 100 });
   p._draw.onMouseMove({ x: 120, y: 100 });
-  assert.equal(api._starts(), 1, "start() once while running");
+  assert.equal(api._starts() - startsBefore, 1, "start() once while running");
   assert.equal(api._timers.filter((t) => t.active).length, 1);
   const redraws = p._draw._redraws;
   runTimersOnce(api);
@@ -3200,7 +3204,7 @@ test("preview: the redraw timer is tracked by the widget (no isActive), started 
   assert.equal(api._timers.filter((t) => t.active).length, 0, "idle: stopped");
   p.zoomBy(1);
   assert.equal(api._timers.filter((t) => t.active).length, 1, "a change starts it again");
-  assert.equal(api._starts(), 2);
+  assert.equal(api._starts() - startsBefore, 2);
 });
 
 test("preview: an onPick that throws does not take the preview down", () => {
@@ -3240,4 +3244,81 @@ test("preview: a drag that paused before release renders full detail once, not t
     context.__now = realNow;
     vm.runInContext("Date.now = __now", context);
   }
+});
+
+// ---- Preview in the Map tab ----------------------------------------------------------
+function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
+
+test("Map tab: the preview sits between Search and Camera", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const items = context.sectionPages.pages[0]._items;
+  const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
+  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview"), iCamera = texts.indexOf("Camera");
+  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iCamera);
+  assert.ok(mapPageHas(context, context.preview._draw));
+});
+
+test("Map tab: a search centres the preview on the first result and shows the results as dots", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  const f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS.lat) < 1e-6 && Math.abs(f.lon - PARIS.lon) < 1e-6);
+  assert.equal(context.preview.source(), "result");
+});
+
+test("Map tab: picking a map centres the preview on its camera and shows the dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.mapPicker.setValue(0);
+  context.mapPicker.onValueChanged();
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  const f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.zoom - cam.zoom) < 1e-6);
+  assert.equal(context.preview.source(), "camera");
+});
+
+test("Map tab: after moving the preview, Jump here goes to the green frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
+  context.preview.zoomBy(1); // the user moved it: source becomes null
+  context.jumpBtn.onClick();
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  assert.ok(Math.abs(cam.lat - 10) < 1e-6 && Math.abs(cam.lon - 20) < 1e-6 && Math.abs(cam.zoom - 7) < 1e-6);
+  assert.match(context.statusLabel.getText(), /the preview frame/);
+});
+
+test("Map tab: while the preview follows a result, Jump here still names the place", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+});
+
+test("Map tab: Create map here appears only for New map and makes a map at the frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  assert.equal(context.createHereBtn.isHidden(), false, "empty scene: New map");
+  assert.equal(context.jumpBtn.isHidden(), true);
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  const map = context.currentMap(), cam = context.GeoScene.readCamera(map.cameraId);
+  assert.ok(Math.abs(cam.lat - 35) < 1e-6 && Math.abs(cam.lon - 139) < 1e-6 && Math.abs(cam.zoom - 8) < 1e-6);
+  assert.equal(map.name, "Map");
+  assert.equal(context.createHereBtn.isHidden(), true, "a map is picked now");
+  assert.equal(context.jumpBtn.isHidden(), false);
+});
+
+test("Map tab: with the preview unavailable, Jump here and Fly here work as before", () => {
+  const { context } = buildSandbox(); // no bundled data → preview fails on first render
+  context.preview._render();
+  assert.equal(context.preview.available(), false);
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
 });

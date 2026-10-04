@@ -58,6 +58,30 @@ var MAP_ACTION_WIDTH = 84;
 if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_ACTION_WIDTH);
 if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
 
+// The preview: Task 1's Cavalry probe settled these.
+var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
+var framesLabel = new ui.Label("Frames");
+var createHereBtn = GeoStyle.primaryButton("Create map here");
+var preview = GeoPreviewPanel.create({
+  compSize: function () { return GeoScene.compSize(); },
+  onPick: function (i) { resultPicker.setValue(i + 1); previewFollowPicked(); },
+  yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM, redraw: PREVIEW_REDRAW
+});
+// Centres the preview on the picked result (or the world view) — the preview then "follows" it.
+function previewFollowPicked() {
+  if (!preview.available()) return;
+  var cam = resultPicker.getValue() > 0 ? camForResult(selectedResult(), 0) : worldViewCamera(0);
+  preview.setPlaces(results.map(function (r) { return { lat: r.lat, lon: r.lon, name: r.name }; }), resultPicker.getValue() - 1);
+  preview.showCamera(cam, resultPicker.getValue() > 0 ? "result" : "world");
+}
+// Centres the preview on the picked map's camera and shows it as the dashed frame.
+function previewShowMap() {
+  if (!preview.available() || newMapSelected()) { if (preview.available()) preview.setCurrentCamera(null); return; }
+  var cam = GeoScene.readCamera(maps[mapPicker.getValue()].cameraId);
+  preview.setCurrentCamera(cam);
+  preview.showCamera(cam, "camera");
+}
+
 // "New map" is always the last entry, and the one selected when the scene has no maps.
 function refreshMaps(selectCameraId) {
   maps = GeoScene.findMaps();
@@ -67,6 +91,7 @@ function refreshMaps(selectCameraId) {
   mapPicker.addEntry(NEW_MAP);
   mapPicker.setValue(sel);
   refreshNewMapFields();
+  previewShowMap();
 }
 function newMapSelected() {
   var idx = mapPicker.getValue();
@@ -78,6 +103,8 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
+  [jumpBtn, framesLabel, flyFramesField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show);
 }
 function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
@@ -123,8 +150,13 @@ function worldViewCamera(projection) {
   var s = GeoScene.compSize();
   return { lat: 20, lon: 0, zoom: GeoProjection.zoomForBounds(WORLD_VIEW, s.width, s.height), rotation: 0, projection: projection };
 }
-// Where Jump here and Fly here go: the picked place, or the world view for entry 0.
+// Where Jump here and Fly here go: the preview's green frame once the user has moved it;
+// otherwise the picked place, or the world view for entry 0.
 function pickedTarget(projection) {
+  if (preview.available() && preview.source() === null) {
+    var f = preview.frameCamera();
+    return { cam: { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projection }, name: "the preview frame" };
+  }
   if (resultPicker.getValue() > 0) {
     var r = selectedResult();
     return { cam: camForResult(r, projection), name: shortName(r) };
@@ -133,6 +165,7 @@ function pickedTarget(projection) {
 }
 
 refreshResultPicker();
+resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
 refreshMapsBtn.onClick = guard(function () { refreshMaps(); say(maps.length + " map(s) in this composition."); });
 
@@ -144,6 +177,7 @@ searchBtn.onClick = guard(function () {
   refreshResultPicker();
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
   resultPicker.setValue(1);
+  previewFollowPicked();
   prefillPins(q, results);
   if (!creating) { say(results.length + " result(s). Pick one, then Jump here or Fly here."); return; }
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
@@ -154,7 +188,8 @@ searchBtn.onClick = guard(function () {
 jumpBtn.onClick = guard(function () {
   var map = currentMap(), t = pickedTarget(GeoScene.readCamera(map.cameraId).projection);
   GeoScene.setCamera(map.cameraId, { lat: t.cam.lat, lon: t.cam.lon, zoom: t.cam.zoom });
-  say("Camera jumped to " + t.name + (resultPicker.getValue() > 0 ? " (zoom " + t.cam.zoom.toFixed(1) + ")" : "") + ".");
+  say("Camera jumped to " + t.name + (t.name !== "the world view" ? " (zoom " + t.cam.zoom.toFixed(1) + ")" : "") + ".");
+  previewShowMap();
 });
 
 flyBtn.onClick = guard(function () {
@@ -164,12 +199,20 @@ flyBtn.onClick = guard(function () {
   var range = GeoScene.flyCamera(map, pts, frame);
   api.setFrame(frame);
   var msg = "Flight to " + t.name + ": frames " + range.start + "–" + range.end + ".";
-  if (!(resultPicker.getValue() > 0)) msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
+  if (t.name === "the world view") msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
   msg += " Press Build imagery (Imagery tab) for sharp imagery along the way.";
   var compEnd = GeoScene.compFrameRange().end;
   if (range.end > compEnd) msg += " Note: the flight ends after the composition's last frame (" + compEnd + ").";
   say(msg);
   resetImageryPlan();
+  previewShowMap();
+});
+
+createHereBtn.onClick = guard(function () {
+  if (!preview.available()) throw new Error("The map preview isn't available — search for a place to make a map instead.");
+  var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
+  makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
+  say("Created map \"" + name + "\" at the preview frame.");
 });
 
 TAB_BUILDERS.push(function (tabs) {
@@ -179,8 +222,11 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
+    GeoStyle.heading("Preview"),
+    preview.layout,
     GeoStyle.heading("Camera"),
-    row(jumpBtn, new ui.Label("Frames"), flyFramesField, flyBtn)
+    row(jumpBtn, framesLabel, flyFramesField, flyBtn),
+    createHereBtn
   ]));
 });
 
@@ -300,6 +346,7 @@ refreshLayersBtn.onClick = guard(function () { refreshSourceLayers(); say(source
 // Picking "New map" is a normal choice, not an error: it just leaves no map to extract from.
 mapPicker.onValueChanged = guard(function () {
   refreshNewMapFields();
+  previewShowMap();
   if (!newMapSelected()) { refreshSourceLayers(); return; }
   clearSourceLayers();
   say("New map: type a place and press Search to make it.");
@@ -1040,7 +1087,14 @@ function buildUi() {
   root.add(statusLabel);
   ui.add(root);
   ui.show();
+  // The preview follows the panel's width (Cavalry's Draw doesn't stretch by itself).
+  function fitPreview() {
+    try { var g = sectionTabs.widget.geometry(); if (g && g.width > 50) preview.setWidth(g.width); } catch (e) { /* older Cavalry */ }
+  }
+  ui.onResize = fitPreview;
+  fitPreview();
   guard(function () { refreshMaps(); })();
+  guard(function () { previewFollowPicked(); previewShowMap(); })();
   try { GeoUpdateCheck.run(say); } catch (e) { /* the update check never gets in the way */ }
 }
 buildUi();
