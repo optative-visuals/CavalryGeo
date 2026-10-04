@@ -502,7 +502,7 @@ function showLabelPage(name) {
   labelPages.setPage(i);
 }
 TAB_BUILDERS.push(function (tabs) {
-  labelPages = new ui.PageView();
+  labelPages = GeoStyle.pageStack();
   labelPages.add(column([
     GeoStyle.heading("Place"),
     row(pinSearchField, pinSearchBtn),
@@ -529,7 +529,7 @@ TAB_BUILDERS.push(function (tabs) {
   var labelColumn = new ui.VLayout();
   labelColumn.setMargins(0, 0, 0, 0);
   labelColumn.add(labelTabs.widget);
-  labelColumn.add(labelPages);
+  labelColumn.add(labelPages.widget);
   tabs.add("Label", labelColumn);
 });
 
@@ -1016,14 +1016,16 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
-  sectionPages = new ui.PageView();
+  sectionPages = GeoStyle.pageStack();
   sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
   sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
   root.setMargins(4, 4, 4, 4);
   root.add(sectionTabs.widget);
-  root.add(sectionPages);
+  root.add(sectionPages.widget);
+  // The stretch keeps the status line at the bottom when the page is shorter than the window.
+  if (typeof root.addStretch === "function") root.addStretch();
   root.add(statusLabel);
   ui.add(root);
   ui.show();

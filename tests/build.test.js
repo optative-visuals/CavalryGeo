@@ -306,19 +306,23 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   const { ui, context } = buildSandbox();
   const root = ui._root();
   assert.ok(root, "buildUi should have called ui.add(root)");
-  const bar = root._items[0], pages = root._items[1];
+  const bar = root._items[0], pages = context.sectionPages;
   assert.ok(bar instanceof ui.Container, "the tab bar is a rounded box");
   assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"]);
-  assert.ok(pages instanceof ui.PageView);
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
-  assert.equal(root._items[2], context.statusLabel);
+  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom.
+  assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
+  assert.equal(root._stretch, 1);
+  pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout, layout, "page " + i));
+  context.showSection("Imagery");
+  assert.deepEqual(pages.widget._items.map((c) => c.isHidden()), [true, true, false, true, true]);
 });
 
 test("each section page holds its controls: Extract and Bake in Layers, Pins and Routes in Label", () => {
   const { ui, context } = buildSandbox();
-  const pages = ui._root()._items[1]._pages;
+  const pages = context.sectionPages.pages;
   assert.ok(holds(pages[0], context.searchBtn), "Map");
   assert.ok(holds(pages[1], context.addLayersBtn) && holds(pages[1], context.findBtn) && holds(pages[1], context.bakeBtn), "Layers");
   assert.ok(holds(pages[2], context.buildImageryBtn), "Imagery");
@@ -327,8 +331,8 @@ test("each section page holds its controls: Extract and Bake in Layers, Pins and
 });
 
 test("clicking a tab shows its page and selects only that tab", () => {
-  const { ui, context } = buildSandbox();
-  const pages = ui._root()._items[1];
+  const { context } = buildSandbox();
+  const pages = context.sectionPages;
   const imagery = context.sectionTabs.buttons[2];
   imagery.onClick();
   assert.equal(pages.currentPage(), 2);
@@ -338,12 +342,12 @@ test("clicking a tab shows its page and selects only that tab", () => {
 });
 
 test("Label has a Pins / Routes tab bar; old section names still land in the right place", () => {
-  const { ui, context } = buildSandbox();
-  const pages = ui._root()._items[1];
+  const { context } = buildSandbox();
+  const pages = context.sectionPages;
   assert.deepEqual(plain(context.labelTabs.buttons.map((b) => b.getText())), ["Pins", "Routes"]);
   assert.equal(context.labelPages.pageCount(), 2);
-  assert.ok(holds(context.labelPages._pages[0], context.pinHereBtn));
-  assert.ok(holds(context.labelPages._pages[1], context.createRouteBtn));
+  assert.ok(holds(context.labelPages.pages[0], context.pinHereBtn));
+  assert.ok(holds(context.labelPages.pages[1], context.createRouteBtn));
   context.labelTabs.buttons[1].onClick();
   assert.equal(context.labelPages.currentPage(), 1);
   context.showSection("Pins");
@@ -421,7 +425,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.pinBtn, undefined);
   assert.equal(context.centreBtn, undefined);
   const texts = [];
-  (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(ui._root()._items[1]._pages[0]);
+  (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
   assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here"]);
 });
 
@@ -2716,7 +2720,7 @@ test("GeoStyle.toggle is a native button with a tick icon, flips on click and re
   const { context } = buildSandbox({ setup: withIcons });
   const t = context.GeoStyle.toggle("Countries", false), seen = [];
   assert.equal(t.getValue(), false);
-  assert.equal(t.widget.getText(), "Countries");
+  assert.equal(t.widget.getText(), " Countries", "a leading space gives a gap after the icon");
   assert.equal(t.widget._image, ICONS + "toggle-off.png");
   assert.deepEqual(plain(t.widget._imageSize), [16, 16]);
   assert.equal(t.widget._fixedHeight, 26);
@@ -2733,9 +2737,26 @@ test("GeoStyle.toggle is a native button with a tick icon, flips on click and re
   assert.equal(t.getValue(), true);
   assert.equal(t.widget._image, ICONS + "toggle-on.png");
   assert.deepEqual(seen, [true, false], "setValue doesn't fire onValueChanged");
-  assert.equal(t.widget.getText(), "Countries", "the text doesn't change when the icon is there");
+  assert.equal(t.widget.getText(), " Countries", "the text doesn't change when the icon is there");
   assert.equal(t.widget._background, undefined, "never painted, so the native hover stays");
   assert.equal(context.GeoStyle.toggle("Legend", true).widget._image, ICONS + "toggle-on.png");
+});
+
+test("GeoStyle.toggle sets the icon size once, before the first icon, so nothing shifts on the first click", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  withIcons(api);
+  const calls = [];
+  const setImage = ui.Button.prototype.setImage, setImageSize = ui.Button.prototype.setImageSize;
+  ui.Button.prototype.setImage = function (p) { calls.push("image"); setImage.call(this, p); };
+  ui.Button.prototype.setImageSize = function (w, h) { calls.push("size"); setImageSize.call(this, w, h); };
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  calls.length = 0;
+  const t = context.GeoStyle.toggle("Countries", false);
+  assert.deepEqual(plain(t.widget._imageSize), [16, 16], "from creation");
+  t.widget.onClick();
+  t.widget.onClick();
+  assert.deepEqual(calls, ["size", "image", "image", "image"]);
 });
 
 test("GeoStyle.toggle without its icon files shows the state in the text", () => {
@@ -2770,6 +2791,53 @@ test("GeoStyle.toggleGrid lays toggles out in rows of N", () => {
   const grid = context.GeoStyle.toggleGrid(ts, 3);
   assert.ok(grid instanceof ui.VLayout);
   assert.deepEqual(grid._items.map((r) => r._items.map((w) => w.getText())), [["A", "B", "C"], ["D", "E"]]);
+});
+
+test("GeoStyle.pageStack: containers in a VLayout, only the shown page takes space", () => {
+  const { context, ui } = buildSandbox();
+  const stack = context.GeoStyle.pageStack();
+  assert.ok(stack.widget instanceof ui.VLayout);
+  const layouts = [new ui.VLayout(), new ui.VLayout(), new ui.VLayout()];
+  layouts.forEach((l) => stack.add(l));
+  assert.equal(stack.pageCount(), 3);
+  assert.equal(stack.currentPage(), 0);
+  layouts.forEach((l, i) => assert.equal(stack.pages[i], l));
+  assert.equal(stack.widget._items.length, 3);
+  stack.widget._items.forEach((c, i) => {
+    assert.ok(c instanceof ui.Container);
+    assert.equal(c._layout, layouts[i]);
+  });
+  assert.deepEqual(stack.widget._items.map((c) => c.isHidden()), [false, true, true]);
+  stack.setPage(2);
+  assert.equal(stack.currentPage(), 2);
+  assert.deepEqual(stack.widget._items.map((c) => c.isHidden()), [true, true, false]);
+  stack.setPage(7);
+  stack.setPage(-1);
+  assert.equal(stack.currentPage(), 2, "out-of-range pages are ignored");
+  assert.deepEqual(stack.widget._items.map((c) => c.isHidden()), [true, true, false]);
+  stack.setPage(0);
+  assert.deepEqual(stack.widget._items.map((c) => c.isHidden()), [false, true, true]);
+});
+
+test("GeoStyle.pageStack without ui.Container falls back to a real PageView", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const stack = context.GeoStyle.pageStack();
+  assert.ok(stack.widget instanceof ui.PageView);
+  const a = new ui.VLayout(), b = new ui.VLayout();
+  stack.add(a);
+  stack.add(b);
+  assert.equal(stack.pageCount(), 2);
+  assert.equal(stack.pages[0], a);
+  assert.equal(stack.pages[1], b);
+  assert.equal(stack.currentPage(), 0);
+  stack.setPage(1);
+  assert.equal(stack.widget.currentPage(), 1, "setPage reaches the PageView");
+  assert.equal(stack.currentPage(), 1);
+  stack.setPage(5);
+  assert.equal(stack.currentPage(), 1, "out-of-range pages are ignored");
 });
 
 test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter", () => {
@@ -2810,22 +2878,23 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
 });
 
 test("every section page packs its controls at the top; nested layouts get no stretch", () => {
-  const { ui } = buildSandbox();
-  const pages = ui._root()._items[1]._pages;
+  const { ui, context } = buildSandbox();
+  const pages = context.sectionPages.pages;
   assert.equal(pages.length, 5);
   // Label's page is the outer column (tab bar + a PageView of two stretched columns).
   pages.forEach((p, i) => {
     if (i === 3) {
       assert.equal(p._stretch, undefined, "the Label wrapper has none");
-      p._items[1]._pages.forEach((c) => assert.equal(c._stretch, 1));
+      assert.equal(p._items[1], context.labelPages.widget);
+      context.labelPages.pages.forEach((c) => assert.equal(c._stretch, 1));
     } else assert.equal(p._stretch, 1, "page " + i);
   });
   walkUi(pages[1], (n) => { if (n instanceof ui.VLayout && n !== pages[1]) assert.equal(n._stretch, undefined, "toggle grid"); });
 });
 
 test("each section has grey headings in order", () => {
-  const { ui } = buildSandbox();
-  const pages = ui._root()._items[1]._pages;
+  const { context } = buildSandbox();
+  const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#8a8a8a" && n._fontSize === 10) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["SEARCH", "CAMERA"]);
   assert.deepEqual(headings(pages[1]), ["WORLD · NATURAL EARTH", "STREETS · OPENSTREETMAP", "EXTRACT", "BAKE"]);
@@ -2836,11 +2905,11 @@ test("each section has grey headings in order", () => {
 
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
   const { context, ui } = buildSandbox({ setup: withIcons });
-  const pages = ui._root()._items[1]._pages;
+  const pages = context.sectionPages.pages;
   const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && n._image) out.push(n.getText()); }); return out; };
   assert.deepEqual(toggleTexts(pages[1]),
-    ["Countries", "States", "Coastlines", "Lakes", "Rivers", "Cities", "Buildings", "Roads", "Water", "Parks", "Railways"]);
-  assert.deepEqual(toggleTexts(pages[4]), ["Coloured regions", "Bubbles", "Value labels", "Legend"]);
+    [" Countries", " States", " Coastlines", " Lakes", " Rivers", " Cities", " Buildings", " Roads", " Water", " Parks", " Railways"]);
+  assert.deepEqual(toggleTexts(pages[4]), [" Coloured regions", " Bubbles", " Value labels", " Legend"]);
   assert.equal(context.regionsCheck.getValue(), true);
   assert.equal(context.legendCheck.getValue(), true);
   assert.equal(context.bubblesCheck.getValue(), false);

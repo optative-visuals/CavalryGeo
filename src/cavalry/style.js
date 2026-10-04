@@ -4,7 +4,8 @@
 // than Cavalry's default. A native button only shows its hover highlight while it has never had
 // setBackgroundColor called, so only the main actions and the tab bar are painted; toggles show
 // their state with a tick icon instead. Cavalry's ui.SegmentedControl isn't used: it keeps room
-// for an icon left of every label, so the text sits off-centre.
+// for an icon left of every label, so the text sits off-centre. Nor is ui.PageView: it reserves
+// the height of its tallest page for every page, so pageStack() hides the pages it isn't showing.
 var GeoStyle = (function () {
   var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a";
   var BUTTON_HEIGHT = 26, TAB_HEIGHT = 24, ICON_SIZE = 16;
@@ -61,15 +62,16 @@ var GeoStyle = (function () {
   function quietButton(text) { return button(text); }
 
   // A button that stays on or off, read like a checkbox (getValue / setValue). A tick icon shows
-  // the state; without the icon files (or Button.setImage) the text carries a tick instead.
+  // the state; without the icon files (or Button.setImage) the text carries a tick instead. The
+  // icon size is set once, up front, so the button doesn't change size on its first click.
   function toggle(text, on) {
     var t = { widget: button(text), onValueChanged: null }, value = !!on;
+    maybe(t.widget, "setImageSize", ICON_SIZE, ICON_SIZE);
     function paint() {
       var icon = GeoAttrs.ASSETS_DIR() + "/icons/toggle-" + (value ? "on" : "off") + ".png";
       if (typeof t.widget.setImage === "function" && api.filePathExists(icon)) {
         t.widget.setImage(icon);
-        maybe(t.widget, "setImageSize", ICON_SIZE, ICON_SIZE);
-        t.widget.setText(text);
+        t.widget.setText(" " + text); // the space is the gap after the icon
       } else t.widget.setText(value ? "✓ " + text : text);
     }
     t.getValue = function () { return value; };
@@ -90,6 +92,42 @@ var GeoStyle = (function () {
       grid.add(r);
     }
     return grid;
+  }
+
+  // Pages shown one at a time, like ui.PageView, but only as tall as the shown page: each page sits
+  // in a Container that is hidden (and so takes no room) unless it's the current one.
+  function pageStack() {
+    var stack = { pages: [] }, current = 0, view;
+    if (hasContainer()) {
+      view = new ui.VLayout();
+      maybe(view, "setMargins", 0, 0, 0, 0);
+      var boxes = [];
+      stack.add = function (layout) {
+        var box = new ui.Container();
+        box.setLayout(layout);
+        box.setHidden(boxes.length !== current);
+        view.add(box);
+        boxes.push(box);
+        stack.pages.push(layout);
+      };
+      stack.setPage = function (i) {
+        if (i < 0 || i >= boxes.length) return;
+        current = i;
+        boxes.forEach(function (box, n) { box.setHidden(n !== i); });
+      };
+    } else {
+      view = new ui.PageView(); // an older Cavalry without Container: every page as tall as the tallest
+      stack.add = function (layout) { view.add(layout); stack.pages.push(layout); };
+      stack.setPage = function (i) {
+        if (i < 0 || i >= stack.pages.length) return;
+        current = i;
+        view.setPage(i);
+      };
+    }
+    stack.widget = view;
+    stack.currentPage = function () { return current; };
+    stack.pageCount = function () { return stack.pages.length; };
+    return stack;
   }
 
   // Easey-style tabs: borderless buttons in a dark rounded box; the selected one is lighter.
@@ -122,5 +160,5 @@ var GeoStyle = (function () {
   }
 
   return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, color: color, heading: heading, note: note,
-    button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, tabBar: tabBar };
+    button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();
