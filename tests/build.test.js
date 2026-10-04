@@ -432,6 +432,13 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here"]);
 });
 
+test("Map tab: Search and Fly here buttons share the same fixed width", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.searchBtn._fixedWidth, 84);
+  assert.equal(context.flyBtn._fixedWidth, 84);
+  assert.equal(context.searchBtn._fixedWidth, context.flyBtn._fixedWidth);
+});
+
 test("Map tab: Search with \"New map\" selected creates the map, named from the name field and centred on the first result", () => {
   const { context } = buildSandbox();
   searchFinds(context, [PARIS, PARIS_TX]);

@@ -53,6 +53,11 @@ flyFramesField.setType(0);
 flyFramesField.setMin(2);
 var flyBtn = GeoStyle.primaryButton("Fly here");
 
+// Search and Fly here share one width so they line up above each other on the right.
+var MAP_ACTION_WIDTH = 84;
+if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_ACTION_WIDTH);
+if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
+
 // "New map" is always the last entry, and the one selected when the scene has no maps.
 function refreshMaps(selectCameraId) {
   maps = GeoScene.findMaps();
