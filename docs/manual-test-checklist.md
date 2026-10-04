@@ -11,8 +11,9 @@ fixed before release.
       Layers, Imagery, Label, Data; Map selected, lighter than the other tabs) and a status
       line. Clicking a tab shows that section and moves the selection; the tab text has
       no extra symbols. On Layers, clicking a category (Countries, Cities, …) or, on Data,
-      a Show option turns it green; click again → off. Label has a Pins / Routes switch
-      that changes the page.
+      a Show option gives it a green tick; click again → tick gone. Buttons (toggles
+      included) show a hover highlight. Label has a Pins / Routes switch that changes the
+      page.
 - [ ] 1b. Narrow the panel → the tab bar stays on one row and the tab text stays centred
       (check nothing is clipped at the narrowest width); widen it again.
 - [ ] 2. The Map dropdown shows only "New map", and there is no Create map, Drop pin or

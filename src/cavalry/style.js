@@ -1,9 +1,13 @@
 // The panel's look in one place, borrowed from Cavalry and Easey: Cavalry's own greys (from its
-// theme), one green for the main actions, small grey section headings with a thin line, toggle
-// buttons for picking categories, and a segmented tab bar. Cavalry's ui.SegmentedControl isn't
-// used: it keeps room for an icon left of every label, so the text sits off-centre.
+// theme), one deep green for the main actions, small grey section headings with a thin line,
+// toggle buttons for picking categories, and a segmented tab bar. Every button is a little taller
+// than Cavalry's default. A native button only shows its hover highlight while it has never had
+// setBackgroundColor called, so only the main actions and the tab bar are painted; toggles show
+// their state with a tick icon instead. Cavalry's ui.SegmentedControl isn't used: it keeps room
+// for an icon left of every label, so the text sits off-centre.
 var GeoStyle = (function () {
-  var GREEN = "#33CE70", HEADING_GREY = "#8a8a8a";
+  var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a";
+  var BUTTON_HEIGHT = 26, TAB_HEIGHT = 24, ICON_SIZE = 16;
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {
@@ -42,22 +46,32 @@ var GeoStyle = (function () {
     return label;
   }
 
+  // A plain native button, a little taller (it keeps Cavalry's hover highlight).
+  function button(text) {
+    var b = new ui.Button(text);
+    maybe(b, "setFixedHeight", BUTTON_HEIGHT);
+    return b;
+  }
   function primaryButton(text) {
-    var b = new ui.Button(text);
-    b.setBackgroundColor(GREEN);
+    var b = button(text);
+    b.setBackgroundColor(PRIMARY);
     return b;
   }
-  function quietButton(text) {
-    var b = new ui.Button(text);
-    b.setBackgroundColor(color("Window"));
-    maybe(b, "setDrawStroke", false);
-    return b;
-  }
+  // Housekeeping: nothing to paint, so it stays a plain button; the name keeps call sites readable.
+  function quietButton(text) { return button(text); }
 
-  // A button that stays on or off, read like a checkbox (getValue / setValue).
+  // A button that stays on or off, read like a checkbox (getValue / setValue). A tick icon shows
+  // the state; without the icon files (or Button.setImage) the text carries a tick instead.
   function toggle(text, on) {
-    var t = { widget: new ui.Button(text), onValueChanged: null }, value = !!on;
-    function paint() { t.widget.setBackgroundColor(value ? GREEN : color("Base")); }
+    var t = { widget: button(text), onValueChanged: null }, value = !!on;
+    function paint() {
+      var icon = GeoAttrs.ASSETS_DIR() + "/icons/toggle-" + (value ? "on" : "off") + ".png";
+      if (typeof t.widget.setImage === "function" && api.filePathExists(icon)) {
+        t.widget.setImage(icon);
+        maybe(t.widget, "setImageSize", ICON_SIZE, ICON_SIZE);
+        t.widget.setText(text);
+      } else t.widget.setText(value ? "✓ " + text : text);
+    }
     t.getValue = function () { return value; };
     t.setValue = function (v) { value = !!v; paint(); };
     t.widget.onClick = function () {
@@ -90,6 +104,7 @@ var GeoStyle = (function () {
     bar.selected = function () { return current; };
     names.forEach(function (name, i) {
       var b = new ui.Button(name);
+      maybe(b, "setFixedHeight", TAB_HEIGHT);
       maybe(b, "setDrawStroke", false);
       b.onClick = function () { bar.select(name); if (onSelect) onSelect(name, i); };
       bar.buttons.push(b);
@@ -106,6 +121,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, HEADING_GREY: HEADING_GREY, color: color, heading: heading, note: note,
-    primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, tabBar: tabBar };
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, color: color, heading: heading, note: note,
+    button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, tabBar: tabBar };
 })();

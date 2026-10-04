@@ -8,4 +8,5 @@ const scripts = path.join(process.env.APPDATA, "Cavalry", "Scripts");
 if (!fs.existsSync(scripts)) throw new Error("Cavalry Scripts folder not found: " + scripts);
 fs.copyFileSync(path.join(ROOT, "dist", "CavalryGeo.js"), path.join(scripts, "CavalryGeo.js"));
 copyDirSync(path.join(ROOT, "dist", "CavalryGeo_assets", "ne"), path.join(scripts, "CavalryGeo_assets", "ne"));
+copyDirSync(path.join(ROOT, "dist", "CavalryGeo_assets", "icons"), path.join(scripts, "CavalryGeo_assets", "icons"));
 console.log("Installed to " + scripts);

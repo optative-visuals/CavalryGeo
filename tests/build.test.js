@@ -153,6 +153,8 @@ function makeFakeUi() {
   Button.prototype.setText = function (t) { this._text = t; };
   Button.prototype.getText = function () { return this._text; };
   Button.prototype.setDrawStroke = function (s) { this._stroke = !!s; };
+  Button.prototype.setImage = function (p) { this._image = p; };
+  Button.prototype.setImageSize = function (w, h) { this._imageSize = [w, h]; };
 
   function LineEdit() { this._text = ""; }
   LineEdit.prototype.setPlaceholder = function () {};
@@ -197,10 +199,12 @@ function makeFakeUi() {
   function HLayout() { this._items = []; }
   HLayout.prototype.add = function (w) { this._items.push(w); };
   HLayout.prototype.setMargins = function () {};
+  HLayout.prototype.addStretch = function () { this._stretch = (this._stretch || 0) + 1; };
 
   function VLayout() { this._items = []; }
   VLayout.prototype.add = function (w) { this._items.push(w); };
   VLayout.prototype.setMargins = function () {};
+  VLayout.prototype.addStretch = function () { this._stretch = (this._stretch || 0) + 1; };
 
   HLayout.prototype.setSpaceBetween = function (s) { this._spacing = s; };
   VLayout.prototype.setSpaceBetween = function (s) { this._spacing = s; };
@@ -2659,7 +2663,8 @@ test("GeoStyle.color reads Cavalry's theme, with fallbacks when it has none", ()
   ui.getThemeColor = (n) => ({ Base: "#404040" })[n] || "";
   assert.equal(context.GeoStyle.color("Base"), "#404040");
   assert.equal(context.GeoStyle.color("Shadow"), "#1c1c1c", "fallback when the theme returns nothing");
-  assert.equal(context.GeoStyle.GREEN, "#33CE70");
+  assert.equal(context.GeoStyle.GREEN, "#33CE70", "the tick colour");
+  assert.equal(context.GeoStyle.PRIMARY, "#1F8F4E");
 });
 
 test("GeoStyle.heading is a small grey UPPERCASE label followed by a thin line", () => {
@@ -2688,34 +2693,75 @@ test("GeoStyle.heading without ui.Container is just the label", () => {
   assert.equal(h._items[0].getText(), "SEARCH");
 });
 
-test("GeoStyle buttons: green main actions, quiet housekeeping", () => {
+test("GeoStyle buttons: deep green main actions, quiet housekeeping, all 26 tall", () => {
   const { context } = buildSandbox();
   const p = context.GeoStyle.primaryButton("Search");
   assert.equal(p.getText(), "Search");
-  assert.equal(p._background, "#33CE70");
+  assert.equal(p._background, "#1F8F4E");
+  assert.equal(p._fixedHeight, 26);
   const q = context.GeoStyle.quietButton("Clear download cache");
-  assert.equal(q._background, "#272727");
-  assert.equal(q._stroke, false);
+  assert.equal(q._background, undefined, "no background, so the native hover stays");
+  assert.equal(q._stroke, undefined);
+  assert.equal(q._fixedHeight, 26);
+  const b = context.GeoStyle.button("Jump here");
+  assert.equal(b.getText(), "Jump here");
+  assert.equal(b._background, undefined);
+  assert.equal(b._fixedHeight, 26);
 });
 
-test("GeoStyle.toggle flips on click, paints green when on, and reads like a checkbox", () => {
-  const { context } = buildSandbox();
+const ICONS = "C:/fake/AppData/Scripts/CavalryGeo_assets/icons/";
+const withIcons = (api) => { api._files[ICONS + "toggle-on.png"] = "<png>"; api._files[ICONS + "toggle-off.png"] = "<png>"; };
+
+test("GeoStyle.toggle is a native button with a tick icon, flips on click and reads like a checkbox", () => {
+  const { context } = buildSandbox({ setup: withIcons });
   const t = context.GeoStyle.toggle("Countries", false), seen = [];
   assert.equal(t.getValue(), false);
   assert.equal(t.widget.getText(), "Countries");
-  assert.equal(t.widget._background, "#373737");
+  assert.equal(t.widget._image, ICONS + "toggle-off.png");
+  assert.deepEqual(plain(t.widget._imageSize), [16, 16]);
+  assert.equal(t.widget._fixedHeight, 26);
   t.onValueChanged = (v) => seen.push(v);
   t.widget.onClick();
   assert.equal(t.getValue(), true);
-  assert.equal(t.widget._background, "#33CE70");
+  assert.equal(t.widget._image, ICONS + "toggle-on.png");
+  assert.deepEqual(plain(t.widget._imageSize), [16, 16]);
   t.widget.onClick();
   assert.equal(t.getValue(), false);
+  assert.equal(t.widget._image, ICONS + "toggle-off.png");
   assert.deepEqual(seen, [true, false]);
   t.setValue(true);
   assert.equal(t.getValue(), true);
-  assert.equal(t.widget._background, "#33CE70");
+  assert.equal(t.widget._image, ICONS + "toggle-on.png");
   assert.deepEqual(seen, [true, false], "setValue doesn't fire onValueChanged");
-  assert.equal(context.GeoStyle.toggle("Legend", true).widget._background, "#33CE70");
+  assert.equal(t.widget.getText(), "Countries", "the text doesn't change when the icon is there");
+  assert.equal(t.widget._background, undefined, "never painted, so the native hover stays");
+  assert.equal(context.GeoStyle.toggle("Legend", true).widget._image, ICONS + "toggle-on.png");
+});
+
+test("GeoStyle.toggle without its icon files shows the state in the text", () => {
+  const { context } = buildSandbox();
+  const t = context.GeoStyle.toggle("Countries", false);
+  assert.equal(t.widget.getText(), "Countries");
+  assert.equal(t.widget._image, undefined);
+  t.widget.onClick();
+  assert.equal(t.widget.getText(), "✓ Countries");
+  t.widget.onClick();
+  assert.equal(t.widget.getText(), "Countries");
+  assert.equal(context.GeoStyle.toggle("Legend", true).widget.getText(), "✓ Legend");
+  assert.equal(t.widget._background, undefined);
+});
+
+test("GeoStyle.toggle without Button.setImage falls back to the text too", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  withIcons(api);
+  delete ui.Button.prototype.setImage;
+  delete ui.Button.prototype.setImageSize;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const t = context.GeoStyle.toggle("Bubbles", true);
+  assert.equal(t.widget.getText(), "✓ Bubbles");
+  t.setValue(false);
+  assert.equal(t.widget.getText(), "Bubbles");
 });
 
 test("GeoStyle.toggleGrid lays toggles out in rows of N", () => {
@@ -2735,6 +2781,7 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
   assert.deepEqual(plain(bar.widget._radius), [6, 6, 6, 6]);
   assert.deepEqual(plain(bar.buttons.map((b) => b.getText())), ["Pins", "Routes"]);
   bar.buttons.forEach((b) => assert.equal(b._stroke, false));
+  bar.buttons.forEach((b) => assert.equal(b._fixedHeight, 24));
   assert.equal(bar.selected(), "Pins");
   assert.deepEqual(plain(bar.buttons.map((b) => b._background)), ["#373737", "#1c1c1c"]);
   bar.buttons[1].onClick();
@@ -2747,16 +2794,33 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 });
 
 // ---- Restyled sections -------------------------------------------------------------
-test("main actions are green and housekeeping buttons quiet", () => {
+test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
-  ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
-    "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"].forEach((n) => assert.equal(context[n]._background, "#33CE70", n));
-  ["clearCacheBtn", "clearTilesBtn"].forEach((n) => {
-    assert.equal(context[n]._background, "#272727", n);
-    assert.equal(context[n]._stroke, false, n);
+  const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
+    "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
+  const quiet = ["clearCacheBtn", "clearTilesBtn"];
+  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "refreshDataBtn", "imageryAttrBtn"];
+  primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
+  quiet.concat(plainBtns).forEach((n) => {
+    assert.equal(context[n]._background, undefined, n + " keeps the native hover");
+    assert.equal(context[n]._stroke, undefined, n);
   });
-  ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn"]
-    .forEach((n) => assert.equal(context[n]._background, undefined, n + " stays a plain button"));
+  primary.concat(quiet, plainBtns).forEach((n) => assert.equal(context[n]._fixedHeight, 26, n));
+});
+
+test("every section page packs its controls at the top; nested layouts get no stretch", () => {
+  const { ui } = buildSandbox();
+  const pages = ui._root()._items[1]._pages;
+  assert.equal(pages.length, 5);
+  // Label's page is the outer column (tab bar + a PageView of two stretched columns).
+  pages.forEach((p, i) => {
+    if (i === 3) {
+      assert.equal(p._stretch, undefined, "the Label wrapper has none");
+      p._items[1]._pages.forEach((c) => assert.equal(c._stretch, 1));
+    } else assert.equal(p._stretch, 1, "page " + i);
+  });
+  walkUi(pages[1], (n) => { if (n instanceof ui.VLayout && n !== pages[1]) assert.equal(n._stretch, undefined, "toggle grid"); });
 });
 
 test("each section has grey headings in order", () => {
@@ -2771,12 +2835,12 @@ test("each section has grey headings in order", () => {
 });
 
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
-  const { context, ui } = buildSandbox();
+  const { context, ui } = buildSandbox({ setup: withIcons });
   const pages = ui._root()._items[1]._pages;
-  const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && (n._background === "#33CE70" || n._background === "#373737")) out.push(n.getText()); }); return out; };
-  assert.deepEqual(toggleTexts(pages[1]).filter((t) => t !== "Add layers"),
+  const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && n._image) out.push(n.getText()); }); return out; };
+  assert.deepEqual(toggleTexts(pages[1]),
     ["Countries", "States", "Coastlines", "Lakes", "Rivers", "Cities", "Buildings", "Roads", "Water", "Parks", "Railways"]);
-  assert.deepEqual(toggleTexts(pages[4]).filter((t) => t !== "Add to map"), ["Coloured regions", "Bubbles", "Value labels", "Legend"]);
+  assert.deepEqual(toggleTexts(pages[4]), ["Coloured regions", "Bubbles", "Value labels", "Legend"]);
   assert.equal(context.regionsCheck.getValue(), true);
   assert.equal(context.legendCheck.getValue(), true);
   assert.equal(context.bubblesCheck.getValue(), false);

@@ -37,7 +37,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 
 ## Layers
 
-Turn on the categories you want (they turn green) and press **Add layers**.
+Turn on the categories you want (each shows a green tick) and press **Add layers**.
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.

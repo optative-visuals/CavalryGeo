@@ -20,6 +20,7 @@ function column(items) {
   var v = new ui.VLayout();
   v.setMargins(6, 6, 6, 6);
   items.forEach(function (w) { v.add(w); });
+  if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
   return v;
 }
 function row() {
@@ -34,13 +35,13 @@ function row() {
 var NEW_MAP = "New map";
 var maps = [], results = [];
 var mapPicker = new ui.DropDown();
-var refreshMapsBtn = new ui.Button("Refresh");
+var refreshMapsBtn = GeoStyle.button("Refresh");
 var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name)");
 var projPicker = new ui.DropDown(); PROJECTIONS.forEach(function (p) { projPicker.addEntry(p); });
 var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place, e.g. Notre-Dame, Paris");
 var searchBtn = GeoStyle.primaryButton("Search");
 var resultPicker = new ui.DropDown();
-var jumpBtn = new ui.Button("Jump here");
+var jumpBtn = GeoStyle.button("Jump here");
 var flyFramesField = new ui.NumericField(100);
 flyFramesField.setType(0);
 flyFramesField.setMin(2);
@@ -257,13 +258,13 @@ clearCacheBtn.onClick = guard(function () {
 var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
-var refreshLayersBtn = new ui.Button("Refresh");
+var refreshLayersBtn = GeoStyle.button("Refresh");
 var featureQuery = new ui.LineEdit(); featureQuery.setPlaceholder("Name, e.g. France or Rue de Rivoli (blank = all named)");
-var findBtn = new ui.Button("Find");
+var findBtn = GeoStyle.button("Find");
 var featureList = new ui.List();
 featureList.setSelectionMode("extended");
-var extractBtn = new ui.Button("Extract selected");
-var bakeBtn = new ui.Button("Bake selected layers to editable shapes");
+var extractBtn = GeoStyle.button("Extract selected");
+var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
 
 // Extract state (groups/groupsEnc/groupsLayer, and the feature list) is only ever
 // valid for the layer it was built from. Any refresh of the source-layer list -
@@ -397,8 +398,8 @@ var pinHereBtn = GeoStyle.primaryButton("Pin here");
 var labelHereBtn = GeoStyle.primaryButton("Label here");
 var latField = new ui.NumericField(0); latField.setType(1); latField.setMin(-90); latField.setMax(90);
 var lonField = new ui.NumericField(0); lonField.setType(1); lonField.setMin(-180); lonField.setMax(180);
-var pinCoordBtn = new ui.Button("Pin at coordinates");
-var labelCoordBtn = new ui.Button("Label at coordinates");
+var pinCoordBtn = GeoStyle.button("Pin at coordinates");
+var labelCoordBtn = GeoStyle.button("Label at coordinates");
 
 function labelOr(fallback) { return labelText.getText().trim() || fallback; }
 function coordName() { return latField.getValue().toFixed(4) + ", " + lonField.getValue().toFixed(4); }
@@ -444,10 +445,10 @@ var routeResults = [], stops = [];
 var routeSearchField = new ui.LineEdit(); routeSearchField.setPlaceholder("Search a stop, e.g. London");
 var routeSearchBtn = GeoStyle.primaryButton("Search");
 var routeResultPicker = new ui.DropDown();
-var addStopBtn = new ui.Button("Add stop");
+var addStopBtn = GeoStyle.button("Add stop");
 var stopsList = new ui.List(); stopsList.setSelectionMode("extended");
-var removeStopBtn = new ui.Button("Remove selected");
-var clearStopsBtn = new ui.Button("Clear");
+var removeStopBtn = GeoStyle.button("Remove selected");
+var clearStopsBtn = GeoStyle.button("Clear");
 var liftField = new ui.NumericField(30); liftField.setType(1); liftField.setMin(0); liftField.setMax(100);
 var pinsAtStops = new ui.Checkbox(true);
 var labelsAtStops = new ui.Checkbox(false);
@@ -535,7 +536,7 @@ TAB_BUILDERS.push(function (tabs) {
 // ---- Data tab -------------------------------------------------------------------
 var dataLoaded = null; // { url, table, detection }
 var dataLinkField = new ui.LineEdit(); dataLinkField.setPlaceholder("Google Sheet link (shared: Anyone with the link) or CSV link");
-var dataLoadBtn = new ui.Button("Load");
+var dataLoadBtn = GeoStyle.button("Load");
 var placePicker = new ui.DropDown(), valuePicker = new ui.DropDown(), yearPicker = new ui.DropDown();
 var prefixField = new ui.LineEdit(); prefixField.setPlaceholder("Prefix, e.g. $");
 var suffixField = new ui.LineEdit(); suffixField.setPlaceholder("Suffix, e.g. %");
@@ -543,7 +544,7 @@ var regionsCheck = GeoStyle.toggle("Coloured regions", true), bubblesCheck = Geo
 var labelsCheck = GeoStyle.toggle("Value labels", false), legendCheck = GeoStyle.toggle("Legend", true);
 var lookupCheck = new ui.Checkbox(false);
 var addDataBtn = GeoStyle.primaryButton("Add to map");
-var refreshDataBtn = new ui.Button("Refresh data");
+var refreshDataBtn = GeoStyle.button("Refresh data");
 var dataUnmatchedList = new ui.List();
 var NO_YEAR = "(none)", WIDE_YEARS = "(one column per year)";
 
@@ -663,8 +664,8 @@ var stylePicker = new ui.DropDown();
 var customUrlField = new ui.LineEdit(); customUrlField.setPlaceholder("Custom tile link with {z}, {x} and {y}");
 var customAttrField = new ui.LineEdit(); customAttrField.setPlaceholder("Credit for the custom tiles");
 var buildImageryBtn = GeoStyle.primaryButton("Build imagery");
-var cancelImageryBtn = new ui.Button("Cancel");
-var imageryAttrBtn = new ui.Button("Add attribution");
+var cancelImageryBtn = GeoStyle.button("Cancel");
+var imageryAttrBtn = GeoStyle.button("Add attribution");
 var clearTilesBtn = GeoStyle.quietButton("Clear imagery tiles");
 var imageryProgress = new ui.ProgressBar();
 
