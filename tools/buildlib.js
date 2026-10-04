@@ -11,7 +11,7 @@ const CORE_FILES = [
   "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js",
   "src/core/update.js"
 ];
-const CAVALRY_FILES = ["src/cavalry/attrs.js", "src/cavalry/net.js", "src/cavalry/fetch.js", "src/cavalry/scene.js", "src/cavalry/updatecheck.js", "src/cavalry/panel.js"];
+const CAVALRY_FILES = ["src/cavalry/attrs.js", "src/cavalry/net.js", "src/cavalry/fetch.js", "src/cavalry/scene.js", "src/cavalry/updatecheck.js", "src/cavalry/style.js", "src/cavalry/panel.js"];
 
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
 
