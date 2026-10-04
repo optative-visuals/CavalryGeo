@@ -1009,5 +1009,6 @@ function buildUi() {
   ui.add(root);
   ui.show();
   guard(function () { refreshMaps(); })();
+  try { GeoUpdateCheck.run(say); } catch (e) { /* the update check never gets in the way */ }
 }
 buildUi();

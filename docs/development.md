@@ -14,6 +14,8 @@ Needs Node.js 20 or newer; there are no dependencies to install.
   tile maths) and `src/cavalry/` (the Cavalry-specific panel glue).
 - The build step in `tools/buildlib.js` inlines the core modules into the panel and into each map
   layer's expression, so the panel and the layers it creates always share the same code.
+- The build stamps `package.json`'s version into the script (`GEO_VERSION`): the update check
+  compares it with the latest GitHub release, so bump it before packaging a release.
 - Plugin data (bundled Natural Earth files and the download cache) lives in
   `CavalryGeo_assets` inside Cavalry's Scripts folder.
 - `docs/cavalry-api-notes.md` records Cavalry API behaviour confirmed in real Cavalry;

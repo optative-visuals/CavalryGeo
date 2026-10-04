@@ -1,6 +1,6 @@
 // Downloads (Overpass, Nominatim, Natural Earth) and the on-disk cache. Panel-only: uses `api` and `ui`.
 var GeoNet = (function () {
-  var USER_AGENT = "CavalryGeo/0.1 (https://github.com/optative-visuals/CavalryGeo)";
+  var USER_AGENT = "CavalryGeo/" + (typeof GEO_VERSION !== "undefined" ? GEO_VERSION : "dev") + " (https://github.com/optative-visuals/CavalryGeo)";
   var OVERPASS = ["https://overpass-api.de", "https://overpass.kumi.systems"];
   var NOMINATIM = "https://nominatim.openstreetmap.org";
   var GITHUB_RAW = "https://raw.githubusercontent.com";
