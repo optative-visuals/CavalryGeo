@@ -240,13 +240,16 @@ function makeFakeCavalry() {
   return { Path: Path };
 }
 
-function buildSandbox() {
+// options.version: the version stamped into the bundle; options.setup(api): runs before the
+// panel opens (e.g. fakeCurl, or files already on disk).
+function buildSandbox(options = {}) {
   const api = makeFakeApi();
   const ui = makeFakeUi();
   const cavalry = makeFakeCavalry();
+  if (options.setup) options.setup(api);
   const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
   const context = vm.createContext(sandbox);
-  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
   return { context: context, api: api, ui: ui };
 }
 
@@ -2524,4 +2527,84 @@ test("Imagery tab: missing and rejected keys", () => {
   runTimers(api);
   assert.match(context.statusLabel.getText(), /MapTiler rejected your key/);
   assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});
+
+// ---- Update check -------------------------------------------------------------------
+const UPDATE_DIR = "C:/fake/AppData/Scripts/CavalryGeo_assets";
+const SETTINGS = UPDATE_DIR + "/settings.json";
+const REPLY = UPDATE_DIR + "/cache/downloads/latest-release.json";
+const NEWER = "Cavalry Geo v0.5.0 is available (you have v0.4.1). Download: https://github.com/optative-visuals/CavalryGeo/releases/latest";
+function readSettings(api) { return JSON.parse(api._files[SETTINGS] || "{}"); }
+// A panel opened as version 0.4.1 with curl available and `settings` already on disk.
+function openForUpdate(settings) {
+  let curl;
+  const sandbox = buildSandbox({ version: "0.4.1", setup: (api) => {
+    curl = fakeCurl(api);
+    if (settings) api._files[SETTINGS] = JSON.stringify(settings);
+  } });
+  return { ...sandbox, curl };
+}
+
+test("the bundle stamps package.json's version, which the user agent carries", () => {
+  const version = require("../package.json").version;
+  assert.ok(buildPanel().includes("var GEO_VERSION = " + JSON.stringify(version) + ";"));
+  const { context } = buildSandbox({ version: "9.8.7" });
+  assert.match(context.GeoNet.USER_AGENT, /^CavalryGeo\/9\.8\.7 /);
+});
+
+test("update check: asks GitHub in the background once, then tells the user about a newer release", () => {
+  const { context, api, curl } = openForUpdate();
+  assert.equal(curl.calls.length, 1);
+  const args = curl.calls[0].args;
+  assert.equal(args[args.length - 1], "https://api.github.com/repos/optative-visuals/CavalryGeo/releases/latest");
+  assert.equal(args[args.indexOf("-o") + 1], REPLY);
+  assert.ok(readSettings(api).updateCheckedAt > 0, "the check is recorded before the reply comes");
+  runTimersOnce(api);
+  assert.notEqual(context.statusLabel.getText(), NEWER, "nothing until the reply arrives");
+  api._files[REPLY] = JSON.stringify({ tag_name: "v0.5.0", draft: false, prerelease: false });
+  runTimersOnce(api);
+  assert.equal(context.statusLabel.getText(), NEWER);
+  assert.equal(readSettings(api).latestVersion, "0.5.0");
+  assert.equal(api._files[REPLY], undefined, "the reply file is cleaned up");
+  assert.ok(api._timers.every((t) => !t.active));
+});
+
+test("update check: a remembered newer release is shown on open without asking GitHub again", () => {
+  const { context, curl } = openForUpdate({ updateCheckedAt: Date.now() - 3600000, latestVersion: "0.5.0" });
+  assert.equal(curl.calls.length, 0);
+  assert.equal(context.statusLabel.getText(), NEWER);
+});
+
+test("update check: a day later it asks again, and the same answer isn't shown twice", () => {
+  const { context, api, curl } = openForUpdate({ updateCheckedAt: Date.now() - 25 * 3600000, latestVersion: "0.5.0", apiKey: "kept" });
+  assert.equal(curl.calls.length, 1);
+  context.statusLabel.setText("Ready.");
+  api._files[REPLY] = JSON.stringify({ tag_name: "v0.5.0" });
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), "Ready.");
+  assert.equal(readSettings(api).apiKey, "kept", "other settings survive");
+});
+
+test("update check: silent when up to date, switched off, or GitHub never answers", () => {
+  let s = openForUpdate();
+  s.api._files[REPLY] = JSON.stringify({ tag_name: "v0.4.1" });
+  runTimers(s.api);
+  assert.doesNotMatch(s.context.statusLabel.getText(), /available/);
+  assert.equal(readSettings(s.api).latestVersion, "0.4.1");
+
+  s = openForUpdate({ checkForUpdates: false, latestVersion: "0.5.0" });
+  assert.equal(s.curl.calls.length, 0);
+  assert.doesNotMatch(s.context.statusLabel.getText(), /available/);
+
+  s = openForUpdate();
+  runTimers(s.api);
+  assert.ok(s.api._timers.every((t) => !t.active), "it gives up");
+  assert.doesNotMatch(s.context.statusLabel.getText(), /available/);
+  assert.equal(readSettings(s.api).latestVersion, undefined);
+});
+
+test("update check: no curl means no check (opening the panel never waits on the network)", () => {
+  const { context, api } = buildSandbox({ version: "0.4.1" });
+  assert.equal(api._files[SETTINGS], undefined);
+  assert.doesNotMatch(context.statusLabel.getText(), /available/);
 });
