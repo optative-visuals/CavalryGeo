@@ -63,8 +63,9 @@ function newMapSelected() {
 // The map name and projection only matter when Search is about to make a map.
 function refreshNewMapFields() {
   var show = newMapSelected();
-  nameField.setHidden(!show);
-  projPicker.setHidden(!show);
+  // Real Cavalry only documents setHidden on Button, so check before calling it.
+  if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
+  if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
 }
 function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
@@ -518,11 +519,17 @@ TAB_BUILDERS.push(function (tabs) {
     stopsList,
     row(removeStopBtn, clearStopsBtn),
     GeoStyle.heading("Style"),
-    row(new ui.Label("Lift %"), liftField, pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
+    row(new ui.Label("Lift %"), liftField),
+    row(pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
     createRouteBtn
   ]));
   labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
-  tabs.add("Label", column([labelTabs.widget, labelPages]));
+  // No margins here: the page columns already carry theirs.
+  var labelColumn = new ui.VLayout();
+  labelColumn.setMargins(0, 0, 0, 0);
+  labelColumn.add(labelTabs.widget);
+  labelColumn.add(labelPages);
+  tabs.add("Label", labelColumn);
 });
 
 // ---- Data tab -------------------------------------------------------------------

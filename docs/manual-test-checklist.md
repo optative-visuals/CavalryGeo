@@ -10,7 +10,9 @@ fixed before release.
 - [ ] 1. The panel opens on the Map section, with section tabs along the top (Map,
       Layers, Imagery, Label, Data; Map selected, lighter than the other tabs) and a status
       line. Clicking a tab shows that section and moves the selection; the tab text has
-      no extra symbols.
+      no extra symbols. On Layers, clicking a category (Countries, Cities, …) or, on Data,
+      a Show option turns it green; click again → off. Label has a Pins / Routes switch
+      that changes the page.
 - [ ] 1b. Narrow the panel → the tab bar stays on one row and the tab text stays centred
       (check nothing is clipped at the narrowest width); widen it again.
 - [ ] 2. The Map dropdown shows only "New map", and there is no Create map, Drop pin or
@@ -23,6 +25,8 @@ fixed before release.
       renaming turned out to be display-only). Pick "New map" again → no error ("New map:
       type a place and press Search to make it."); search the same place → the new map is
       named "… 2". Type a name and search again with "New map" picked → the map takes that name.
+      The map name and projection fields hide once a map is picked and come back when
+      "New map" is picked.
 - [ ] 4. Label → Pins → the search field and result list already show the Map tab's search →
       **Pin here** → a red dot at the centre of the frame.
 - [ ] 5. Keyframe the camera's zoom from ~16 to ~19 over 50 frames → the pin stays

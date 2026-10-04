@@ -2773,7 +2773,7 @@ test("each section has grey headings in order", () => {
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
   const { context, ui } = buildSandbox();
   const pages = ui._root()._items[1]._pages;
-  const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && (n._background === "#33CE70" || n._background === "#373737") && n.getText() !== "Layers") out.push(n.getText()); }); return out; };
+  const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && (n._background === "#33CE70" || n._background === "#373737")) out.push(n.getText()); }); return out; };
   assert.deepEqual(toggleTexts(pages[1]).filter((t) => t !== "Add layers"),
     ["Countries", "States", "Coastlines", "Lakes", "Rivers", "Cities", "Buildings", "Roads", "Water", "Parks", "Railways"]);
   assert.deepEqual(toggleTexts(pages[4]).filter((t) => t !== "Add to map"), ["Coloured regions", "Bubbles", "Value labels", "Legend"]);
@@ -2810,4 +2810,40 @@ test("Map: the map name and projection only show while \"New map\" is picked", (
   context.mapPicker.setValue(0);
   context.mapPicker.onValueChanged();
   assert.equal(context.nameField.isHidden(), true);
+});
+
+test("Map tab: without setHidden on LineEdit and DropDown, Search with \"New map\" still creates the map", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.LineEdit.prototype.setHidden;
+  delete ui.DropDown.prototype.setHidden;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.ok(!/^Error:/.test(context.statusLabel.getText()), context.statusLabel.getText());
+  assert.deepEqual(plain(context.mapPicker._entries), ["Paris", "New map"]);
+});
+
+test("Pin here and Add stop with no search say where to search", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.pinHereBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Search for a place under Label → Pins first.");
+  context.addStopBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Search for a stop under Label → Routes first.");
+});
+
+test("GeoStyle.tabBar without ui.Container is a plain HLayout of the buttons, and clicking still selects", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const picked = [];
+  const bar = context.GeoStyle.tabBar(["Pins", "Routes"], (name, i) => picked.push(name + ":" + i));
+  assert.ok(bar.widget instanceof ui.HLayout);
+  assert.equal(bar.widget._items.length, 2);
+  bar.buttons.forEach((b, i) => assert.equal(bar.widget._items[i], b));
+  bar.buttons[1].onClick();
+  assert.equal(bar.selected(), "Routes");
+  assert.deepEqual(plain(picked), ["Routes:1"]);
 });
