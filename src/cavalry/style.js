@@ -10,7 +10,7 @@
 // after it, which groups a heading with the controls it introduces.
 var GeoStyle = (function () {
   var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a", HEADING_COLOR = "#a6a6a6";
-  var BUTTON_HEIGHT = 26, TAB_HEIGHT = 24, ICON_SIZE = 16;
+  var BUTTON_HEIGHT = 24, TAB_HEIGHT = 24, ICON_SIZE = 16;
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {

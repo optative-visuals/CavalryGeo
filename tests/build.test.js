@@ -2711,15 +2711,15 @@ test("GeoStyle buttons: deep green main actions, quiet housekeeping, all 26 tall
   const p = context.GeoStyle.primaryButton("Search");
   assert.equal(p.getText(), "Search");
   assert.equal(p._background, "#1F8F4E");
-  assert.equal(p._fixedHeight, 26);
+  assert.equal(p._fixedHeight, 24);
   const q = context.GeoStyle.quietButton("Clear download cache");
   assert.equal(q._background, undefined, "no background, so the native hover stays");
   assert.equal(q._stroke, undefined);
-  assert.equal(q._fixedHeight, 26);
+  assert.equal(q._fixedHeight, 24);
   const b = context.GeoStyle.button("Jump here");
   assert.equal(b.getText(), "Jump here");
   assert.equal(b._background, undefined);
-  assert.equal(b._fixedHeight, 26);
+  assert.equal(b._fixedHeight, 24);
 });
 
 const ICONS = "C:/fake/AppData/Scripts/CavalryGeo_assets/icons/";
@@ -2732,7 +2732,7 @@ test("GeoStyle.toggle is a native button with a tick icon, flips on click and re
   assert.equal(t.widget.getText(), " Countries", "a leading space gives a gap after the icon");
   assert.equal(t.widget._image, ICONS + "toggle-off.png");
   assert.deepEqual(plain(t.widget._imageSize), [16, 16]);
-  assert.equal(t.widget._fixedHeight, 26);
+  assert.equal(t.widget._fixedHeight, 24);
   t.onValueChanged = (v) => seen.push(v);
   t.widget.onClick();
   assert.equal(t.getValue(), true);
@@ -2883,7 +2883,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
     assert.equal(context[n]._background, undefined, n + " keeps the native hover");
     assert.equal(context[n]._stroke, undefined, n);
   });
-  primary.concat(quiet, plainBtns).forEach((n) => assert.equal(context[n]._fixedHeight, 26, n));
+  primary.concat(quiet, plainBtns).forEach((n) => assert.equal(context[n]._fixedHeight, 24, n));
 });
 
 test("every section page packs its controls at the top; nested layouts get no stretch", () => {
