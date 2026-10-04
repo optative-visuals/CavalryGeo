@@ -246,22 +246,7 @@ clearCacheBtn.onClick = guard(function () {
   resetImageryPlan();
 });
 
-TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Layers", column([
-    new ui.Label("World (Natural Earth)"),
-    row(checkRow(NE_CATS[0]), checkRow(NE_CATS[1]), checkRow(NE_CATS[2])),
-    row(checkRow(NE_CATS[3]), checkRow(NE_CATS[4]), checkRow(NE_CATS[5])),
-    scalePicker,
-    new ui.Label("Streets (OpenStreetMap, area = camera view)"),
-    row(checkRow(OSM_CATS[0]), checkRow(OSM_CATS[1]), checkRow(OSM_CATS[2])),
-    row(checkRow(OSM_CATS[3]), checkRow(OSM_CATS[4])),
-    modePicker,
-    row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
-    row(addLayersBtn, clearCacheBtn)
-  ]));
-});
-
-// ---- Extract tab -------------------------------------------------------------
+// ---- Extract and Bake (in the Layers section) ---------------------------------
 var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
@@ -319,7 +304,7 @@ findBtn.onClick = guard(function () {
 });
 
 extractBtn.onClick = guard(function () {
-  if (!groupsLayer) throw new Error("Click Find first (Extract tab).");
+  if (!groupsLayer) throw new Error("Click Find first (Layers tab).");
   var sel = featureList.getSelection();
   if (!sel || !sel.length) throw new Error("Select features in the list first.");
   var map = currentMap();
@@ -353,8 +338,20 @@ bakeBtn.onClick = guard(function () {
   say(msg);
 });
 
+// Layers holds the layer categories, then Extract and Bake.
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Extract", column([
+  tabs.add("Layers", column([
+    new ui.Label("World (Natural Earth)"),
+    row(checkRow(NE_CATS[0]), checkRow(NE_CATS[1]), checkRow(NE_CATS[2])),
+    row(checkRow(NE_CATS[3]), checkRow(NE_CATS[4]), checkRow(NE_CATS[5])),
+    scalePicker,
+    new ui.Label("Streets (OpenStreetMap, area = camera view)"),
+    row(checkRow(OSM_CATS[0]), checkRow(OSM_CATS[1]), checkRow(OSM_CATS[2])),
+    row(checkRow(OSM_CATS[3]), checkRow(OSM_CATS[4])),
+    modePicker,
+    row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
+    row(addLayersBtn, clearCacheBtn),
+    new ui.Label("Extract"),
     row(new ui.Label("From layer"), layerPicker, refreshLayersBtn),
     row(featureQuery, findBtn),
     featureList,
@@ -431,19 +428,6 @@ labelCoordBtn.onClick = guard(function () {
   say("Label \"" + text + "\" added at " + coordName() + ".");
 });
 
-TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Pins", column([
-    new ui.Label("Place"),
-    row(pinSearchField, pinSearchBtn),
-    pinResultPicker,
-    labelText,
-    row(pinHereBtn, labelHereBtn),
-    new ui.Label("Or at coordinates"),
-    row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
-    row(pinCoordBtn, labelCoordBtn)
-  ]));
-});
-
 // ---- Routes tab ---------------------------------------------------------------
 // A flight arc is a route with two stops; a journey has more. One leg layer per pair.
 var routeResults = [], stops = [];
@@ -497,8 +481,28 @@ createRouteBtn.onClick = guard(function () {
   say("Route created: " + r.legs.length + " leg(s). Animate each leg's Trim to draw it on.");
 });
 
+// ---- Label section: Pins and Routes, switched by a small tab bar -----------------
+var LABEL_PAGES = ["Pins", "Routes"];
+var labelTabs = null, labelPages = null;
+function showLabelPage(name) {
+  var i = LABEL_PAGES.indexOf(name);
+  if (i < 0 || !labelPages) return;
+  labelTabs.select(name);
+  labelPages.setPage(i);
+}
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Routes", column([
+  labelPages = new ui.PageView();
+  labelPages.add(column([
+    new ui.Label("Place"),
+    row(pinSearchField, pinSearchBtn),
+    pinResultPicker,
+    labelText,
+    row(pinHereBtn, labelHereBtn),
+    new ui.Label("Or at coordinates"),
+    row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
+    row(pinCoordBtn, labelCoordBtn)
+  ]));
+  labelPages.add(column([
     new ui.Label("Stops"),
     row(routeSearchField, routeSearchBtn),
     row(routeResultPicker, addStopBtn),
@@ -508,6 +512,8 @@ TAB_BUILDERS.push(function (tabs) {
     row(pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
     createRouteBtn
   ]));
+  labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
+  tabs.add("Label", column([labelTabs.widget, labelPages]));
 });
 
 // ---- Data tab -------------------------------------------------------------------
@@ -963,21 +969,18 @@ TAB_BUILDERS.push(function (tabs) {
 
 // ---- Other tabs are appended above this line by later tasks ---------------
 
-// Sections are shown as a row of buttons above one page per section: Cavalry's tab strip
-// scrolls awkwardly in a narrow panel, while the buttons wrap onto a second row. Builders
-// register (name, layout) as before; SECTION_ORDER sets the order (unlisted ones go last).
-var SECTION_ORDER = ["Map", "Layers", "Imagery", "Extract", "Pins", "Routes", "Data"];
-var SECTION_CURRENT = "#2f6f4f";
-var sectionNames = [], sectionButtons = [], sectionPages = null;
-function themeColor(name, fallback) {
-  try { return (typeof ui.getThemeColor === "function" && ui.getThemeColor(name)) || fallback; } catch (e) { return fallback; }
-}
+// Sections: one tab bar above one page per section. Builders register (name, layout);
+// SECTION_ORDER sets the order (unlisted ones go last). The old section names still work in
+// showSection: Extract lives in Layers, Pins and Routes in Label.
+var SECTION_ORDER = ["Map", "Layers", "Imagery", "Label", "Data"];
+var SECTION_ALIASES = { Extract: ["Layers"], Pins: ["Label", "Pins"], Routes: ["Label", "Routes"] };
+var sectionNames = [], sectionTabs = null, sectionPages = null;
 function showSection(name) {
-  var i = sectionNames.indexOf(name);
+  var target = SECTION_ALIASES[name] || [name], i = sectionNames.indexOf(target[0]);
   if (i < 0) return;
+  sectionTabs.select(target[0]);
   sectionPages.setPage(i);
-  var other = themeColor("Mid", "#3a3a3a");
-  sectionButtons.forEach(function (b, j) { b.setBackgroundColor(j === i ? SECTION_CURRENT : other); });
+  if (target[1]) showLabelPage(target[1]);
 }
 
 function buildUi() {
@@ -990,20 +993,13 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
-  var bar = new ui.FlowLayout(4, 4);
-  bar.setMargins(0, 0, 0, 0);
   sectionPages = new ui.PageView();
-  sectionNames.forEach(function (name) {
-    var b = new ui.Button(name);
-    b.onClick = function () { showSection(name); };
-    sectionButtons.push(b);
-    bar.add(b);
-    sectionPages.add(layouts[name]);
-  });
+  sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
+  sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
   root.setMargins(4, 4, 4, 4);
-  root.add(bar);
+  root.add(sectionTabs.widget);
   root.add(sectionPages);
   root.add(statusLabel);
   ui.add(root);

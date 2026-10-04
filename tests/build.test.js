@@ -295,44 +295,65 @@ function useCustomTiles(context) {
   context.customUrlField.setText("https://tiles.example/{z}/{x}/{y}.png");
 }
 
-test("buildPanel() runs against stub ui/api without throwing: section buttons above a page per section", () => {
-  const { ui } = buildSandbox();
+// True when `layout` (or anything under it) holds `widget`.
+function holds(layout, widget) { let found = false; walkUi(layout, (n) => { if (n === widget) found = true; }); return found; }
+
+test("buildPanel() runs against stub ui/api: a five-section tab bar above a page per section", () => {
+  const { ui, context } = buildSandbox();
   const root = ui._root();
   assert.ok(root, "buildUi should have called ui.add(root)");
   const bar = root._items[0], pages = root._items[1];
-  assert.ok(bar instanceof ui.FlowLayout, "the section buttons wrap onto more rows when the panel is narrow");
-  assert.deepEqual(bar._items.map((b) => b.getText()), ["Map", "Layers", "Imagery", "Extract", "Pins", "Routes", "Data"]);
+  assert.ok(bar instanceof ui.Container, "the tab bar is a rounded box");
+  assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"]);
   assert.ok(pages instanceof ui.PageView);
-  assert.equal(pages.pageCount(), 7);
+  assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
-  assert.ok(pages._pages.every((p) => p instanceof ui.VLayout));
-  assert.equal(bar._items[0]._background, "#2f6f4f", "Map starts as the current section");
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(root._items[2], context.statusLabel);
 });
 
-test("clicking a section button shows its page and highlights only that button", () => {
+test("each section page holds its controls: Extract and Bake in Layers, Pins and Routes in Label", () => {
   const { ui, context } = buildSandbox();
-  const bar = ui._root()._items[0], pages = ui._root()._items[1];
-  const imagery = bar._items.find((b) => b.getText() === "Imagery");
+  const pages = ui._root()._items[1]._pages;
+  assert.ok(holds(pages[0], context.searchBtn), "Map");
+  assert.ok(holds(pages[1], context.addLayersBtn) && holds(pages[1], context.findBtn) && holds(pages[1], context.bakeBtn), "Layers");
+  assert.ok(holds(pages[2], context.buildImageryBtn), "Imagery");
+  assert.ok(holds(pages[3], context.pinHereBtn) && holds(pages[3], context.createRouteBtn), "Label");
+  assert.ok(holds(pages[4], context.addDataBtn), "Data");
+});
+
+test("clicking a tab shows its page and selects only that tab", () => {
+  const { ui, context } = buildSandbox();
+  const pages = ui._root()._items[1];
+  const imagery = context.sectionTabs.buttons[2];
   imagery.onClick();
   assert.equal(pages.currentPage(), 2);
-  assert.equal(pages._pages[2]._items.some((row) => (row._items || []).includes(context.buildImageryBtn)), true, "page 2 is the Imagery section");
-  assert.equal(imagery._background, "#2f6f4f");
-  assert.equal(imagery.getText(), "Imagery", "no extra symbols on the current button");
-  bar._items.filter((b) => b !== imagery).forEach((b) => assert.notEqual(b._background, "#2f6f4f", b.getText()));
-  context.showSection("Pins");
-  assert.equal(pages.currentPage(), 4);
-  assert.equal(bar._items[4]._background, "#2f6f4f");
-  assert.notEqual(imagery._background, "#2f6f4f");
+  assert.equal(context.sectionTabs.selected(), "Imagery");
+  assert.equal(imagery._background, "#373737");
+  context.sectionTabs.buttons.filter((b) => b !== imagery).forEach((b) => assert.equal(b._background, "#1c1c1c", b.getText()));
 });
 
-test("the other section buttons use the theme's Mid colour when Cavalry provides one", () => {
-  const api = makeFakeApi(), ui = makeFakeUi();
-  ui.getThemeColor = (name) => ({ Accent1: "#123456", Mid: "#2a2a2a" })[name] || "";
-  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
-  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
-  const bar = ui._root()._items[0];
-  assert.equal(bar._items[0]._background, "#2f6f4f", "a fixed, subtle highlight, not the theme accent");
-  assert.equal(bar._items[1]._background, "#2a2a2a", "the others use the theme's button-ish colour");
+test("Label has a Pins / Routes tab bar; old section names still land in the right place", () => {
+  const { ui, context } = buildSandbox();
+  const pages = ui._root()._items[1];
+  assert.deepEqual(plain(context.labelTabs.buttons.map((b) => b.getText())), ["Pins", "Routes"]);
+  assert.equal(context.labelPages.pageCount(), 2);
+  assert.ok(holds(context.labelPages._pages[0], context.pinHereBtn));
+  assert.ok(holds(context.labelPages._pages[1], context.createRouteBtn));
+  context.labelTabs.buttons[1].onClick();
+  assert.equal(context.labelPages.currentPage(), 1);
+  context.showSection("Pins");
+  assert.equal(pages.currentPage(), 3);
+  assert.equal(context.sectionTabs.selected(), "Label");
+  assert.equal(context.labelPages.currentPage(), 0);
+  assert.equal(context.labelTabs.selected(), "Pins");
+  context.showSection("Routes");
+  assert.equal(context.labelPages.currentPage(), 1);
+  context.showSection("Extract");
+  assert.equal(pages.currentPage(), 1);
+  assert.equal(context.sectionTabs.selected(), "Layers");
+  context.showSection("Nowhere");
+  assert.equal(pages.currentPage(), 1, "unknown names are ignored");
 });
 
 test("every button's onClick can be invoked against an empty scene without an error escaping guard()", () => {
