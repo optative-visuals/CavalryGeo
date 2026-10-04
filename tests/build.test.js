@@ -792,8 +792,10 @@ test("default canvas styles use the preview's palette", () => {
   assert.equal(S.lakes.fill, "#1d2a33");
   assert.equal(S.rivers.stroke, "#3d6178");
   assert.equal(S.label.fill, "#e6e6e6");
-  assert.equal(S.extractFill.fill, "#e4572e", "overlays keep their orange");
-  assert.equal(S.route.stroke, "#e4572e");
+  assert.equal(S.extractFill.fill, "#e4572e", "extracts keep their orange");
+  assert.equal(S.extractLine.stroke, "#e4572e");
+  assert.equal(S.pin.fill, "#1F8F4E", "pins use the panel's green");
+  assert.equal(S.route.stroke, "#1F8F4E", "routes use the panel's green");
 });
 
 test("credit texts are light so they read on the dark map", () => {
@@ -803,6 +805,19 @@ test("credit texts are light so they read on the dark map", () => {
   const img = context.GeoScene.createImageryCredit(map, "Some credit");
   assert.equal(api.get(osm, "material.materialColor"), "#e6e6e6");
   assert.equal(api.get(img, "material.materialColor"), "#e6e6e6");
+});
+
+test("pins, route legs and route stop pins are drawn in the panel's green", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const pin = GeoScene.addPin(map, "Paris", 2.35, 48.85);
+  assert.equal(api.get(pin, "material.materialColor"), "#1F8F4E");
+  const r = GeoScene.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { lift: 30, pins: true, labels: false });
+  r.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.strokeColor"), "#1F8F4E"));
+  const stopPins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
+  assert.equal(stopPins.length, 2);
+  stopPins.forEach((id) => assert.equal(api.get(id, "material.materialColor"), "#1F8F4E"));
 });
 
 test("restackBaseLayers falls back to stepping backward when moveToBack does nothing, and restores the selection", () => {

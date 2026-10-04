@@ -5,15 +5,15 @@ var GeoScene = (function () {
   var OCEAN_NAME = "Ocean";
   var OCEAN_COLOR = "#1d2a33";
   var CREDIT_STYLE = { fill: "#e6e6e6" };
-  // Same palette as the Map tab preview.
+  // Same palette as the Map tab preview; pins and routes use the panel's button green.
   var STYLE = {
     countries: { fill: "#4a5a50", stroke: "#2a3530", width: 1 }, states: { stroke: "#3a4a40", width: 0.5 }, lakes: { fill: "#1d2a33" },
     coastlines: { stroke: "#2a3530", width: 0.5 }, rivers: { stroke: "#3d6178", width: 1.5 }, cities: { fill: "#e6e6e6" },
     buildings: { fill: "#5c6b61" }, water: { fill: "#1d2a33" }, parks: { fill: "#56705a" },
     roads: { stroke: "#8a948e", width: 2 }, railways: { stroke: "#a0a7a3", width: 1.5 },
     extractFill: { fill: "#e4572e" }, extractLine: { stroke: "#e4572e", width: 3 },
-    pin: { fill: "#e4572e" }, label: { fill: "#e6e6e6" },
-    route: { stroke: "#e4572e", width: 3 }
+    pin: { fill: "#1F8F4E" }, label: { fill: "#e6e6e6" },
+    route: { stroke: "#1F8F4E", width: 3 }
   };
 
   function setOne(id, attr, value) { var o = {}; o[attr] = value; api.set(id, o); }
