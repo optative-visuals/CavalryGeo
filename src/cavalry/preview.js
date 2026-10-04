@@ -11,7 +11,7 @@ var GeoPreviewPanel = (function () {
   function create(opts) {
     var p = {}, draw = null, note = null, error = null, controls = null;
     var view = { lat: 20, lon: 0, zoom: 0, width: 320, height: 180 }, source = null, places = [], picked = -1, current = null;
-    var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, failed = false, sized = false;
+    var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, running = false, failed = false, sized = false;
     var levels = {}, lakes = null;
 
     function comp() { return opts.compSize(); }
@@ -25,6 +25,7 @@ var GeoPreviewPanel = (function () {
     p.fail = function (message) {
       failed = true;
       if (timer) timer.stop();
+      running = false;
       error.setText(message);
       [draw, controls && controls.minus, controls && controls.plus, note].forEach(function (w) { if (w && typeof w.setHidden === "function") w.setHidden(true); });
       if (typeof error.setHidden === "function") error.setHidden(false);
@@ -68,6 +69,7 @@ var GeoPreviewPanel = (function () {
 
     function render() {
       var c = comp(), settling = dragging && Date.now() - lastMove < SETTLE_MS, li = GeoPreview.detailFor(view.zoom, settling);
+      if (!settling) dragging = false; // a full-detail render ends the drag's low-detail phase
       draw.clearPaths();
       var land = GeoPreview.project(GeoPreview.visible(level(li), view), view);
       if (land.length) {
@@ -111,6 +113,7 @@ var GeoPreviewPanel = (function () {
         if (dirty) { dirty = false; render(); return; }
         if (dragging && Date.now() - lastMove >= SETTLE_MS) { dragging = false; render(); return; }
         timer.stop();
+        running = false;
       });
     }
     function changed() {
@@ -118,12 +121,15 @@ var GeoPreviewPanel = (function () {
       if (opts.redraw === "release" && drag) return; // redrawn on release
       dirty = true;
       if (!timer) { timer = new api.Timer(new Tick()); timer.setRepeating(true); timer.setInterval(TICK_MS); }
-      if (!timer.isActive || !timer.isActive()) timer.start();
+      if (!running) { running = true; timer.start(); }
     }
+    // The panel's callback may throw; that must not take the preview down with it.
+    function pick(i) { try { opts.onPick(i); } catch (e) { console.log("[CavalryGeo] Map preview: onPick failed: " + (e && e.message ? e.message : e)); } }
     function setView(v, src) { view = v; source = src; changed(); }
 
     p.setWidth = guarded(function (px) {
       px = Math.round(px);
+      if (!(px >= 16)) return; // not laid out yet (width 0): keep the current view
       if (sized && Math.abs(px - view.width) < 2) return;
       var cam = p.frameCamera(), c = comp();
       view = GeoPreview.viewForCamera(cam, c.width, c.height, px, Math.round(px * 9 / 16));
@@ -155,7 +161,7 @@ var GeoPreviewPanel = (function () {
     draw.onMousePress = guarded(function (pos, button) {
       if (button && button !== "left") return;
       var y = sy(pos.y), hit = GeoPreview.hitDot(view, places, pos.x, y, DOT_HIT);
-      if (hit >= 0) { picked = hit; changed(); opts.onPick(hit); return; }
+      if (hit >= 0) { picked = hit; changed(); pick(hit); return; }
       drag = { x: pos.x, y: y };
     });
     draw.onMouseMove = guarded(function (pos) {

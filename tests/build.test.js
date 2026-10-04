@@ -3161,3 +3161,83 @@ test("preview: without ui.Draw, or with the data missing, it says so and is unav
   p._render();
   assert.equal(p.available(), false);
 });
+
+test("preview: setWidth ignores an un-laid-out width of 0 and keeps the view", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(0);
+  p.setWidth(-5);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setWidth(320);
+  const f = p.frameCamera();
+  assert.ok(Number.isFinite(f.lat) && Number.isFinite(f.lon) && Number.isFinite(f.zoom), JSON.stringify(f));
+  assert.ok(Math.abs(f.zoom - 5) < 1e-9 && Math.abs(f.lat - 45) < 1e-9 && Math.abs(f.lon - 2) < 1e-9);
+  assert.deepEqual(plain(p._draw._size), [320, 180]);
+});
+
+test("preview: the redraw timer is tracked by the widget (no isActive), started once and stopped when idle", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    installNe(a);
+    const T = a.Timer;
+    let starts = 0;
+    a.Timer = function (cb) { const t = T(cb); delete t.isActive; const s = t.start; t.start = function () { starts++; s(); }; a._starts = () => starts; return t; };
+  } });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 110, y: 100 });
+  p._draw.onMouseMove({ x: 120, y: 100 });
+  assert.equal(api._starts(), 1, "start() once while running");
+  assert.equal(api._timers.filter((t) => t.active).length, 1);
+  const redraws = p._draw._redraws;
+  runTimersOnce(api);
+  assert.ok(p._draw._redraws > redraws, "rendered");
+  p._draw.onMouseRelease({ x: 120, y: 100 }, "left");
+  runTimersOnce(api);
+  runTimersOnce(api);
+  runTimersOnce(api);
+  assert.equal(api._timers.filter((t) => t.active).length, 0, "idle: stopped");
+  p.zoomBy(1);
+  assert.equal(api._timers.filter((t) => t.active).length, 1, "a change starts it again");
+  assert.equal(api._starts(), 2);
+});
+
+test("preview: an onPick that throws does not take the preview down", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const log = context.console.log;
+  context.console = { log() {} };
+  const { p } = makePreview(context, { onPick() { throw new Error("boom"); } });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  assert.equal(p.available(), true);
+  p._render();
+  assert.equal(p.available(), true);
+});
+
+test("preview: a drag that paused before release renders full detail once, not twice", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  runTimersOnce(api);
+  runTimersOnce(api);
+  const realNow = vm.runInContext("Date.now", context);
+  try {
+    p._draw.onMousePress({ x: 100, y: 100 }, "left");
+    p._draw.onMouseMove({ x: 120, y: 100 });
+    const t0 = realNow();
+    vm.runInContext("Date.now = function () { return " + (t0 + 500) + "; }", context);
+    p._draw.onMouseRelease({ x: 120, y: 100 }, "left");
+    const before = p._draw._redraws;
+    runTimersOnce(api);
+    assert.equal(p._draw._redraws, before + 1, "the release render");
+    runTimersOnce(api);
+    assert.equal(p._draw._redraws, before + 1, "no redundant second render");
+  } finally {
+    context.__now = realNow;
+    vm.runInContext("Date.now = __now", context);
+  }
+});
