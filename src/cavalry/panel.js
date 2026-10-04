@@ -192,8 +192,9 @@ searchBtn.onClick = guard(function () {
   prefillPins(q, results);
   if (!creating) { say(results.length + " result(s). Pick one, then Jump here or Fly here."); return; }
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
-  makeMap(name, camForResult(r, projPicker.getValue()));
-  say("Created map \"" + name + "\" centred on " + shortName(r) + ". " + results.length + " result(s): pick one, then Jump here or Fly here.");
+  var made = makeMap(name, camForResult(r, projPicker.getValue()));
+  var starter = addStarterLayers(made);
+  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines, " : "") + "centred on " + shortName(r) + ". " + results.length + " result(s): pick one, then Jump here or Fly here." + starterNote(starter));
 });
 
 jumpBtn.onClick = guard(function () {
@@ -222,8 +223,9 @@ flyBtn.onClick = guard(function () {
 createHereBtn.onClick = guard(function () {
   if (!preview.available()) throw new Error("The map preview isn't available — search for a place to make a map instead.");
   var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
-  makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
-  say("Created map \"" + name + "\" at the preview frame.");
+  var made = makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
+  var starter = addStarterLayers(made);
+  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines " : "") + "at the preview frame." + starterNote(starter));
 });
 
 TAB_BUILDERS.push(function (tabs) {
@@ -248,6 +250,26 @@ var DRAW_ORDER = ["countries", "states", "lakes", "coastlines", "rivers", "parks
 var NE_SCALES = ["110m", "50m", "10m"];
 var CATEGORY_LABEL = {};
 NE_CATS.concat(OSM_CATS).forEach(function (c) { CATEGORY_LABEL[c[0]] = c[1]; });
+
+// New maps start with Countries and Coastlines (bundled medium detail), made the same way as
+// Add layers makes them. Returns true, or the error message: the map is already made by then.
+function addStarterLayers(map) {
+  try {
+    var fetched = ["countries", "coastlines"].map(function (c) { return { category: c, enc: GeoNet.neLayer(c, "50m") }; });
+    fetched.forEach(function (r) {
+      if (!r.enc.f.length) return;
+      GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
+        { camera: map.cameraId, category: r.category }, GeoScene.STYLE[r.category], {});
+    });
+    GeoScene.restackBaseLayers(map, DRAW_ORDER);
+    return true;
+  } catch (e) {
+    return String(e && e.message ? e.message : e);
+  }
+}
+function starterNote(result) {
+  return result === true ? "" : " (Countries and coastlines couldn't be added: " + result + ")";
+}
 
 // Toggle texts are shorter than the layer names ("States", not "States / provinces").
 var checks = {};

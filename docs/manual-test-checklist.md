@@ -120,7 +120,7 @@ adding street layers.
 ## Label → Routes
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add London and New York → Create route →
-      an orange arc bowing upward between them; turn on Trim and animate End 0 → 100 →
+      a green arc bowing upward between them; turn on Trim and animate End 0 → 100 →
       it draws from London to New York; leg ends are round.
 - [ ] 23. Keyframe the leg's **lift** 0 → 60 → the arc rises smoothly; the ends stay put.
 - [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the

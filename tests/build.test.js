@@ -44,6 +44,8 @@ function makeFakeApi() {
       if (type === "group") ensure(id).hidden = false;
       return id;
     },
+    // Like Cavalry: a primitive shape is a basicShape layer.
+    primitive: function (kind, name) { return this.create("basicShape", name); },
     createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return id; },
     parent: function (id, parentId) {
       if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
@@ -308,7 +310,9 @@ function installNe(api) {
   const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
   const layer = { kind: "polygon", features: [{ name: "Here", rings: [sq(-5, 40, 15)] }, { name: "There", rings: [sq(100, -10, 20)] }] };
   const lakes = { kind: "polygon", features: [{ name: "Lake", rings: [sq(0, 45, 3)] }] };
+  const coast = { kind: "line", features: [{ name: "Coast", rings: [[[-5, 40], [10, 40], [10, 55]]] }] };
   ["110m", "50m"].forEach((s) => {
+    api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/coastlines.json`] = JSON.stringify(C.encodeLayer(coast));
     api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/countries.json`] = JSON.stringify(C.encodeLayer(layer));
     api._files[`C:/fake/AppData/Scripts/CavalryGeo_assets/ne/${s}/lakes.json`] = JSON.stringify(C.encodeLayer(lakes));
   });
@@ -466,12 +470,12 @@ test("Map tab: Search and Fly here buttons share the same fixed width", () => {
 });
 
 test("Map tab: Search with \"New map\" selected creates the map, named from the name field and centred on the first result", () => {
-  const { context } = buildSandbox();
+  const { context } = buildSandbox({ setup: installNe });
   searchFinds(context, [PARIS, PARIS_TX]);
   context.nameField.setText("Trip");
   context.projPicker.setValue(1);
   mapSearch(context, "Paris");
-  assert.equal(context.statusLabel.getText(), "Created map \"Trip\" centred on Paris. 2 result(s): pick one, then Jump here or Fly here.");
+  assert.equal(context.statusLabel.getText(), "Created map \"Trip\" with countries and coastlines, centred on Paris. 2 result(s): pick one, then Jump here or Fly here.");
   assert.deepEqual(plain(context.mapPicker._entries), ["Trip", "New map"]);
   assert.equal(context.mapPicker.getValue(), 0);
   const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
@@ -483,7 +487,7 @@ test("Map tab: Search with \"New map\" selected creates the map, named from the 
 });
 
 test("Map tab: Search names the new map after the place when the name field is blank, made unique", () => {
-  const { context } = buildSandbox();
+  const { context } = buildSandbox({ setup: installNe });
   searchFinds(context, [PARIS]);
   mapSearch(context, "Paris");
   assert.equal(context.currentMap().name, "Paris");
@@ -494,7 +498,40 @@ test("Map tab: Search names the new map after the place when the name field is b
   mapSearch(context, "Paris");
   assert.equal(context.currentMap().name, "Paris 3");
   assert.deepEqual(plain(context.mapPicker._entries).sort(), ["New map", "Paris", "Paris 2", "Paris 3"]);
-  assert.match(context.statusLabel.getText(), /^Created map "Paris 3" centred on Paris\. 1 result\(s\)/);
+  assert.match(context.statusLabel.getText(), /^Created map "Paris 3" with countries and coastlines, centred on Paris\. 1 result\(s\)/);
+});
+
+test("Map tab: Search that creates a map also adds Countries and Coastlines", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const names = api.getChildren(context.currentMap().groupId).map((id) => api.getNiceName(id));
+  assert.ok(names.includes("Paris: Countries"), names.join(", "));
+  assert.ok(names.includes("Paris: Coastlines"), names.join(", "));
+  assert.equal(context.statusLabel.getText(), "Created map \"Paris\" with countries and coastlines, centred on Paris. 1 result(s): pick one, then Jump here or Fly here.");
+});
+
+test("Map tab: Create map here also adds Countries and Coastlines", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  const names = api.getChildren(context.currentMap().groupId).map((id) => api.getNiceName(id));
+  assert.ok(names.includes("Map: Countries"), names.join(", "));
+  assert.ok(names.includes("Map: Coastlines"), names.join(", "));
+  assert.equal(context.statusLabel.getText(), "Created map \"Map\" with countries and coastlines at the preview frame.");
+});
+
+test("Map tab: without bundled data the map is still created and the message says why there are no starter layers", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.equal(context.GeoScene.findMaps().length, 1);
+  assert.match(context.statusLabel.getText(), /^Created map "Paris" centred on Paris\. 1 result\(s\): pick one, then Jump here or Fly here\. \(Countries and coastlines couldn't be added: .+\)$/);
+  context.mapPicker.setValue(context.maps.length);
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  assert.equal(context.GeoScene.findMaps().length, 2);
+  assert.match(context.statusLabel.getText(), /^Created map "Map" at the preview frame\. \(Countries and coastlines couldn't be added: .+\)$/);
 });
 
 test("Map tab: Search with a map selected only finds places", () => {
@@ -621,12 +658,13 @@ test("GeoScene.restackBaseLayers moves base layers to back in draw-order-descend
   api._moveToBackCalls.length = 0;
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
 
-  assert.deepEqual(api._moveToBackCalls, [cities, roads, countries]);
+  assert.deepEqual(api._moveToBackCalls, [cities, roads, countries, oceanOf(api, map)], "base layers back to front, then the Ocean last");
   assert.ok(api._moveToBackCalls.indexOf(pin) < 0, "the pin (an overlay) should never be moved");
   const kids = api.getChildren(map.groupId);
   const pos = (id) => kids.indexOf(id);
   assert.ok(pos(pin) < pos(cities) && pos(cities) < pos(roads) && pos(roads) < pos(countries), "pin on top, then cities, roads, countries at the bottom");
-  assert.equal(pos(countries), kids.length - 1);
+  assert.equal(pos(countries), kids.length - 2, "countries at the bottom, just above the Ocean");
+  assert.equal(pos(oceanOf(api, map)), kids.length - 1, "the Ocean stays under everything");
 });
 
 // F13: adding a base layer after imagery was built must not bury the imagery -
@@ -642,7 +680,7 @@ test("restackBaseLayers keeps imagery at the back of the map group even after a 
   GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], built.groupId, "imagery must still be the last child of the map group");
+  assert.equal(kids[kids.length - 2], built.groupId, "imagery must still sit at the back of the map group, just above the Ocean");
 });
 
 test("GeoScene.restackBaseLayers is a no-op when api.moveToBack is unavailable", () => {
@@ -721,6 +759,119 @@ test("default styles: countries show borders; states are border lines only", () 
   assert.ok(!S.states.fill && S.states.stroke && S.states.width > 0, "states: lines only");
   assert.ok(S.states.width < S.countries.width, "state lines thinner than country borders");
   assert.equal(S.coastlines.width, 0.5, "coastlines default to a fine 0.5 line");
+});
+
+// The canvas uses the Map tab preview's palette, and each new map gets an Ocean layer
+// (the composition background is the only "sea" otherwise).
+function oceanOf(api, map) { return api.getChildren(map.groupId).find((id) => api.getNiceName(id) === "Ocean"); }
+
+test("a new map gets an Ocean rectangle: twice the comp size, slate fill, last child of the group", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const ocean = oceanOf(api, map);
+  assert.ok(ocean, "an Ocean layer exists in the map group");
+  assert.equal(api.getParent(ocean), map.groupId);
+  assert.deepEqual(Array.from(api.get(ocean, "generator.dimensions")), [3840, 2160]);
+  assert.equal(api.get(ocean, "material.materialColor"), "#1d2a33");
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean is at the bottom");
+  assert.deepEqual(Object.keys(plain(map)).sort(), ["cameraId", "groupId", "name"], "createMap still returns just name/cameraId/groupId");
+});
+
+test("createMap skips the Ocean silently when api.primitive is missing", () => {
+  const { context, api } = buildSandbox();
+  delete api.primitive;
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.equal(oceanOf(api, map), undefined);
+  assert.ok(map.groupId && map.cameraId);
+});
+
+test("the Ocean stays the last child after layers are added and restacked", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const ocean = oceanOf(api, map);
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  GeoScene.addPin(map, "Pin", 0, 0);
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  let kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean below the countries after a restack");
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "and after another");
+});
+
+test("imagery is built above the Ocean, which stays at the very bottom", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene, DRAW_ORDER = context.DRAW_ORDER;
+  const map = imageryMap(context, api, 4);
+  const ocean = oceanOf(api, map);
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const built = GeoScene.buildImagery(map, src, {}, GeoScene.planImagery(map, src, {}));
+  let kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean, "Ocean last after the imagery build");
+  assert.equal(kids[kids.length - 2], built.groupId, "imagery sits directly above the Ocean");
+  GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  GeoScene.restackBaseLayers(map, DRAW_ORDER);
+  kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 1], ocean);
+  assert.equal(kids[kids.length - 2], built.groupId);
+});
+
+test("default canvas styles use the preview's palette", () => {
+  const { context } = buildSandbox();
+  const S = context.GeoScene.STYLE;
+  assert.equal(S.countries.fill, "#4a5a50");
+  assert.equal(S.countries.stroke, "#2a3530");
+  assert.equal(S.lakes.fill, "#1d2a33");
+  assert.equal(S.rivers.stroke, "#3d6178");
+  assert.equal(S.label.fill, "#e6e6e6");
+  assert.equal(S.extractFill.fill, "#e4572e", "extracts keep their orange");
+  assert.equal(S.extractLine.stroke, "#e4572e");
+  assert.equal(S.pin.fill, "#1F8F4E", "pins use the panel's green");
+  assert.equal(S.route.stroke, "#1F8F4E", "routes use the panel's green");
+});
+
+test("credit texts are light so they read on the dark map", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const osm = context.GeoScene.createAttribution(map);
+  const img = context.GeoScene.createImageryCredit(map, "Some credit");
+  assert.equal(api.get(osm, "material.materialColor"), "#e6e6e6");
+  assert.equal(api.get(img, "material.materialColor"), "#e6e6e6");
+});
+
+test("pins, route legs and route stop pins are drawn in the panel's green", () => {
+  const { context, api } = buildSandbox();
+  const GeoScene = context.GeoScene;
+  const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const pin = GeoScene.addPin(map, "Paris", 2.35, 48.85);
+  assert.equal(api.get(pin, "material.materialColor"), "#1F8F4E");
+  const r = GeoScene.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { lift: 30, pins: true, labels: false });
+  r.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.strokeColor"), "#1F8F4E"));
+  const stopPins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
+  assert.equal(stopPins.length, 2);
+  stopPins.forEach((id) => assert.equal(api.get(id, "material.materialColor"), "#1F8F4E"));
+});
+
+test("creating a map leaves the user's selection alone, even if Cavalry selects the new Ocean", () => {
+  const { context, api } = buildSandbox();
+  const realPrimitive = api.primitive.bind(api);
+  api.primitive = function (kind, name) { const id = realPrimitive(kind, name); api.select([id]); return id; };
+  api.select(["someone#1"]);
+  context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  assert.deepEqual(Array.from(api.getSelection()), ["someone#1"]);
+});
+
+test("restacking does not touch the Ocean when it is already the last child", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  api._moveToBackCalls.length = 0;
+  api.select(["someone#1"]);
+  context.GeoScene.restackBaseLayers(map, context.DRAW_ORDER);
+  assert.deepEqual(api._moveToBackCalls, [], "no moveToBack when nothing needs moving");
+  assert.deepEqual(Array.from(api.getSelection()), ["someone#1"]);
 });
 
 test("restackBaseLayers falls back to stepping backward when moveToBack does nothing, and restores the selection", () => {
@@ -1248,7 +1399,7 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.equal(r.levels, 1);
   assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], r.groupId, "imagery at the back of the map group");
+  assert.equal(kids[kids.length - 2], r.groupId, "imagery at the back of the map group, above the Ocean");
   const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
   assert.ok(level);
   assert.equal(api.getChildren(level).length, 48);
@@ -1484,7 +1635,7 @@ test("beginImageryBuild adds one tile per zero-budget step and keeps the new gro
   assert.equal(api.get(outer, "hidden"), false, "shown once the build is complete");
   assert.equal(api.getChildren(levelGroup(api, outer, 4)).length, 48);
   const kids = api.getChildren(map.groupId);
-  assert.equal(kids[kids.length - 1], outer, "imagery at the back of the map group");
+  assert.equal(kids[kids.length - 2], outer, "imagery at the back of the map group, above the Ocean");
 });
 
 // Measured in Cavalry: every step that loads an asset costs a ~3.6 s rescan afterwards,
