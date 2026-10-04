@@ -37,7 +37,7 @@ fixed before release.
       the camera moves there. Open the result dropdown → index 0 is "World view"; pick it →
       Jump here → the camera jumps to the world view. A search with no results makes no map.
 - [ ] 5c. Preview: drag at world, country and city zoom (smooth), double-click and + / −
-      zoom, a result dot click picks it, resize the panel (preview follows), Jump / Fly /
+      zoom, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
       Create map here land where the green frame showed.
 
 ## Layers tab

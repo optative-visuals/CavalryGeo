@@ -89,6 +89,28 @@ test("prepare projects once to world units with a bbox per feature", () => {
   near(big.rings[0][0], P.worldX(0)); near(big.rings[0][1], P.worldY(40));
   near(big.bbox.x0, P.worldX(0)); near(big.bbox.x1, P.worldX(10));
   near(big.bbox.y0, P.worldY(50)); near(big.bbox.y1, P.worldY(40));
+  assert.equal(big.ringBoxes.length, 1);
+  assert.deepEqual(big.ringBoxes[0], big.bbox);
+});
+
+const TWO_RINGS = { features: [{ name: "Split", rings: [square(0, 40, 10), square(-120, -40, 10), square(5, 45, 0.001)] }] };
+
+test("prepare gives each ring its own bbox; the feature bbox covers them all", () => {
+  const f = P.prepare(TWO_RINGS).features[0];
+  assert.equal(f.ringBoxes.length, 3);
+  near(f.ringBoxes[0].x0, P.worldX(0)); near(f.ringBoxes[0].x1, P.worldX(10));
+  near(f.ringBoxes[1].x0, P.worldX(-120)); near(f.ringBoxes[1].y1, P.worldY(-40));
+  near(f.bbox.x0, P.worldX(-120)); near(f.bbox.x1, P.worldX(10));
+  near(f.bbox.y0, P.worldY(50)); near(f.bbox.y1, P.worldY(-40));
+});
+
+test("project skips a feature's rings that are off the view or under 2 px", () => {
+  const p = P.prepare(TWO_RINGS), v = { lat: 45, lon: 5, zoom: 3, width: 320, height: 180 };
+  assert.equal(P.visible(p, v).length, 1, "the feature itself is on screen");
+  const px = P.project(P.visible(p, v), v);
+  assert.equal(px.length, 1, "only the in-view ring");
+  const first = P.toPx(v, 0, 40);
+  near(px[0][0], first[0], 1e-6); near(px[0][1], first[1], 1e-6);
 });
 
 test("visible skips features out of view and ones under 2 px", () => {
@@ -114,6 +136,16 @@ test("simplify drops points within tolerance and keeps rings closed; collapsed r
   assert.ok(r.length / 2 < wiggly.length / 2, "fewer points");
   assert.equal(r[0], r[r.length - 2]); assert.equal(r[1], r[r.length - 1]);
   assert.equal(s.features.length, 1, "a ring that collapses below 4 points is dropped with its feature");
+  assert.equal(s.features[0].ringBoxes.length, 1);
+});
+
+test("simplify keeps the bbox of each surviving ring, in step with the rings", () => {
+  const p = P.prepare({ features: [{ name: "M", rings: [square(1, 1, 0.00001), square(0, 40, 10), square(-120, -40, 10)] }] });
+  const f = P.simplify(p, 0.01).features[0];
+  assert.equal(f.rings.length, 2, "the collapsed ring goes");
+  assert.equal(f.ringBoxes.length, 2);
+  near(f.ringBoxes[0].x0, P.worldX(0)); near(f.ringBoxes[1].x0, P.worldX(-120));
+  assert.deepEqual(f.bbox, p.features[0].bbox);
 });
 
 test("hitDot finds the nearest place within the radius", () => {

@@ -67,17 +67,22 @@ var GeoPreview = (function () {
     return dragging ? Math.max(0, level - 1) : level;
   }
 
-  function bboxOf(rings) {
+  function ringBox(r) {
     var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-    rings.forEach(function (r) {
-      for (var i = 0; i < r.length; i += 2) {
-        if (r[i] < b.x0) b.x0 = r[i]; if (r[i] > b.x1) b.x1 = r[i];
-        if (r[i + 1] < b.y0) b.y0 = r[i + 1]; if (r[i + 1] > b.y1) b.y1 = r[i + 1];
-      }
-    });
+    for (var i = 0; i < r.length; i += 2) {
+      if (r[i] < b.x0) b.x0 = r[i]; if (r[i] > b.x1) b.x1 = r[i];
+      if (r[i + 1] < b.y0) b.y0 = r[i + 1]; if (r[i + 1] > b.y1) b.y1 = r[i + 1];
+    }
+    return b;
+  }
+  function unionBox(boxes) {
+    var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    boxes.forEach(function (r) { b.x0 = Math.min(b.x0, r.x0); b.y0 = Math.min(b.y0, r.y0); b.x1 = Math.max(b.x1, r.x1); b.y1 = Math.max(b.y1, r.y1); });
     return b;
   }
   // Projects every point once, to flat [x0, y0, x1, y1, ...] rings in zoom-0 world units.
+  // Each feature keeps its bbox (the coarse cull) and one per ring (ringBoxes[i] for rings[i]),
+  // so a big country with one island on screen draws only that island.
   function prepare(layer) {
     return { features: layer.features.map(function (f) {
       var rings = f.rings.map(function (ring) {
@@ -85,7 +90,8 @@ var GeoPreview = (function () {
         for (var i = 0; i < ring.length; i++) { a[2 * i] = worldX(ring[i][0]); a[2 * i + 1] = worldY(ring[i][1]); }
         return a;
       });
-      return { name: f.name, rings: rings, bbox: bboxOf(rings) };
+      var boxes = rings.map(ringBox);
+      return { name: f.name, rings: rings, bbox: unionBox(boxes), ringBoxes: boxes };
     }) };
   }
 
@@ -115,25 +121,36 @@ var GeoPreview = (function () {
     if (!tolerance) return prepared;
     var features = [];
     prepared.features.forEach(function (f) {
-      var rings = f.rings.map(function (r) { return simplifyRing(r, tolerance); }).filter(function (r) { return r.length >= 8; });
-      if (rings.length) features.push({ name: f.name, rings: rings, bbox: f.bbox });
+      // A simplified ring stays inside its original bbox, so the surviving rings keep theirs.
+      var rings = [], boxes = [];
+      f.rings.forEach(function (r, i) {
+        var s = simplifyRing(r, tolerance);
+        if (s.length >= 8) { rings.push(s); boxes.push(f.ringBoxes[i]); }
+      });
+      if (rings.length) features.push({ name: f.name, rings: rings, bbox: f.bbox, ringBoxes: boxes });
     });
     return { features: features };
   }
 
-  function visible(prepared, view) {
+  // A test for boxes in world units: on the view and at least 2 px wide or tall.
+  function shows(view) {
     var s = scale(view), cx = worldX(view.lon), cy = worldY(view.lat);
     var x0 = cx - view.width / 2 / s, x1 = cx + view.width / 2 / s, y0 = cy - view.height / 2 / s, y1 = cy + view.height / 2 / s;
-    return prepared.features.filter(function (f) {
-      var b = f.bbox;
+    return function (b) {
       if (b.x1 < x0 || b.x0 > x1 || b.y1 < y0 || b.y0 > y1) return false;
       return (b.x1 - b.x0) * s >= MIN_FEATURE_PX || (b.y1 - b.y0) * s >= MIN_FEATURE_PX;
-    });
+    };
+  }
+  // The coarse cull: features with any part on screen. project() then culls their rings.
+  function visible(prepared, view) {
+    var ok = shows(view);
+    return prepared.features.filter(function (f) { return ok(f.bbox); });
   }
   function project(features, view) {
-    var s = scale(view), ox = worldX(view.lon) - view.width / 2 / s, oy = worldY(view.lat) - view.height / 2 / s, out = [];
+    var s = scale(view), ox = worldX(view.lon) - view.width / 2 / s, oy = worldY(view.lat) - view.height / 2 / s, out = [], ok = shows(view);
     features.forEach(function (f) {
-      f.rings.forEach(function (r) {
+      f.rings.forEach(function (r, k) {
+        if (f.ringBoxes && !ok(f.ringBoxes[k])) return;
         var p = new Array(r.length);
         for (var i = 0; i < r.length; i += 2) { p[i] = (r[i] - ox) * s; p[i + 1] = (r[i + 1] - oy) * s; }
         out.push(p);

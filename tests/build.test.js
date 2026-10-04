@@ -555,6 +555,7 @@ test("Fly to keys the camera from the current frame to the selected place", () =
   context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
   context.refreshResultPicker();
   context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged(); // the preview follows the pick, so Fly here goes there
   context.flyFramesField.setValue(10);
   api.setFrame(20);
   context.flyBtn.onClick();
@@ -573,6 +574,7 @@ test("Fly to the world view", () => {
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(5);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view: frames 0–4\./);
@@ -586,6 +588,7 @@ test("Fly to notes when the flight ends after the composition's last frame (F9)"
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(15);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /Note: the flight ends after the composition's last frame \(9\)\./);
@@ -595,6 +598,7 @@ test("Fly to says nothing extra when the flight stays inside the composition (F9
   const { context, api } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
   context.flyFramesField.setValue(5);
   context.flyBtn.onClick();
   assert.doesNotMatch(context.statusLabel.getText(), /Note: the flight ends/);
@@ -3136,8 +3140,12 @@ test("preview: clicking a place dot picks it instead of dragging", () => {
   p.setWidth(320);
   p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
   p.setPlaces([{ lat: 45, lon: 2, name: "Here" }, { lat: 46, lon: 4, name: "Nearby" }], 0);
+  const before = p.frameCamera();
   p._draw.onMousePress({ x: 161, y: 89 }, "left");
   assert.deepEqual(picks, [0]);
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "the press doesn't pan");
+  p._draw.onMouseMove({ x: 200, y: 120 }); // no drag started, so moving doesn't pan either
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "nor does a move before release");
   p._render();
   assert.equal(fills(p._draw, "#33CE70").length >= 1, true, "dots drawn");
 });
@@ -3165,6 +3173,20 @@ test("preview: without ui.Draw, or with the data missing, it says so and is unav
   p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
   p._render();
   assert.equal(p.available(), false);
+});
+
+test("preview: a Draw missing a method doesn't break the panel; the preview says so and is unavailable", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  ui.Draw.prototype.setBackgroundColor = undefined;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  assert.ok(ui._root(), "the panel was built");
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(context.preview.available(), false);
+  let message = null;
+  walkUi(context.preview.layout, (n) => { if (n.getText && /Map preview unavailable/.test(n.getText())) message = n.getText(); });
+  assert.ok(message, "the preview's note explains");
+  assert.equal(context.createHereBtn.isHidden(), true, "no frame to make a map from");
 });
 
 test("preview: setWidth ignores an un-laid-out width of 0 and keeps the view", () => {
@@ -3358,14 +3380,14 @@ test("Map tab: clicking a preview dot that is not one of the results is ignored"
 
 test("Map tab: with New map picked and the preview unavailable, Create map here is hidden", () => {
   const { context } = buildSandbox();
-  context.preview._render();
+  assert.equal(context.createHereBtn.isHidden(), false, "shown while the preview works");
+  context.preview._render(); // no bundled data: the preview fails, and hides the button itself
   assert.equal(context.preview.available(), false);
-  context.refreshNewMapFields();
   assert.equal(context.createHereBtn.isHidden(), true);
   assert.equal(context.jumpBtn.isHidden(), true);
 });
 
-test("Map tab: Fly here goes to the preview frame once the user has moved it", () => {
+test("Map tab: after moving the preview, Fly here goes to the green frame", () => {
   const { context, api } = buildSandbox({ setup: installNe });
   createWorldMap(context);
   const map = context.currentMap();
@@ -3391,4 +3413,93 @@ test("Map tab: with the preview unavailable, Fly here still names the picked res
   api.setFrame(20);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
+});
+
+const close = (a, b) => Math.abs(a - b) < 1e-9;
+function sameCam(a, b) { return close(a.lat, b.lat) && close(a.lon, b.lon) && close(a.zoom, b.zoom); }
+
+test("Map tab: opening on a scene with a map, Jump here goes to the green frame, which is on the map's camera", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.makeMap("Map", { lat: 35, lon: 139, zoom: 8, rotation: 0, projection: 0 });
+  context.refreshMaps(); context.previewFollowPicked(); context.previewShowMap(); // the panel's startup hooks
+  const map = context.currentMap(), before = context.GeoScene.readCamera(map.cameraId);
+  context.jumpBtn.onClick();
+  assert.ok(sameCam(context.GeoScene.readCamera(map.cameraId), before), "the camera stays where it was");
+  assert.match(context.statusLabel.getText(), /^Camera jumped to the preview frame \(zoom 8\.0\)\.$/);
+});
+
+test("Map tab: Jump here twice after moving the frame goes to the same frame both times", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.preview.zoomBy(2);
+  const frame = context.preview.frameCamera();
+  context.jumpBtn.onClick();
+  const first = context.GeoScene.readCamera(map.cameraId);
+  assert.ok(sameCam(first, frame), "the first Jump goes to the frame");
+  context.jumpBtn.onClick();
+  assert.ok(sameCam(context.GeoScene.readCamera(map.cameraId), first), "the second Jump doesn't move the camera");
+  assert.match(context.statusLabel.getText(), /the preview frame/);
+});
+
+test("Map tab: Jump here and Fly here leave the preview where it is and only move the dashed frame", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap();
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const frame = context.preview.frameCamera();
+  context.jumpBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Camera jumped to Paris/);
+  assert.deepEqual(plain(context.preview.frameCamera()), plain(frame), "no recentre after Jump");
+  assert.equal(context.preview.source(), "result", "still following the result");
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1, "the dashed frame shows the camera");
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  const world = context.preview.frameCamera();
+  context.flyFramesField.setValue(5);
+  api.setFrame(0);
+  context.flyBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Flight to the world view/);
+  assert.deepEqual(plain(context.preview.frameCamera()), plain(world), "no recentre after Fly");
+  assert.equal(context.preview.source(), "world");
+});
+
+test("Map tab: picking a result centres the preview on it; picking World view follows the world view", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  searchFinds(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  context.resultPicker.setValue(2);
+  context.resultPicker.onValueChanged();
+  let f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS_TX.lat) < 1e-6 && Math.abs(f.lon - PARIS_TX.lon) < 1e-6);
+  assert.equal(context.preview.source(), "result");
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  f = context.preview.frameCamera();
+  assert.ok(Math.abs(f.lat - 20) < 1e-6 && Math.abs(f.lon) < 1e-6);
+  assert.equal(context.preview.source(), "world");
+});
+
+test("Map tab: the preview follows the tab bar's width when the panel is resized", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  assert.equal(typeof ui.onResize, "function");
+  context.sectionTabs.widget._width = 480;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
+  context.sectionTabs.widget._width = 300;
+  ui.onResize();
+  assert.deepEqual(plain(context.preview._draw._size), [300, 169]);
+});
+
+test("Map tab: Refresh shows the picked map's camera as the dashed frame", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.GeoScene.createMap("Map", { lat: 35, lon: 139, zoom: 8, rotation: 0, projection: 0 }); // made outside the panel
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 0);
+  context.refreshMapsBtn.onClick();
+  context.preview._render();
+  assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
 });

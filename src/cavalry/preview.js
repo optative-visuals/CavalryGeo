@@ -22,13 +22,18 @@ var GeoPreviewPanel = (function () {
     error = GeoStyle.note("");
     if (typeof error.setHidden === "function") error.setHidden(true);
 
+    // opts.onFail (optional) hears about the first failure, so the panel can update at once.
     p.fail = function (message) {
+      var first = !failed;
       failed = true;
       if (timer) timer.stop();
       running = false;
       error.setText(message);
       [draw, controls && controls.minus, controls && controls.plus, note].forEach(function (w) { if (w && typeof w.setHidden === "function") w.setHidden(true); });
       if (typeof error.setHidden === "function") error.setHidden(false);
+      if (first && typeof opts.onFail === "function") {
+        try { opts.onFail(message); } catch (e) { console.log("[CavalryGeo] Map preview: onFail failed: " + (e && e.message ? e.message : e)); }
+      }
     };
     p.available = function () { return !failed; };
 
@@ -155,43 +160,49 @@ var GeoPreviewPanel = (function () {
       return p;
     }
 
-    draw = new ui.Draw();
-    draw.setSize(view.width, view.height);
-    draw.setBackgroundColor(WATER);
-    p._draw = draw;
-    draw.onMousePress = guarded(function (pos, button) {
-      if (button && button !== "left") return;
-      var y = sy(pos.y), hit = GeoPreview.hitDot(view, places, pos.x, y, DOT_HIT);
-      if (hit >= 0) { picked = hit; changed(); pick(hit); return; }
-      drag = { x: pos.x, y: y };
-    });
-    draw.onMouseMove = guarded(function (pos) {
-      if (!drag) return;
-      var y = sy(pos.y);
-      view = GeoPreview.pan(view, pos.x - drag.x, y - drag.y);
-      drag = { x: pos.x, y: y };
-      source = null; dragging = true; lastMove = Date.now();
-      changed();
-    });
-    draw.onMouseRelease = guarded(function () { var was = drag; drag = null; if (was) changed(); });
-    draw.onMouseDoubleClick = guarded(function (pos) {
-      var c = comp();
-      drag = null;
-      setView(GeoPreview.zoomAt(view, 1, pos.x, sy(pos.y), c.width, c.height), null);
-    });
+    // A Cavalry missing some Draw method must not take the whole panel down at load.
+    try {
+      draw = new ui.Draw();
+      p._draw = draw;
+      draw.setSize(view.width, view.height);
+      draw.setBackgroundColor(WATER);
+      draw.onMousePress = guarded(function (pos, button) {
+        if (button && button !== "left") return;
+        var y = sy(pos.y), hit = GeoPreview.hitDot(view, places, pos.x, y, DOT_HIT);
+        if (hit >= 0) { picked = hit; changed(); pick(hit); return; }
+        drag = { x: pos.x, y: y };
+      });
+      draw.onMouseMove = guarded(function (pos) {
+        if (!drag) return;
+        var y = sy(pos.y);
+        view = GeoPreview.pan(view, pos.x - drag.x, y - drag.y);
+        drag = { x: pos.x, y: y };
+        source = null; dragging = true; lastMove = Date.now();
+        changed();
+      });
+      draw.onMouseRelease = guarded(function () { var was = drag; drag = null; if (was) changed(); });
+      draw.onMouseDoubleClick = guarded(function (pos) {
+        var c = comp();
+        drag = null;
+        setView(GeoPreview.zoomAt(view, 1, pos.x, sy(pos.y), c.width, c.height), null);
+      });
 
-    note = GeoStyle.note("");
-    controls = { minus: GeoStyle.button("−"), plus: GeoStyle.button("+") };
-    [controls.minus, controls.plus].forEach(function (b) { if (typeof b.setFixedWidth === "function") b.setFixedWidth(24); });
-    controls.minus.onClick = function () { p.zoomBy(-1); };
-    controls.plus.onClick = function () { p.zoomBy(1); };
-    var row = new ui.HLayout();
-    if (typeof row.setMargins === "function") row.setMargins(0, 0, 0, 0);
-    row.add(note);
-    if (typeof row.addStretch === "function") row.addStretch();
-    row.add(controls.minus); row.add(controls.plus);
-    p.layout.add(draw); p.layout.add(row); p.layout.add(error);
-    updateNote();
+      note = GeoStyle.note("");
+      controls = { minus: GeoStyle.button("−"), plus: GeoStyle.button("+") };
+      [controls.minus, controls.plus].forEach(function (b) { if (typeof b.setFixedWidth === "function") b.setFixedWidth(24); });
+      controls.minus.onClick = function () { p.zoomBy(-1); };
+      controls.plus.onClick = function () { p.zoomBy(1); };
+      var row = new ui.HLayout();
+      if (typeof row.setMargins === "function") row.setMargins(0, 0, 0, 0);
+      row.add(note);
+      if (typeof row.addStretch === "function") row.addStretch();
+      row.add(controls.minus); row.add(controls.plus);
+      p.layout.add(draw); p.layout.add(row);
+      updateNote();
+    } catch (e) {
+      p.fail("Map preview unavailable: " + (e && e.message ? e.message : e));
+    }
+    p.layout.add(error);
     return p;
   }
 
