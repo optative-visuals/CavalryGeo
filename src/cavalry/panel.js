@@ -19,7 +19,12 @@ function guard(fn) {
 function column(items) {
   var v = new ui.VLayout();
   v.setMargins(6, 6, 6, 6);
-  items.forEach(function (w) { v.add(w); });
+  if (typeof v.setSpaceBetween === "function") v.setSpaceBetween(4);
+  // A heading sits close to what it introduces (4 px below) and further from what came before (14 px above).
+  items.forEach(function (w, i) {
+    if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(10);
+    v.add(w);
+  });
   if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
   return v;
 }

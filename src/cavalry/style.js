@@ -1,13 +1,15 @@
 // The panel's look in one place, borrowed from Cavalry and Easey: Cavalry's own greys (from its
-// theme), one deep green for the main actions, small grey section headings with a thin line,
+// theme), one deep green for the main actions, small sentence-case section headings with a thin line,
 // toggle buttons for picking categories, and a segmented tab bar. Every button is a little taller
 // than Cavalry's default. A native button only shows its hover highlight while it has never had
 // setBackgroundColor called, so only the main actions and the tab bar are painted; toggles show
 // their state with a tick icon instead. Cavalry's ui.SegmentedControl isn't used: it keeps room
 // for an icon left of every label, so the text sits off-centre. Nor is ui.PageView: it reserves
 // the height of its tallest page for every page, so pageStack() hides the pages it isn't showing.
+// Headings are kept in a private list so the panel's columns can leave more room before one than
+// after it, which groups a heading with the controls it introduces.
 var GeoStyle = (function () {
-  var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a";
+  var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a", HEADING_COLOR = "#a6a6a6";
   var BUTTON_HEIGHT = 26, TAB_HEIGHT = 24, ICON_SIZE = 16;
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
@@ -25,11 +27,17 @@ var GeoStyle = (function () {
   }
   function hasContainer() { return typeof ui.Container === "function"; }
 
+  var headings = []; // the rows heading() made; Cavalry's objects get no extra properties
+  function isHeading(item) { return headings.indexOf(item) >= 0; }
   function heading(text) {
-    var label = new ui.Label(String(text).toUpperCase());
-    maybe(label, "setFontSize", 10);
-    maybe(label, "setTextColor", HEADING_GREY);
+    var label = new ui.Label(String(text));
+    maybe(label, "setFontSize", 11);
+    maybe(label, "setTextColor", HEADING_COLOR);
+    maybe(label, "setFixedHeight", 16);
     var h = new ui.HLayout();
+    maybe(h, "setMargins", 0, 0, 0, 0);
+    maybe(h, "setSpaceBetween", 6);
+    headings.push(h);
     h.add(label);
     if (hasContainer()) {
       var line = new ui.Container();
@@ -159,6 +167,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, color: color, heading: heading, note: note,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, heading: heading, isHeading: isHeading, note: note,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

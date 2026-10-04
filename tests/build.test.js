@@ -208,6 +208,9 @@ function makeFakeUi() {
 
   HLayout.prototype.setSpaceBetween = function (s) { this._spacing = s; };
   VLayout.prototype.setSpaceBetween = function (s) { this._spacing = s; };
+  // Recorded apart from the items, with the index of the item it comes before.
+  VLayout.prototype.addSpacing = function (px) { (this._spacings = this._spacings || []).push({ at: this._items.length, px: px }); };
+  HLayout.prototype.addSpacing = function (px) { (this._spacings = this._spacings || []).push({ at: this._items.length, px: px }); };
 
   // Like Cavalry's Container: a widget with a background, rounded corners and one layout.
   function Container() { this._layout = null; }
@@ -2671,14 +2674,20 @@ test("GeoStyle.color reads Cavalry's theme, with fallbacks when it has none", ()
   assert.equal(context.GeoStyle.PRIMARY, "#1F8F4E");
 });
 
-test("GeoStyle.heading is a small grey UPPERCASE label followed by a thin line", () => {
+test("GeoStyle.heading is a small light-grey sentence-case label followed by a thin line", () => {
   const { context, ui } = buildSandbox();
   const h = context.GeoStyle.heading("Search");
   assert.ok(h instanceof ui.HLayout);
+  assert.equal(h._spacing, 6, "tight row");
   const [label, line] = h._items;
-  assert.equal(label.getText(), "SEARCH");
-  assert.equal(label._fontSize, 10);
-  assert.equal(label._textColor, "#8a8a8a");
+  assert.equal(label.getText(), "Search");
+  assert.equal(label._fontSize, 11);
+  assert.equal(label._textColor, "#a6a6a6");
+  assert.equal(context.GeoStyle.HEADING_COLOR, "#a6a6a6");
+  assert.equal(label._fixedHeight, 16);
+  assert.ok(context.GeoStyle.isHeading(h));
+  assert.ok(!context.GeoStyle.isHeading(new ui.HLayout()), "a plain row is not a heading");
+  assert.ok(!context.GeoStyle.isHeading(label));
   assert.ok(line instanceof ui.Container);
   assert.equal(line._fixedHeight, 1);
   assert.equal(line._background, "#3a3a3a");
@@ -2694,7 +2703,7 @@ test("GeoStyle.heading without ui.Container is just the label", () => {
   vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
   const h = context.GeoStyle.heading("Search");
   assert.equal(h._items.length, 1);
-  assert.equal(h._items[0].getText(), "SEARCH");
+  assert.equal(h._items[0].getText(), "Search");
 });
 
 test("GeoStyle buttons: deep green main actions, quiet housekeeping, all 26 tall", () => {
@@ -2895,12 +2904,34 @@ test("every section page packs its controls at the top; nested layouts get no st
 test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
-  const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#8a8a8a" && n._fontSize === 10) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["SEARCH", "CAMERA"]);
-  assert.deepEqual(headings(pages[1]), ["WORLD · NATURAL EARTH", "STREETS · OPENSTREETMAP", "EXTRACT", "BAKE"]);
-  assert.deepEqual(headings(pages[2]), ["SOURCE", "BUILD"]);
-  assert.deepEqual(headings(pages[3]), ["PLACE", "AT COORDINATES", "STOPS", "STYLE"]);
-  assert.deepEqual(headings(pages[4]), ["SHEET", "COLUMNS", "SHOW", "UNMATCHED ROWS"]);
+  const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
+  assert.deepEqual(headings(pages[0]), ["Search", "Camera"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake"]);
+  assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
+  assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
+});
+
+test("every page column packs items 4 apart and puts 10 before each heading that isn't first", () => {
+  const { context } = buildSandbox();
+  // The Label section's page is just the tab bar over the two Label pages, which are the columns.
+  const labelSection = context.sectionPages.pages.find((p) => holds(p, context.labelPages.widget));
+  const columns = context.sectionPages.pages.filter((p) => p !== labelSection).concat(context.labelPages.pages);
+  assert.equal(columns.length, 6);
+  let headingCount = 0;
+  columns.forEach((col, c) => {
+    assert.equal(col._spacing, 4, "column " + c);
+    const spacings = col._spacings || [];
+    col._items.forEach((item, i) => {
+      const isHeading = item._items && item._items[0] && item._items[0]._textColor === "#a6a6a6" && item._items[0]._fontSize === 11;
+      const mine = spacings.filter((s) => s.at === i);
+      if (!isHeading) return assert.equal(mine.length, 0, "column " + c + " item " + i + " is not a heading");
+      headingCount++;
+      if (i === 0) assert.equal(mine.length, 0, "column " + c + ": a first heading gets no space before it");
+      else assert.deepEqual(plain(mine), [{ at: i, px: 10 }], "column " + c + " heading at " + i);
+    });
+  });
+  assert.ok(headingCount >= 14, "headings were found");
 });
 
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
