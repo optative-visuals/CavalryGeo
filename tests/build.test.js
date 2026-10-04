@@ -3100,9 +3100,13 @@ test("preview: the Draw gets a small minimum size so the panel can shrink back",
   const { context } = buildSandbox({ setup: installNe });
   const { p } = makePreview(context);
   assert.equal(p._draw._minWidth, 120);
-  assert.equal(p._draw._minHeight, 68);
+  assert.equal(p._draw._minHeight, 180);
+  p.setWidth(320);
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 180);
   p.setWidth(480);
-  assert.equal(p._draw._minWidth, 120, "a wider size doesn't change the minimum");
+  assert.equal(p._draw._minWidth, 120);
+  assert.equal(p._draw._minHeight, 270);
 });
 
 test("preview: two near-identical places draw one dot, and a click reports the picked place's index", () => {

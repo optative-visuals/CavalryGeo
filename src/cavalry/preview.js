@@ -155,6 +155,9 @@ var GeoPreviewPanel = (function () {
       var cam = p.frameCamera(), c = comp();
       view = GeoPreview.viewForCamera(cam, c.width, c.height, px, Math.round(px * 9 / 16));
       draw.setSize(view.width, view.height);
+      // Cavalry's setSize also locks the minimum size; re-apply a small minimum width (so the panel can shrink) and the real height (so the map isn't squeezed).
+      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
+      if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       sized = true;
       changed();
     });
@@ -183,7 +186,7 @@ var GeoPreviewPanel = (function () {
       // Cavalry's Draw won't get narrower than its setSize unless a small minimum is set,
       // and then the panel couldn't shrink back either.
       if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
-      if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(68);
+      if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(WATER);
       draw.onMousePress = guarded(function (pos, button) {
