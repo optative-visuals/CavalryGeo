@@ -32,6 +32,12 @@ function makeFakeApi() {
   var COMP_ID = "comp#1";
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
   var timers = [];
+  var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
+  var userData = {};   // layerId -> { key: value }
+  var attrNames = {};  // layerId -> { attr: custom name }
+  var overrides = {};  // layerId -> { attr: { hardMin, ... } }
+  var paints = {};     // layerId -> { fill, stroke }
+  var PROMOTED_SLOT = /^promotedAttributes\.(\d+)\.(name|notes)$/;
 
   function ensure(id) { if (!store[id]) store[id] = {}; return store[id]; }
 
@@ -77,19 +83,34 @@ function makeFakeApi() {
     deleteLayer: function (id) {
       (childOrder[id] || []).slice().forEach(function (c) { this.deleteLayer(c); }, this);
       if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
+      // Like Cavalry: a deleted layer's promotions and connections go with it.
+      Object.keys(promoted).forEach(function (c) { promoted[c] = promoted[c].filter(function (p) { return p.attribute.indexOf(id + ".") !== 0; }); });
+      delete promoted[id]; delete userData[id];
+      for (var ci = connections.length - 1; ci >= 0; ci--) { if (connections[ci][0] === id || connections[ci][2] === id) connections.splice(ci, 1); }
       delete niceNames[id]; delete parents[id]; delete childOrder[id]; delete store[id];
     },
     addDynamic: function (id, arr) {
       var o = ensure(id), n = 0;
       while (o[arr + "." + n] !== undefined) n++;
       o[arr + "." + n] = 0;
+      return arr + "." + n; // like Cavalry: the new attribute's path
     },
-    renameAttribute: function () { /* display name only */ },
+    renameAttribute: function (id, attr, name) { (attrNames[id] = attrNames[id] || {})[attr] = name; },
+    getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
-    set: function (id, obj) { var o = ensure(id); Object.keys(obj).forEach(function (k) { o[k] = obj[k]; }); },
+    set: function (id, obj) {
+      var o = ensure(id);
+      Object.keys(obj).forEach(function (k) {
+        var m = PROMOTED_SLOT.exec(k);
+        if (m && promoted[id] && promoted[id][Number(m[1])]) { promoted[id][Number(m[1])][m[2]] = obj[k]; return; }
+        o[k] = obj[k];
+      });
+    },
     get: function (id, attr) {
       if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
       if (id === COMP_ID && attr === "frameRange") return { x: 0, y: 9 };
+      var pm = PROMOTED_SLOT.exec(attr);
+      if (pm && promoted[id] && promoted[id][Number(pm[1])]) return promoted[id][Number(pm[1])][pm[2]];
       var k = keyframes[id] && keyframes[id][attr];
       if (k && Object.keys(k).length) {
         var fs = Object.keys(k).map(Number).sort(function (a, b) { return a - b; }), v = k[fs[0]];
@@ -98,9 +119,57 @@ function makeFakeApi() {
       }
       return ensure(id)[attr];
     },
-    setFill: function () {},
-    setStroke: function () {},
-    connect: function (a, b, c, d) { connections.push([a, b, c, d]); },
+    setFill: function (id, on) { (paints[id] = paints[id] || {}).fill = !!on; },
+    setStroke: function (id, on) { (paints[id] = paints[id] || {}).stroke = !!on; },
+    hasFill: function (id) { return !!(paints[id] && paints[id].fill); },
+    hasStroke: function (id) { return !!(paints[id] && paints[id].stroke); },
+    // Like Cavalry: connecting into a Component's "promotedAttributes" list appends a promotion.
+    connect: function (a, b, c, d) {
+      if (d === "promotedAttributes") { (promoted[c] = promoted[c] || []).push({ attribute: a + "." + b, name: "", notes: "" }); return; }
+      connections.push([a, b, c, d]);
+    },
+    disconnect: function (a, b, c, d) {
+      for (var i = connections.length - 1; i >= 0; i--) { var k = connections[i]; if (k[0] === a && k[1] === b && k[2] === c && k[3] === d) connections.splice(i, 1); }
+    },
+    getLayerType: function (id) { return String(id).split("#")[0]; },
+    getInConnection: function (id, attr) {
+      var m = /^promotedAttributes\.(\d+)\.attribute$/.exec(attr);
+      if (m) {
+        var p = (promoted[id] || [])[Number(m[1])];
+        if (!p) throw new Error("Couldn't find attribute with path: " + id + "." + attr);
+        return p.attribute;
+      }
+      for (var i = connections.length - 1; i >= 0; i--) { var k = connections[i]; if (k[2] === id && k[3] === attr) return k[0] + "." + k[1]; }
+      return "";
+    },
+    getInConnectedAttributes: function (id) {
+      var out = (promoted[id] || []).map(function (p, i) { return "promotedAttributes." + i + ".attribute"; });
+      connections.forEach(function (k) { if (k[2] === id && out.indexOf(k[3]) < 0) out.push(k[3]); });
+      return out;
+    },
+    getOutConnections: function (id, attr) {
+      return connections.filter(function (k) { return k[0] === id && k[1] === attr; }).map(function (k) { return k[2] + "." + k[3]; });
+    },
+    // Like Cavalry: two arguments, the list item's path; later items shift down.
+    removeArrayIndex: function (id, path) {
+      if (arguments.length !== 2) throw new Error("Argument count does not match function definition. Expected 2 but got " + arguments.length);
+      var m = /^promotedAttributes\.(\d+)$/.exec(path);
+      if (m && promoted[id]) promoted[id].splice(Number(m[1]), 1);
+    },
+    setUserData: function (id, key, value) { (userData[id] = userData[id] || {})[key] = JSON.parse(JSON.stringify(value)); },
+    getUserDataKey: function (id, key) { var v = (userData[id] || {})[key]; return v === undefined ? null : JSON.parse(JSON.stringify(v)); },
+    hasUserDataKey: function (id, key) { return !!userData[id] && Object.prototype.hasOwnProperty.call(userData[id], key); },
+    setAttributeDefinitionOverride: function (id, attr, key, value) { overrides[id] = overrides[id] || {}; (overrides[id][attr] = overrides[id][attr] || {})[key] = value; },
+    // Like Cavalry: no arguments, acts on the selection; moves to the top of its group.
+    bringToFront: function () {
+      if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
+      selection.forEach(function (id) {
+        var sib = childOrder[parents[id]]; if (!sib) return;
+        childOrder[parents[id]] = [id].concat(sib.filter(function (x) { return x !== id; }));
+      });
+    },
+    _promoted: function (id) { return (promoted[id] || []).map(function (p) { return p.attribute; }); },
+    _overrides: overrides,
     _connections: connections,
     getCompLayers: function () { return Object.keys(niceNames); },
     getActiveComp: function () { return COMP_ID; },
@@ -3766,4 +3835,149 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
   context.refreshMapsBtn.onClick();
   context.preview._render();
   assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
+});
+
+// ---- Map controls ------------------------------------------------------------------
+function controlsMap(context) { createWorldMap(context); return context.GeoScene.findMaps()[0]; }
+function promotedNames(api, comp) {
+  return api._promoted(comp).map((s) => { const d = s.indexOf("."); return api.getCustomAttributeName(s.slice(0, d), s.slice(d + 1)); });
+}
+function slotsOf(api, valuesId) { return plain(api.getUserDataKey(valuesId, "geoSlots")); }
+const CAMERA_NAMES = ["Camera · Zoom", "Camera · Centre latitude", "Camera · Centre longitude", "Camera · Rotation", "Camera · Projection (0 flat · 1 Equal Earth · 2 globe)"];
+
+test("controls: a sync puts \"<Map> Controls\" at the top of the map group with the camera and Ocean", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[0], r.componentId);
+  assert.equal(api.getLayerType(r.componentId), "component");
+  assert.equal(api.getNiceName(r.componentId), "Map Controls");
+  assert.deepEqual(api.getChildren(r.componentId), [r.valuesId]);
+  assert.equal(api.getNiceName(r.valuesId), "Map control values");
+  assert.equal(api.get(r.valuesId, "expression"), "0;");
+  const c = map.cameraId, ocean = kids.find((id) => api.getNiceName(id) === "Ocean");
+  assert.deepEqual(plain(api._promoted(r.componentId)), [c + ".array.2", c + ".array.0", c + ".array.1", c + ".array.3", c + ".array.4", ocean + ".material.materialColor", ocean + ".hidden"]);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)), CAMERA_NAMES.concat(["Ocean · Colour", "Ocean · Hide"]));
+  assert.deepEqual(plain(api._overrides[c]["array.4"]), { hardMin: 0, hardMax: 2, step: 1 });
+  assert.equal(r.controls, 7);
+});
+
+test("controls: a map layer gets direct rows and a Detail value that drives the layer", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const C = require("../src/core/codec.js");
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Here", rings: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }] });
+  const id = context.GeoScene.createMapLayer(map, "Map: Countries", enc, { camera: map.cameraId, category: "countries" }, context.GeoScene.STYLE.countries, {});
+  const r = context.GeoControlPanel.sync(map);
+  const detail = slotsOf(api, r.valuesId)["layer:" + id + ":detail"];
+  assert.deepEqual(plain(api._promoted(r.componentId)).slice(7), [id + ".hidden", id + ".opacity", id + ".material.materialColor", id + ".stroke.strokeColor", id + ".stroke.width", r.valuesId + "." + detail]);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Countries · Hide", "Countries · Opacity", "Countries · Fill colour", "Countries · Outline colour", "Countries · Outline width", "Countries · Detail"]);
+  assert.equal(api.getInConnection(id, "generator.array.5"), r.valuesId + "." + detail);
+  assert.equal(api.get(r.valuesId, detail), 100, "starts with the layer's own Detail");
+  assert.equal(api.getCustomAttributeName(id, "generator.array.5"), "detail", "the layer's own input keeps its name");
+});
+
+test("controls: pins share one Hide, Colour and Size, and a later pin links too", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r.valuesId + "." + color));
+  assert.equal(api.getCustomAttributeName(r.valuesId, color), "Pins · Colour");
+  assert.equal(api.get(r.valuesId, color), "#1F8F4E", "starts with the pins' colour");
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
+  const c = S.addPin(map, "C", 20, 20);
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(c, "material.materialColor"), r.valuesId + "." + color);
+  assert.equal(api.getChildren(map.groupId)[0], r.componentId, "back on top after the new pin landed above it");
+  assert.equal(plain(api._promoted(r.componentId)).filter((s) => s === r.valuesId + "." + color).length, 1);
+});
+
+test("controls: a pin the user disconnected stays unlinked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  api.disconnect(r.valuesId, color, b, "material.materialColor");
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(b, "material.materialColor"), "");
+  assert.equal(api.getInConnection(a, "material.materialColor"), r.valuesId + "." + color);
+});
+
+test("controls: the user's own promotions stay, after the plugin's, with their names", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  let r = context.GeoControlPanel.sync(map);
+  const other = api.create("basicShape", "Other");
+  api.connect(other, "position", r.componentId, "promotedAttributes");
+  const n = api._promoted(r.componentId).length - 1;
+  api.set(r.componentId, { ["promotedAttributes." + n + ".name"]: "My position" });
+  S.addPin(map, "A", 0, 0);
+  r = context.GeoControlPanel.sync(map);
+  const p = plain(api._promoted(r.componentId)), last = p.length - 1;
+  assert.equal(p[last], other + ".position");
+  assert.equal(api.get(r.componentId, "promotedAttributes." + last + ".name"), "My position");
+  assert.ok(p.indexOf(r.valuesId + "." + slotsOf(api, r.valuesId)["pins:color"]) < last);
+});
+
+test("controls: syncing again changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin(map, "A", 0, 0);
+  const r1 = context.GeoControlPanel.sync(map);
+  const before = { promoted: plain(api._promoted(r1.componentId)), slots: slotsOf(api, r1.valuesId), conns: api._connections.length };
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.componentId, r1.componentId);
+  assert.equal(r2.valuesId, r1.valuesId);
+  assert.deepEqual(plain(api._promoted(r2.componentId)), before.promoted);
+  assert.deepEqual(slotsOf(api, r2.valuesId), before.slots);
+  assert.equal(api._connections.length, before.conns);
+});
+
+test("controls: a deleted Controls component is made again and relinks the pins", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.deleteLayer(r1.componentId);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.notEqual(r2.valuesId, r1.valuesId);
+  const color = slotsOf(api, r2.valuesId)["pins:color"];
+  [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r2.valuesId + "." + color));
+});
+
+test("controls: labels share Hide, Colour and Size", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const t = context.GeoScene.createLabel(map, "Paris", 2.35, 48.85);
+  assert.deepEqual(plain(context.GeoScene.findLabels(map)), [t]);
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  assert.equal(api.getInConnection(t, "fontSize"), r.valuesId + "." + slotsOf(api, r.valuesId)["labels:size"]);
+});
+
+test("controls: a route gets shared colour, width and arc height, then each leg's draw on %", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+    "Paris → London → Rome · Colour", "Paris → London → Rome · Width", "Paris → London → Rome · Arc height",
+    "Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"
+  ]);
+  assert.equal(plain(api._promoted(r.componentId))[10], route.legs[0] + ".stroke.trimEnd");
+  route.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.trim"), true));
+  const lift = slotsOf(api, r.valuesId)["route:" + route.groupId + ":lift"];
+  route.legs.forEach((leg) => assert.equal(api.getInConnection(leg, "generator.array.7"), r.valuesId + "." + lift));
+  assert.equal(api.get(r.valuesId, lift), 30);
+});
+
+test("controls: without user data, sync says this Cavalry can't do it", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  delete api.setUserData;
+  assert.throws(() => context.GeoControlPanel.sync(map), /This version of Cavalry can't update a map's Controls\./);
 });

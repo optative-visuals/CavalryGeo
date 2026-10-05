@@ -470,6 +470,26 @@ var GeoScene = (function () {
     return out;
   }
 
+  // The text layers of this map's labels: each label's position helper drives its text's
+  // position, so the text is whatever that helper's output is connected to.
+  function findLabels(map) {
+    var out = [];
+    if (typeof api.getOutConnections !== "function") return out;
+    api.getCompLayers(false).forEach(function (id) {
+      var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
+      if (!meta || meta.category !== "labelDriver" || meta.camera !== map.cameraId) return;
+      (api.getOutConnections(id, A.DRIVER_OUTPUT_ATTR) || []).forEach(function (c) {
+        var s = String(c), dot = s.indexOf(".");
+        if (dot > 0 && s.slice(dot + 1) === "position") out.push(s.slice(0, dot));
+      });
+    });
+    return out;
+  }
+
+  function findOcean(map) {
+    return api.getChildren(map.groupId).filter(function (id) { return api.getNiceName(id) === OCEAN_NAME; })[0] || null;
+  }
+
   // Assets are reused by path and never deleted: deleting hundreds of assets in one
   // go can hang Cavalry.
   function existingAssets() {
@@ -743,6 +763,6 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera
+    findImagery: findImagery, flyCamera: flyCamera, findLabels: findLabels, findOcean: findOcean
   };
 })();
