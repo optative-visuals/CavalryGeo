@@ -206,7 +206,8 @@ var GeoControlPanel = (function () {
       var marker = null;
       // A deleted plugin marker only loses the colour row; the copies keep their other rows.
       if (!t.userSource && !(typeof api.layerExists === "function" && !api.layerExists(t.source))) marker = { id: t.source, state: linkState(t.source, S.marker) };
-      model.travellers.push({ routeId: t.groupId, marker: marker, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
+      var scale = t.scale && (typeof api.layerExists !== "function" || api.layerExists(t.scale)) ? { id: t.scale, state: linkState(t.scale, S.travellerScale) } : null;
+      model.travellers.push({ routeId: t.groupId, marker: marker, scale: scale, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);

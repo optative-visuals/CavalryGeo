@@ -187,6 +187,16 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   assert.deepEqual(E.HANDLE_INPUTS.map((i) => i[0]), ["aHolderX", "aHolderY", "aStopX", "aStopY", "bHolderX", "bHolderY", "bStopX", "bStopY", "arc", "lean", "flip", "hand", "handX", "handY"]);
 });
 
+test("traveller scale helper: size times the source layer's own scale", () => {
+  const vm = require("node:vm");
+  const run = (expr, inputs) => vm.runInNewContext(expr, Object.fromEntries(inputs.map((v, i) => ["n" + i, v])));
+  assert.deepEqual(E.TRAVELLER_SCALE_INPUTS, [["size", 1], ["sourceScaleX", 1], ["sourceScaleY", 1]]);
+  const expr = E.travellerScaleExpression({ camera: "c", category: "travellerScale" });
+  assert.deepEqual(Array.from(run(expr, [2, 0.25, 0.5])), [0.5, 1]);
+  assert.deepEqual(Array.from(run(expr, [1, 1, 1])), [1, 1]);
+  assert.equal(E.readTag(expr, "GEO_META").category, "travellerScale");
+});
+
 test("traveller helpers: tip clamps to 0..99.9; show is the current leg only", () => {
   const vm = require("node:vm");
   const run = (expr, inputs) => vm.runInNewContext(expr, Object.fromEntries(inputs.map((v, i) => ["n" + i, v])));

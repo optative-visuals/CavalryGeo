@@ -166,6 +166,8 @@ adding street layers.
       the text rides the route. Traveller = None, **Add to route** → the route has no traveller
       and the text is back, visible. With nothing usable selected, Create route with Selected
       layer refuses ("Select the layer to send along the route first.") and makes no route.
+- [ ] 27e2. Selected layer with a scaled-down layer (say scale 0.13) → the copy matches its size;
+      rescale the original → the copy follows. Rotate the original → the copy's angle changes.
 - [ ] 27f. In Controls, change Traveller size, Traveller hide and Traveller faces direction →
       every copy follows; Traveller colour changes a Plane, Arrow or Dot.
 

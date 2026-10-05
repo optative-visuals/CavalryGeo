@@ -183,8 +183,10 @@ cache come after them).
   route: select it (as well as the route part, when adding to an existing route). Your layer is
   kept, and Cavalry hides it while the copies ride; choose None to bring it back, visible. If you
   delete a route that carried your own layer, Cavalry leaves that layer hidden: un-hide it
-  yourself (or pick None and press **Add to route** before deleting the route). In
-  the map's Controls the route gets four rows: `Traveller hide`, `Traveller size`,
+  yourself (or pick None and press **Add to route** before deleting the route). Your layer
+  keeps its own scale and rotation; Traveller size multiplies it. With Faces direction on,
+  your layer's rotation is added to the direction of travel: rotate an icon drawn pointing up
+  by −90° so it points along the route. In the map's Controls the route gets four rows: `Traveller hide`, `Traveller size`,
   `Traveller colour` (for the Plane, Arrow and Dot only) and `Traveller faces direction`.
 - On a globe, a stop on the far side of the Earth fades out with its legs, and a long leg is a
   simple curve rather than a bow. Routes made by earlier versions keep working as before.

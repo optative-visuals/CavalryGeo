@@ -5497,6 +5497,66 @@ test("travellers: a plane rides each leg — one-copy duplicator per leg, tip an
   });
 });
 
+function checkScaleWiring(api, groupId, src) {
+  const t = travData(api, groupId);
+  assert.ok(t.scale && api.layerExists(t.scale), "the record names the scale helper");
+  assert.equal(api.getNiceName(t.scale), "Traveller scale");
+  assert.equal(api.getInConnection(t.scale, "array.1"), src + ".scale.x");
+  assert.equal(api.getInConnection(t.scale, "array.2"), src + ".scale.y");
+  assert.equal(api.get(t.scale, "array.0"), 1, "size starts at 1");
+  t.legs.forEach((l) => {
+    assert.equal(api.getInConnection(l.dup, "shapeScale"), t.scale + ".id");
+    assert.equal(api.getInConnection(l.dup, "shapeRotation"), src + ".rotation.z");
+  });
+  return t;
+}
+
+test("travellers: your scaled and rotated layer's copies follow its scale and rotation", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const logo = api.create("textShape", "Logo");
+  api.set(logo, { "scale.x": 0.134, "scale.y": 0.134, "rotation.z": 30 });
+  context.GeoScene.addTraveller(map, r.groupId, "layer", logo);
+  const t = checkScaleWiring(api, r.groupId, logo);
+  assert.equal(api.getParent(t.scale), routeData(api, r.groupId).helpers, "in the route's helpers group");
+  assert.equal(plain(context.GeoScene.findTravellers(map))[0].scale, t.scale);
+  assert.equal(context.GeoScene.removeTraveller(map, r.groupId), true);
+  assert.ok(!api.layerExists(t.scale), "the helper goes with the traveller");
+  assert.ok(api.layerExists(logo), "your layer is never deleted");
+  assert.equal(api.get(logo, "hidden"), false);
+});
+
+test("travellers: a plugin marker has the same scale and rotation wiring", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "plane");
+  const t = checkScaleWiring(api, r.groupId, travData(api, r.groupId).source);
+  assert.equal(context.GeoScene.removeTraveller(map, r.groupId), true);
+  assert.ok(!api.layerExists(t.scale));
+});
+
+test("travellers: a failed build deletes the scale helper too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const logo = api.create("textShape", "Logo");
+  const before = api.getCompLayers(false).slice().sort();
+  const real = api.setGenerator; let n = 0;
+  api.setGenerator = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "layer", logo), /boom/);
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+});
+
+test("travellers: the scale helper belongs to its route when selecting", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "dot");
+  assert.equal(context.GeoScene.routeOfSelection(map, [travData(api, r.groupId).scale]), r.groupId);
+});
+
 test("travellers: copies sit above the legs and below the stops", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
@@ -5600,7 +5660,7 @@ test("travellers: stacking the copies is best-effort — without moveBackward th
   });
 });
 
-test("controls: a traveller gets its rows and one Size drives every copy", () => {
+test("controls: a traveller gets its rows and one Size drives the scale helper", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
@@ -5609,7 +5669,7 @@ test("controls: a traveller gets its rows and one Size drives every copy", () =>
   const names = plain(promotedNames(api, s.componentId));
   ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller colour", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   const size = slotsOf(api, s.valuesId)["trav:" + r.groupId + ":size"];
-  travData(api, r.groupId).legs.forEach((l) => ["shapeScale.x", "shapeScale.y"].forEach((a) => assert.equal(api.getInConnection(l.dup, a), s.valuesId + "." + size)));
+  assert.equal(api.getInConnection(travData(api, r.groupId).scale, "array.0"), s.valuesId + "." + size);
 });
 
 test("Routes tab: Traveller picker and Add to route", () => {
@@ -5779,7 +5839,7 @@ test("Bake: a traveller's copies, helpers and plugin marker are skipped as route
   const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
   context.GeoScene.addTraveller(map, r.groupId, "plane");
   const t = travData(api, r.groupId);
-  [t.legs[0].dup, t.legs[0].tip, t.legs[0].show, t.source].forEach((id) => {
+  [t.legs[0].dup, t.legs[0].tip, t.legs[0].show, t.scale, t.source].forEach((id) => {
     api.select([id]);
     context.bakeBtn.onClick();
     assert.equal(context.statusLabel.getText(), "Error: Route legs and stops are already Cavalry shapes, so there's nothing to bake.", id);
@@ -5796,4 +5856,16 @@ test("controls: a deleted plugin marker keeps the traveller's other rows", () =>
   const names = plain(promotedNames(api, s.componentId));
   ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   assert.ok(names.indexOf("A → B → C · Traveller colour") < 0, "nothing left to recolour");
+});
+
+test("controls: a traveller without a scale helper (older record) gets no size row", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "plane");
+  const rec = travData(api, r.groupId); delete rec.scale;
+  api.setUserData(r.groupId, "geoTraveller", rec);
+  const names = plain(promotedNames(api, context.GeoControlPanel.sync(map).componentId));
+  assert.ok(names.indexOf("A → B → C · Traveller size") < 0);
+  assert.ok(names.indexOf("A → B → C · Traveller hide") >= 0);
 });

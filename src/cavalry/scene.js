@@ -954,6 +954,8 @@ var GeoScene = (function () {
   // path-distribution duplicator per leg. Per leg, a "tip" utility turns the leg's draw-on
   // into the copy's travel and a "show" utility fades the copy in while its leg is drawing
   // and keeps it visible until a later leg takes over. The marker itself is hidden by Cavalry.
+  // A Duplicator ignores its source layer's own scale and rotation, so one "scale" helper
+  // (Traveller size x the source's scale) and the source's rotation are wired into every copy.
   var TRAVELLER_KEY = "geoTraveller", TRAVELLER_NAMES = { plane: "Traveller: Plane", arrow: "Traveller: Arrow", dot: "Traveller: Dot" };
 
   function userData(id, key) {
@@ -1007,6 +1009,7 @@ var GeoScene = (function () {
       if (!d || d.camera !== map.cameraId) return;
       out.push({
         groupId: id, kind: d.kind, source: d.source, userSource: !!d.userSource,
+        scale: d.scale && layerThere(d.scale) ? d.scale : null,
         legs: (d.legs || []).filter(function (l) { return l.dup && layerThere(l.dup); })
       });
     });
@@ -1027,6 +1030,7 @@ var GeoScene = (function () {
     });
     findTravellers(map).forEach(function (t) {
       t.legs.forEach(function (l) { claim(t.groupId, [l.dup, l.tip, l.show]); });
+      claim(t.groupId, [t.scale]);
       if (!t.userSource) claim(t.groupId, [t.source]);
     });
     findMapLayers(map).forEach(function (l) {
@@ -1057,6 +1061,7 @@ var GeoScene = (function () {
     var d = userData(groupId, TRAVELLER_KEY);
     if (!d) return false;
     (d.legs || []).forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (x) { if (x && layerThere(x)) api.deleteLayer(x); }); });
+    if (d.scale && layerThere(d.scale)) api.deleteLayer(d.scale);
     if (d.source && layerThere(d.source)) {
       if (d.userSource) { if (!carriedElsewhere(groupId, d.source)) api.set(d.source, { hidden: false }); }
       else api.deleteLayer(d.source);
@@ -1119,12 +1124,20 @@ var GeoScene = (function () {
       var source = kind === "layer" ? userLayerId : makeMarker(kind, routeColour(info.legs), track);
       if (kind !== "layer") { api.parent(source, info.helpers); api.set(source, identityTransform()); }
       var meta = function (c) { return { camera: map.cameraId, category: c }; };
+      var scale = track(api.create(A.CAMERA_LAYER_TYPE, "Traveller scale"));
+      addInputs(scale, CA, E.TRAVELLER_SCALE_INPUTS);
+      setOne(scale, A.CAMERA_EXPR_ATTR, E.travellerScaleExpression(meta("travellerScale")));
+      api.connect(source, "scale.x", scale, CA + ".1", true);
+      api.connect(source, "scale.y", scale, CA + ".2", true);
+      api.parent(scale, info.helpers);
       var legs = info.legs.map(function (leg, i) {
         var dup = track(api.create("duplicator", "Leg " + leg.number + " traveller"));
         api.setGenerator(dup, "generator", "pathDistribution");
         api.set(dup, { "generator.count": 1, "generator.calculateRotations": true });
         api.connect(leg.line, "id", dup, "generator.inputShape", true);
         api.connect(source, "id", dup, "shapes", true);
+        api.connect(scale, A.DRIVER_OUTPUT_ATTR, dup, "shapeScale", true);
+        api.connect(source, "rotation.z", dup, "shapeRotation", true);
         var tip = track(api.create(A.CAMERA_LAYER_TYPE, "Leg " + leg.number + " traveller tip"));
         addInputs(tip, CA, E.TRAVELLER_TIP_INPUTS);
         setOne(tip, A.CAMERA_EXPR_ATTR, E.travellerTipExpression(meta("travellerTip")));
@@ -1149,7 +1162,7 @@ var GeoScene = (function () {
         .sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); })[0];
       // Stacking is cosmetic (like restackBaseLayers): a failure here never undoes the traveller.
       if (top) { try { legs.forEach(function (l) { placeAbove(l.dup, top); }); } catch (e5) { /* left on top of the group */ } }
-      api.setUserData(groupId, TRAVELLER_KEY, { camera: map.cameraId, kind: kind, source: source, userSource: kind === "layer", legs: legs });
+      api.setUserData(groupId, TRAVELLER_KEY, { camera: map.cameraId, kind: kind, source: source, userSource: kind === "layer", scale: scale, legs: legs });
       return { routeName: stripRoute(info.name), replaced: replaced };
     } catch (e) {
       for (var i = made.length - 1; i >= 0; i--) { try { if (layerThere(made[i])) api.deleteLayer(made[i]); } catch (e2) { /* already gone */ } }

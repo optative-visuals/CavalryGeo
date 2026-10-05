@@ -26,7 +26,7 @@ var GeoControls = (function () {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
     stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
-    dup: ["hidden", "shapeScale.x", "shapeScale.y", "generator.calculateRotations"], marker: [FILL]
+    dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"]
   };
   var SEP = " · ";
 
@@ -65,10 +65,10 @@ var GeoControls = (function () {
     // A route's travellers (copies riding its legs): shared hide, size, colour (a plugin marker only) and facing.
     function travellerRows(routeId, n) {
       (model.travellers || []).filter(function (t) { return t.routeId === routeId; }).forEach(function (t) {
-        var k = "trav:" + routeId + ":", size = [];
-        t.dups.forEach(function (d) { size.push({ m: d, attr: "shapeScale.x" }, { m: d, attr: "shapeScale.y" }); });
+        var k = "trav:" + routeId + ":";
         value(k + "hide", "bool", n + "Traveller hide", t.dups, "hidden");
-        valueTargets(k + "size", "double", n + "Traveller size", size);
+        // One target: the scale helper's size input (it multiplies the source layer's own scale).
+        if (t.scale) value(k + "size", "double", n + "Traveller size", [t.scale], "array.0");
         if (t.marker) value(k + "color", "color", n + "Traveller colour", [t.marker], FILL);
         value(k + "face", "bool", n + "Traveller faces direction", t.dups, "generator.calculateRotations");
       });
@@ -177,7 +177,7 @@ var GeoControls = (function () {
     (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); });
     (model.stops || []).forEach(add);
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); });
-    (model.travellers || []).forEach(function (t) { add(t.marker); (t.dups || []).forEach(add); });
+    (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     var data = model.data || {};
     (data.year || []).forEach(add);
     (data.sets || []).forEach(function (s) { add(s.regions); add(s.bubbles); add(s.labels); });

@@ -514,6 +514,7 @@ bakeBtn.onClick = guard(function () {
       // A traveller's copies, helpers and plugin marker are route parts too (your own layer is not).
       GeoScene.findTravellers(m).forEach(function (t) {
         t.legs.forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        if (t.scale) routeParts[t.scale] = true;
         if (!t.userSource && t.source) routeParts[t.source] = true;
       });
     });
