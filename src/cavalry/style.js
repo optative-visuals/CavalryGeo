@@ -63,7 +63,9 @@ var GeoStyle = (function () {
     var row = new ui.HLayout();
     maybe(row, "setMargins", 4, 0, 0, 0);
     maybe(row, "setSpaceBetween", 2);
-    row.add(note("F"));
+    var label = new ui.Label("F");
+    maybe(label, "setTextColor", HEADING_GREY);
+    row.add(label);
     row.add(field);
     if (!hasContainer()) return row;
     var box = new ui.Container();

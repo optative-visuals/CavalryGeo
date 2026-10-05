@@ -3398,7 +3398,7 @@ test("GeoStyle.frameField is a rounded dark box holding a grey F and the field",
   assert.ok(f instanceof ui.Label);
   assert.equal(f.getText(), "F");
   assert.equal(f._textColor, "#8a8a8a");
-  assert.equal(f._fontSize, 11);
+  assert.equal(f._fontSize, undefined);
   assert.equal(held, field);
   assert.equal(field._fixedWidth, 48, "the field keeps its width");
 });
