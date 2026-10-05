@@ -6,7 +6,7 @@
 var GeoControlPanel = (function () {
   var A = GeoAttrs, G = GeoControls;
   var PROMOTED = "promotedAttributes";
-  var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks";
+  var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
   var INPUT_TYPES = { double: "double", bool: "bool", color: A.COLOR_INPUT_TYPE };
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var DATA_KINDS = { regions: "regions", bubbles: "bubbles", labels: "valueLabels" };
@@ -169,9 +169,15 @@ var GeoControlPanel = (function () {
     attempt(function () { api.setUserData(layer, LINKS_KEY, links); });
   }
 
+  // The list's length is the highest filled slot + 1 (other inputs don't count).
   function readPromotions(comp) {
-    var count = 0, list = [];
-    try { count = api.getInConnectedAttributes(comp).filter(function (a) { return a.indexOf(PROMOTED + ".") === 0; }).length; } catch (e) { count = 0; }
+    var count = 0, list = [], slot = /^promotedAttributes\.(\d+)\.attribute$/;
+    try {
+      api.getInConnectedAttributes(comp).forEach(function (a) {
+        var m = slot.exec(String(a));
+        if (m && Number(m[1]) + 1 > count) count = Number(m[1]) + 1;
+      });
+    } catch (e) { count = 0; }
     for (var i = 0; i < count; i++) {
       var src = "", name = "", notes = "";
       try { src = String(api.getInConnection(comp, PROMOTED + "." + i + ".attribute") || ""); } catch (e) { /* empty slot */ }
@@ -184,26 +190,37 @@ var GeoControlPanel = (function () {
   }
   function keyOf(p) { return p.layer + "." + p.attr; }
 
-  // Cavalry can't reorder promotions, so when the list differs from (the plan's rows, then the
-  // user's own promotions) it is emptied and filled again in that order.
-  function rebuild(comp, wanted, own) {
-    var current = readPromotions(comp);
-    var theirs = current.filter(function (p) { return p.layer && !own[p.layer]; });
-    if (wanted.concat(theirs).map(keyOf).join("\n") === current.map(keyOf).join("\n")) return;
-    for (var i = current.length - 1; i >= 0; i--) {
-      var path = PROMOTED + "." + i;
-      attempt(function () { api.removeArrayIndex(comp, path); });
+  // The list should be the plan's rows, then the user's own promotions. A promotion is the
+  // plugin's when an earlier sync promoted it (geoPromoted on the component), this sync wants
+  // it, or it comes from the values layer; everything else is the user's, whatever its layer.
+  // Cavalry can't reorder promotions, so the list is kept up to the first difference and
+  // everything after it is removed (highest first) and added again in order.
+  function rebuild(comp, valuesId, wanted) {
+    var current = readPromotions(comp), ours = {}, stored = userData(comp, PROMOTED_KEY);
+    (Array.isArray(stored) ? stored : []).concat(wanted.map(keyOf)).forEach(function (k) { ours[k] = true; });
+    var theirs = current.filter(function (p) { return p.layer && p.layer !== valuesId && !ours[keyOf(p)]; });
+    var target = wanted.concat(theirs), from = 0;
+    while (from < current.length && from < target.length && keyOf(current[from]) === keyOf(target[from])) from++;
+    if (from < current.length || from < target.length) {
+      for (var i = current.length - 1; i >= from; i--) {
+        var path = PROMOTED + "." + i;
+        attempt(function () { api.removeArrayIndex(comp, path); });
+      }
+      // Adding to a list that wasn't cleared would only make it longer on every sync.
+      if (readPromotions(comp).length > from) throw new Error("Couldn't clear the old controls list.");
+      var n = from;
+      target.slice(from).forEach(function (p, k) {
+        if (!attempt(function () { api.connect(p.layer, p.attr, comp, PROMOTED); })) return;
+        if (from + k >= wanted.length) {
+          var o = {};
+          o[PROMOTED + "." + n + ".name"] = p.name;
+          o[PROMOTED + "." + n + ".notes"] = p.notes;
+          attempt(function () { api.set(comp, o); });
+        }
+        n++;
+      });
     }
-    var n = 0;
-    wanted.forEach(function (p) { if (attempt(function () { api.connect(p.layer, p.attr, comp, PROMOTED); })) n++; });
-    theirs.forEach(function (p) {
-      if (!attempt(function () { api.connect(p.layer, p.attr, comp, PROMOTED); })) return;
-      var o = {};
-      o[PROMOTED + "." + n + ".name"] = p.name;
-      o[PROMOTED + "." + n + ".notes"] = p.notes;
-      attempt(function () { api.set(comp, o); });
-      n++;
-    });
+    attempt(function () { setUserData(comp, PROMOTED_KEY, wanted.map(keyOf)); });
   }
 
   function sync(map) {
@@ -237,7 +254,7 @@ var GeoControlPanel = (function () {
       attempt(function () { setUserData(V, SLOTS_KEY, slots); });
     }
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
-    rebuild(made.id, wanted, G.ids(model));
+    rebuild(made.id, V, wanted);
     return { componentId: made.id, valuesId: V, controls: wanted.length };
   }
 

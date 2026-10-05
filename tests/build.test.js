@@ -3923,6 +3923,99 @@ test("controls: the user's own promotions stay, after the plugin's, with their n
   assert.ok(p.indexOf(r.valuesId + "." + slotsOf(api, r.valuesId)["pins:color"]) < last);
 });
 
+test("controls: the user's promotions of this map's own layers stay too (a pin's and the Ocean's position)", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const pin = S.addPin(map, "A", 0, 0);
+  let r = context.GeoControlPanel.sync(map);
+  const ocean = oceanOf(api, map);
+  api.connect(pin, "position", r.componentId, "promotedAttributes");
+  api.set(r.componentId, { ["promotedAttributes." + (api._promoted(r.componentId).length - 1) + ".name"]: "Pin position" });
+  api.connect(ocean, "position", r.componentId, "promotedAttributes");
+  api.set(r.componentId, { ["promotedAttributes." + (api._promoted(r.componentId).length - 1) + ".name"]: "Ocean position" });
+  S.createLabel(map, "Paris", 2.35, 48.85); // adds rows after the pins, so the list is rebuilt
+  S.addPin(map, "B", 10, 10);
+  r = context.GeoControlPanel.sync(map);
+  const p = plain(api._promoted(r.componentId)), n = p.length;
+  assert.deepEqual(p.slice(n - 2), [pin + ".position", ocean + ".position"]);
+  assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 2) + ".name"), "Pin position");
+  assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 1) + ".name"), "Ocean position");
+  assert.ok(promotedNames(api, r.componentId).indexOf("Labels · Colour") >= 0);
+});
+
+test("controls: the Controls component remembers which promotions are the plugin's", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(api.getUserDataKey(r.componentId, "geoPromoted")), plain(api._promoted(r.componentId)));
+  // An older component without the record gets it on a sync that changes nothing.
+  api.setUserData(r.componentId, "geoPromoted", null);
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(api.getUserDataKey(r.componentId, "geoPromoted")), plain(api._promoted(r.componentId)));
+});
+
+test("controls: a plugin row that is no longer wanted is removed (a layer whose fill was turned off)", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const C = require("../src/core/codec.js");
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Here", rings: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }] });
+  const id = context.GeoScene.createMapLayer(map, "Map: Countries", enc, { camera: map.cameraId, category: "countries" }, context.GeoScene.STYLE.countries, {});
+  let r = context.GeoControlPanel.sync(map);
+  assert.ok(api._promoted(r.componentId).indexOf(id + ".material.materialColor") >= 0);
+  api.setFill(id, false);
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api._promoted(r.componentId).indexOf(id + ".material.materialColor"), -1);
+});
+
+test("controls: only the changed tail of the list is removed and added again", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.createLabel(map, "Paris", 2.35, 48.85);
+  let r = context.GeoControlPanel.sync(map);
+  const before = plain(api._promoted(r.componentId));
+  assert.equal(before.length, 10); // camera 5, Ocean 2, Labels 3
+  const removed = [], realRemove = api.removeArrayIndex;
+  api.removeArrayIndex = function (id, path) { removed.push(path); return realRemove.apply(this, arguments); };
+  S.addPin(map, "A", 0, 0); // the pins' rows go in before the labels'
+  r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, ["promotedAttributes.9", "promotedAttributes.8", "promotedAttributes.7"]);
+  const after = plain(api._promoted(r.componentId));
+  assert.deepEqual(after.slice(0, 7), before.slice(0, 7));
+  assert.deepEqual(after.slice(10), before.slice(7));
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size", "Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  removed.length = 0;
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, [], "a second sync removes nothing");
+});
+
+test("controls: if the old list can't be cleared, sync stops instead of growing the list", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.createLabel(map, "Paris", 2.35, 48.85);
+  let r = context.GeoControlPanel.sync(map);
+  const before = plain(api._promoted(r.componentId));
+  api.removeArrayIndex = function () { throw new Error("nope"); };
+  S.addPin(map, "A", 0, 0);
+  assert.throws(() => context.GeoControlPanel.sync(map), /^Error: Couldn't clear the old controls list\.$/);
+  assert.deepEqual(plain(api._promoted(r.componentId)), before);
+  assert.throws(() => context.GeoControlPanel.sync(map), /Couldn't clear the old controls list\./);
+  assert.deepEqual(plain(api._promoted(r.componentId)), before, "still not grown on a second try");
+});
+
+test("controls: the promotion count comes from the highest promotedAttributes slot", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const real = api.getInConnectedAttributes;
+  // Other inputs whose names merely start with "promotedAttributes." must not count as slots.
+  api.getInConnectedAttributes = function (id) { return real.call(this, id).concat(id === r.componentId ? ["promotedAttributes.extra", "promotedAttributesX.1.attribute"] : []); };
+  const removed = [], realRemove = api.removeArrayIndex;
+  api.removeArrayIndex = function (id, path) { removed.push(path); return realRemove.apply(this, arguments); };
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, []);
+  assert.equal(api._promoted(r.componentId).length, 7);
+});
+
 test("controls: syncing again changes nothing", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);
