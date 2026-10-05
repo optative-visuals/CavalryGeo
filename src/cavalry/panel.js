@@ -89,6 +89,34 @@ var toLabel = new ui.Label("To:");
 var flyStartBox = GeoStyle.frameField(flyStartField);
 var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
+// Map styles: picked here for the next new map, applied to the picked map, saved from it.
+// settings.json keeps the picked name ("mapStyle") and the saved styles ("mapStyles"); the
+// imagery settings already own "style".
+var mapStylePicker = new ui.DropDown();
+var applyStyleBtn = GeoStyle.button("Apply to map");
+var styleNameField = new ui.LineEdit(); styleNameField.setPlaceholder("Name for a new style");
+var saveStyleBtn = GeoStyle.button("Save as style");
+var deleteStyleBtn = GeoStyle.quietButton("Delete style");
+var savedStyles = [];
+function styleList() { return GeoStyles.BUILT_IN.concat(savedStyles); }
+function pickedStyle() { return styleList()[mapStylePicker.getValue()] || GeoStyles.DARK; }
+// Lists the built-ins then the saved styles and picks `name` (Dark when it isn't listed).
+function refreshStylePicker(name) {
+  var list = styleList(), sel = 0;
+  mapStylePicker.clear();
+  list.forEach(function (s, i) {
+    mapStylePicker.addEntry(s.name);
+    if (typeof name === "string" && s.name.toLowerCase() === name.trim().toLowerCase()) sel = i;
+  });
+  mapStylePicker.setValue(sel);
+}
+function previewStyle() { if (preview.available()) preview.setColors(GeoStyles.previewColors(pickedStyle())); }
+(function () {
+  var s = {};
+  try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
+  savedStyles = GeoStyles.normalise(s.mapStyles);
+  refreshStylePicker(s.mapStyle);
+})();
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
   onPick: function (i) { if (i < 0 || i >= results.length) return; resultPicker.setValue(i + 1); previewFollowPicked(); },
@@ -140,6 +168,7 @@ function refreshNewMapFields() {
   [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
+  [applyStyleBtn, saveStyleBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
 }
 function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
@@ -147,7 +176,7 @@ function currentMap() {
 }
 // Makes a map and selects it in the Map picker.
 function makeMap(name, cam) {
-  var map = GeoScene.createMap(name, cam);
+  var map = GeoScene.createMap(name, cam, pickedStyle());
   refreshMaps(map.cameraId);
   return map;
 }
@@ -301,6 +330,50 @@ createHereBtn.onClick = guard(function () {
   say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines " : "") + "at the preview frame." + starterNote(starter) + note);
 });
 
+mapStylePicker.onValueChanged = guard(function () {
+  GeoNet.updateSettings({ mapStyle: pickedStyle().name });
+  previewStyle();
+});
+function styleMap() {
+  if (newMapSelected()) throw new Error("Pick a map first.");
+  return currentMap();
+}
+applyStyleBtn.onClick = guard(function () {
+  var map = styleMap(), style = pickedStyle(), r = GeoScene.applyMapStyle(map, style);
+  var left = r.skipped ? " " + r.skipped + " animated or connected colour" + (r.skipped === 1 ? " was" : "s were") + " left alone." : "";
+  say("Applied " + style.name + " to " + map.name + "." + left);
+});
+saveStyleBtn.onClick = guard(function () {
+  var map = styleMap(), name = styleNameField.getText().trim();
+  if (!name) throw new Error("Type a name for the style first.");
+  var built = GeoStyles.builtIn(name);
+  if (built) throw new Error(built.name + " is a built-in style — pick another name.");
+  var existing = GeoStyles.find(name, savedStyles);
+  if (existing) {
+    var q = questionDialog();
+    if (!q) throw new Error("\"" + existing.name + "\" is already saved — pick another name.");
+    if (!q.showQuestion("Replace style", "Replace the saved style " + existing.name + "?")) { say("Nothing was saved."); return; }
+    name = existing.name;
+  }
+  var style = GeoScene.readMapStyle(map, name);
+  var at = savedStyles.indexOf(existing);
+  if (at >= 0) savedStyles[at] = style; else savedStyles.push(style);
+  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: style.name });
+  GeoScene.setMapStyle(map, style);
+  refreshStylePicker(style.name);
+  previewStyle();
+  say("Saved style \"" + style.name + "\" from " + map.name + ".");
+});
+deleteStyleBtn.onClick = guard(function () {
+  var style = pickedStyle();
+  if (GeoStyles.isBuiltIn(style.name)) throw new Error("Built-in styles can't be deleted.");
+  savedStyles = savedStyles.filter(function (s) { return s !== style; });
+  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: GeoStyles.DARK.name });
+  refreshStylePicker(GeoStyles.DARK.name);
+  previewStyle();
+  say("Deleted style \"" + style.name + "\".");
+});
+
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Map", column([
     row(mapPicker, refreshMapsBtn),
@@ -313,7 +386,10 @@ TAB_BUILDERS.push(function (tabs) {
     row(jumpBtn),
     row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
     flyNote,
-    createHereBtn
+    createHereBtn,
+    GeoStyle.heading("Style"),
+    row(mapStylePicker, applyStyleBtn),
+    row(styleNameField, saveStyleBtn, deleteStyleBtn)
   ]));
 });
 
@@ -1002,7 +1078,7 @@ function refreshSourceUi() {
   resetImageryPlan();
 }
 function saveImagerySettings() {
-  GeoNet.saveSettings({ source: currentSource().id, maptilerKey: maptilerKeyField.getText().trim(), mapboxKey: mapboxKeyField.getText().trim(),
+  GeoNet.updateSettings({ source: currentSource().id, maptilerKey: maptilerKeyField.getText().trim(), mapboxKey: mapboxKeyField.getText().trim(),
     style: styleField.getText().trim(), customUrl: customUrlField.getText().trim(), customAttribution: customAttrField.getText().trim() });
 }
 function stopImageryTimer() {
@@ -1327,7 +1403,7 @@ function buildUi() {
   ui.onResize = fitPreview;
   fitPreview();
   guard(function () { refreshMaps(); })();
-  guard(function () { previewFollowPicked(); previewShowMap(); })();
+  guard(function () { previewStyle(); previewFollowPicked(); previewShowMap(); })();
   try { GeoUpdateCheck.run(say); } catch (e) { /* the update check never gets in the way */ }
 }
 buildUi();

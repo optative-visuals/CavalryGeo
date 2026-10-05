@@ -261,10 +261,17 @@ var GeoNet = (function () {
     try { return JSON.parse(api.readFromFile(f)) || {}; } catch (e) { return {}; }
   }
   function saveSettings(obj) { ensureDir(assetsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
+  // Merges patch's keys into settings.json, keeping every other key.
+  function updateSettings(patch) {
+    var s = loadSettings();
+    Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
+    saveSettings(s);
+    return s;
+  }
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces,
     tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile,
-    loadSettings: loadSettings, saveSettings: saveSettings
+    loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
 })();

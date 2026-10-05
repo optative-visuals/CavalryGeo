@@ -15,6 +15,7 @@ var GeoPreviewPanel = (function () {
     var view = { lat: 20, lon: 0, zoom: 0, width: 320, height: 180 }, source = null, places = [], picked = -1, current = null;
     var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, running = false, failed = false, sized = false;
     var levels = {}, lakes = null;
+    var colors = { water: WATER, land: LAND, border: BORDER };
 
     function comp() { return opts.compSize(); }
     function sy(y) { return opts.yUp ? view.height - y : y; }
@@ -38,6 +39,12 @@ var GeoPreviewPanel = (function () {
       }
     };
     p.available = function () { return !failed; };
+    // The picked map style's water, land and border colours (the frame, dots and names keep theirs).
+    p.setColors = function (c) {
+      colors = { water: c.water || WATER, land: c.land || LAND, border: c.border || BORDER };
+      if (draw && typeof draw.setBackgroundColor === "function") { try { draw.setBackgroundColor(colors.water); } catch (e) { /* cosmetic */ } }
+      if (!failed) changed();
+    };
 
     function guarded(fn) {
       return function () {
@@ -98,13 +105,13 @@ var GeoPreviewPanel = (function () {
       var land = GeoPreview.project(GeoPreview.visible(level(li), view), view);
       if (land.length) {
         var obj = ringsPath(land);
-        draw.addPath(obj, { color: LAND });
-        draw.addPath(obj, { color: BORDER, stroke: true, strokeWidth: 0.6 });
+        draw.addPath(obj, { color: colors.land });
+        draw.addPath(obj, { color: colors.border, stroke: true, strokeWidth: 0.6 });
       }
       if (GeoPreview.LEVELS[li].lakes) {
         var s = Math.pow(2, view.zoom);
         var big = GeoPreview.visible(lakeData(), view).filter(function (f) { return (f.bbox.x1 - f.bbox.x0) * s >= MIN_LAKE_PX || (f.bbox.y1 - f.bbox.y0) * s >= MIN_LAKE_PX; });
-        if (big.length) draw.addPath(ringsPath(GeoPreview.project(big, view)), { color: WATER });
+        if (big.length) draw.addPath(ringsPath(GeoPreview.project(big, view)), { color: colors.water });
       }
       var f = GeoPreview.frameRect(view, c.width, c.height);
       if (opts.dim) draw.addPath(appendPaths(rectPath({ x: 0, y: 0, w: view.width, h: view.height }, false), rectPath(f, true)), { color: DIM });
@@ -206,7 +213,7 @@ var GeoPreviewPanel = (function () {
       if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
       if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       draw.setSize(view.width, view.height);
-      draw.setBackgroundColor(WATER);
+      draw.setBackgroundColor(colors.water);
       draw.onMousePress = guarded(function (pos, button) {
         if (button && button !== "left") return;
         var y = sy(pos.y), o = overlayRects();

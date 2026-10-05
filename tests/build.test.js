@@ -574,7 +574,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -3706,7 +3706,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -4535,6 +4535,174 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
   context.refreshMapsBtn.onClick();
   context.preview._render();
   assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
+});
+
+// ---- Map tab: Style section ----
+const SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
+function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
+function pickStyle(context, name) {
+  const i = context.mapStylePicker._entries.indexOf(name);
+  assert.ok(i >= 0, name + " is listed");
+  context.mapStylePicker.setValue(i);
+  context.mapStylePicker.onValueChanged();
+}
+
+test("Map tab Style: the section sits at the bottom of the Map tab, built-ins listed in order, Dark picked", () => {
+  const { context, ui } = buildSandbox();
+  assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
+  assert.equal(context.mapStylePicker.getValue(), 0);
+  const items = context.sectionPages.pages[0]._items;
+  const last = items.slice(-3);
+  assert.ok(context.GeoStyle.isHeading(last[0]));
+  assert.ok(holds(last[1], context.mapStylePicker) && holds(last[1], context.applyStyleBtn));
+  assert.ok(holds(last[2], context.styleNameField) && holds(last[2], context.saveStyleBtn) && holds(last[2], context.deleteStyleBtn));
+  assert.ok(ui);
+});
+
+test("Map tab Style: Apply and Save hide while New map is picked; Delete and the name box stay", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.newMapSelected(), true);
+  assert.equal(context.applyStyleBtn.isHidden(), true);
+  assert.equal(context.saveStyleBtn.isHidden(), true);
+  assert.equal(context.deleteStyleBtn.isHidden(), false);
+  assert.equal(context.styleNameField.isHidden(), false);
+  createWorldMap(context);
+  assert.equal(context.applyStyleBtn.isHidden(), false);
+  assert.equal(context.saveStyleBtn.isHidden(), false);
+});
+
+test("Map tab Style: the picked style is remembered in settings.json and used for the next new map", () => {
+  const { context, api } = buildSandbox();
+  pickStyle(context, "Vintage");
+  assert.equal(settingsOf(api).mapStyle, "Vintage");
+  createWorldMap(context);
+  const map = context.currentMap();
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Vintage");
+  const again = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono", source: "eox" }); } });
+  assert.equal(again.context.mapStylePicker._entries[again.context.mapStylePicker.getValue()], "Mono");
+});
+
+test("Map tab Style: picking a style sets the preview's background to its water colour", () => {
+  const { context } = buildSandbox();
+  pickStyle(context, "Light");
+  assert.equal(context.preview._draw._background, "#cfe3ec");
+});
+
+test("preview: setColors redraws land, borders and water in the given colours", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setColors({ water: "#cfe3ec", land: "#f2efe6", border: "#b9b4a6" });
+  p._render();
+  assert.equal(p._draw._background, "#cfe3ec");
+  assert.equal(fills(p._draw, "#f2efe6").length, 1, "land in the new colour");
+  assert.equal(strokes(p._draw, "#b9b4a6").length, 1, "borders in the new colour");
+  assert.equal(fills(p._draw, "#4a5a50").length, 0, "no old land colour left");
+  assert.equal(strokes(p._draw, "#33CE70").length, 1, "the green frame keeps its colour");
+});
+
+test("Map tab Style: Apply restyles the picked map and says so", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  pickStyle(context, "Blueprint");
+  context.applyStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Applied Blueprint to Map.");
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
+});
+
+test("Map tab Style: Apply reports colours it left alone", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  api.keyframe(oceanOf(api, map), 0, { "material.materialColor": "#000000" });
+  pickStyle(context, "Mono");
+  context.applyStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Applied Mono to Map. 1 animated or connected colour was left alone.");
+});
+
+test("Map tab Style: Save as style saves the map's colours, lists and picks the new style, keeping other settings", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox", maptilerKey: "k" }); } });
+  createWorldMap(context);
+  const map = context.currentMap();
+  api.set(oceanOf(api, map), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("  Mine ");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Saved style \"Mine\" from Map.");
+  const s = settingsOf(api);
+  assert.equal(s.source, "eox");
+  assert.equal(s.maptilerKey, "k");
+  assert.equal(s.mapStyle, "Mine");
+  assert.equal(s.mapStyles.length, 1);
+  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(s.mapStyles[0].colors.ocean, "#010203");
+  assert.deepEqual(context.mapStylePicker._entries.slice(-1), ["Mine"]);
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Mine");
+});
+
+test("Map tab Style: Save refuses an empty name and a built-in's name", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.styleNameField.setText("  ");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Type a name for the style first.");
+  context.styleNameField.setText("blueprint");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Blueprint is a built-in style — pick another name.");
+});
+
+test("Map tab Style: saving over a saved name asks first; No keeps the old one", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine", colors: { ocean: "#111111" } }] }); } });
+  createWorldMap(context);
+  const asked = withModal(ui, false);
+  context.styleNameField.setText("mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].question, /Replace the saved style Mine\?/);
+  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#111111");
+  assert.equal(context.statusLabel.getText(), "Nothing was saved.");
+  withModal(ui, true);
+  context.saveStyleBtn.onClick();
+  assert.equal(settingsOf(api).mapStyles.length, 1);
+  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#1d2a33");
+});
+
+test("Map tab Style: saving over a saved name with no dialog refuses", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine" }] }); } });
+  createWorldMap(context);
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: \"Mine\" is already saved — pick another name.");
+});
+
+test("Map tab Style: Delete removes the picked saved style and refuses built-ins", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); } });
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Other"]);
+  assert.equal(settingsOf(api).mapStyle, "Dark");
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Dark");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Built-in styles can't be deleted.");
+});
+
+test("Map tab Style: a broken styles entry in settings.json never stops the panel", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: 42, mapStyles: "junk" }); } });
+  assert.equal(context.mapStylePicker._entries.length, 6);
+  assert.equal(context.mapStylePicker.getValue(), 0);
+});
+
+test("Imagery settings are merged into settings.json, never replacing other keys", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ style: "basic", mapStyle: "Mono", mapStyles: [{ name: "Mine" }], updateCheckedAt: 5 }); } });
+  context.saveImagerySettings();
+  const s = settingsOf(api);
+  assert.equal(s.mapStyle, "Mono");
+  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(s.updateCheckedAt, 5);
+  assert.ok("source" in s);
 });
 
 // ---- Map controls ------------------------------------------------------------------
