@@ -54,7 +54,9 @@ the **Controls** tab there to find the map's settings in one place:
 - **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
   (for cities) dot size.
 - **Pins** and **Labels:** one hide, colour and size for all of them.
-- **Routes:** colour, width and arc height for each route, and each leg's **draw on %** to animate.
+- **Routes:** colour, width, arc height, lean and flip side for each route, and for each leg its
+  **draw on %** to animate and **shape by hand** for exact control of its curve.
+- **Stops:** one **Hide**, **Colour** and **Size** for every route stop.
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
 - **Imagery:** opacity and hide.
 
@@ -143,15 +145,21 @@ cache come after them).
 ## Label: routes
 
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
-  stops make a flight arc, more make a journey. Set **Lift %** (how high the arcs bow), tick
-  **Pins at stops** and **Labels at stops** if you want them, and press **Create route**.
-- Each leg is its own layer. To draw a leg on, animate its `<route> · Leg N draw on %` row
-  (0 → 100) in the map's Controls; `<route> · Arc height` raises or flattens every arc of the
-  route. On a globe, arcs rise off the surface and hide behind it.
-- For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
-  route leg by leg.
-- Route legs show **Detail** and **Point Radius** from ordinary map layers — you can ignore both
-  (Detail 0 hides the leg).
+  stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
+  with), tick **Labels at stops** if you want a label inside each circle, and press **Create route**.
+- Each stop is a green circle you can drag in the viewer, and the circles ride along with the
+  camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
+  with it. When a dragged stop is where you want it, select it and press **Pin here**: it stays
+  there as the camera moves, instead of following the map.
+- The curve is shaped from the map's Controls: per route, **Arc height**, **Lean** and
+  **Flip side** change every leg at once. For one leg, tick `<route> · Leg N shape by hand` and
+  set its start and end handle X / Y numbers (in pixels, relative to each stop) — handy for still
+  shots. Untick it to go back to the plugin's shape.
+- To draw a leg on, animate its `<route> · Leg N draw on %` row (0 → 100) in the map's Controls.
+  For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
+  route leg by leg. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
+- On a globe, a stop on the far side of the Earth fades out with its legs, and a long leg is a
+  simple curve rather than a bow. Routes made by earlier versions keep working as before.
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
   Mercator itself does. On flat maps, a leg crossing the date line runs off the side of the frame
   rather than wrapping round.

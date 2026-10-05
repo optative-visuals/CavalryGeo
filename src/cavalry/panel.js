@@ -562,7 +562,7 @@ labelCoordBtn.onClick = guard(function () {
 });
 
 // ---- Routes (Label section) -------------------------------------------------
-// A flight arc is a route with two stops; a journey has more. One leg layer per pair.
+// A route is stops joined by legs: each stop is a circle you can drag; each leg a Bézier line.
 var routeResults = [], stops = [];
 var routeSearchField = new ui.LineEdit(); routeSearchField.setPlaceholder("Search a stop, e.g. London");
 var routeSearchBtn = GeoStyle.primaryButton("Search");
@@ -571,10 +571,10 @@ var addStopBtn = GeoStyle.button("Add stop");
 var stopsList = new ui.List(); stopsList.setSelectionMode("extended");
 var removeStopBtn = GeoStyle.button("Remove selected");
 var clearStopsBtn = GeoStyle.button("Clear");
-var liftField = new ui.NumericField(30); liftField.setType(1); liftField.setMin(0); liftField.setMax(100);
-var pinsAtStops = new ui.Checkbox(true);
+var arcField = new ui.NumericField(30); arcField.setType(1); arcField.setMin(0); arcField.setMax(100);
 var labelsAtStops = new ui.Checkbox(false);
 var createRouteBtn = GeoStyle.primaryButton("Create route");
+var pinStopsBtn = GeoStyle.button("Pin here");
 
 function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
@@ -610,8 +610,20 @@ clearStopsBtn.onClick = guard(function () { stops = []; refreshStops(); say("Sto
 createRouteBtn.onClick = guard(function () {
   var map = currentMap();
   if (stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
-  var r = GeoScene.createRoute(map, stops, { lift: liftField.getValue(), pins: pinsAtStops.getValue(), labels: labelsAtStops.getValue() });
-  say("Route created: " + r.legs.length + " leg(s). Animate each leg's draw on % in the map's Controls to draw it on." + syncControls(map));
+  var r = GeoScene.createRoute(map, stops, { arc: arcField.getValue(), labels: labelsAtStops.getValue() });
+  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls."
+    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate each leg's draw on % in the map's Controls.";
+  say("Route created: " + r.legs.length + " leg(s)." + how + syncControls(map));
+});
+pinStopsBtn.onClick = guard(function () {
+  var map = currentMap(), sel = [];
+  try { sel = api.getSelection() || []; } catch (e) { sel = []; }
+  if (!sel.length) throw new Error("Select one or more route stops (the circles) first.");
+  var r = GeoScene.pinStops(map, sel);
+  if (!r.pinned && !r.offGlobe.length) throw new Error("Select one or more route stops (the circles) first.");
+  var msg = "Pinned " + r.pinned + " stop(s).";
+  if (r.offGlobe.length) msg += " " + r.offGlobe.join(", ") + (r.offGlobe.length > 1 ? " are" : " is") + " past the globe's edge, so " + (r.offGlobe.length > 1 ? "they" : "it") + " kept " + (r.offGlobe.length > 1 ? "their places." : "its place.");
+  say(msg + syncControls(map));
 });
 
 // ---- Label section: Pins and Routes, switched by a small tab bar -----------------
@@ -642,9 +654,11 @@ TAB_BUILDERS.push(function (tabs) {
     stopsList,
     row(removeStopBtn, clearStopsBtn),
     GeoStyle.heading("Style"),
-    row(new ui.Label("Lift %"), liftField),
-    row(pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
-    createRouteBtn
+    row(new ui.Label("Arc height %"), arcField),
+    row(labelsAtStops, new ui.Label("Labels at stops")),
+    createRouteBtn,
+    GeoStyle.note("Drag stops in the viewer, then Pin here to keep them there."),
+    pinStopsBtn
   ]));
   labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
   // No margins here: the page columns already carry theirs.

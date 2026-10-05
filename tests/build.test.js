@@ -461,7 +461,7 @@ test("each section page holds its controls: Extract and Bake in Layers, Pins and
   assert.ok(holds(pages[0], context.searchBtn), "Map");
   assert.ok(holds(pages[1], context.addLayersBtn) && holds(pages[1], context.findBtn) && holds(pages[1], context.bakeBtn), "Layers");
   assert.ok(holds(pages[2], context.buildImageryBtn), "Imagery");
-  assert.ok(holds(pages[3], context.pinHereBtn) && holds(pages[3], context.createRouteBtn), "Label");
+  assert.ok(holds(pages[3], context.pinHereBtn) && holds(pages[3], context.createRouteBtn) && holds(pages[3], context.pinStopsBtn), "Label");
   assert.ok(holds(pages[4], context.addDataBtn), "Data");
 });
 
@@ -506,7 +506,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
-    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn",
+    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
   ];
@@ -3260,7 +3260,7 @@ test("layer categories and data Show options are toggle buttons; yes/no settings
   assert.equal(context.regionsCheck.getValue(), true);
   assert.equal(context.legendCheck.getValue(), true);
   assert.equal(context.bubblesCheck.getValue(), false);
-  [context.creditCheck, context.lookupCheck, context.pinsAtStops, context.labelsAtStops].forEach((c) => assert.ok(c instanceof ui.Checkbox));
+  [context.creditCheck, context.lookupCheck, context.labelsAtStops].forEach((c) => assert.ok(c instanceof ui.Checkbox));
 });
 
 test("Add layers reads the toggles, and asks to turn one on when none are", () => {
@@ -4681,4 +4681,50 @@ test("controls: a new route gets stop, curve and hand rows; values drive every h
   d.stops.forEach((st) => ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(st.circle, a), s.valuesId + "." + size)));
   const hx = slots["leg:" + d.legs[0].line + ":startX"];
   assert.equal(api.get(s.valuesId, hx), api.get(d.legs[0].startHandle, "array.12"), "hand X starts with the seeded value");
+});
+
+test("Routes tab: Arc height %, Labels at stops and Pin here; no Pins at stops", () => {
+  const { context } = buildSandbox();
+  const page = context.labelPages.pages[1];
+  assert.ok(holds(page, context.arcField) && holds(page, context.pinStopsBtn) && holds(page, context.createRouteBtn));
+  assert.equal(context.pinsAtStops, undefined);
+  assert.equal(context.liftField, undefined);
+  let label = null;
+  walkUi(page, (n) => { if (n._text === "Arc height %") label = n; });
+  assert.ok(label, "an 'Arc height %' label");
+});
+
+test("Create route passes Arc height % and makes a new-style route", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.stops.push({ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 });
+  context.arcField.setValue(55);
+  context.createRouteBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  const found = plain(context.GeoScene.findRoutes(map));
+  assert.equal(found.length, 1);
+  assert.equal(api.get(found[0].legs[0].startHandle, "array.8"), 55);
+  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\. Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls\./);
+});
+
+test("Pin here: needs a selected stop, then pins it", () => {
+  const { context, api } = buildSandbox();
+  context.pinStopsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+  createWorldMap(context);
+  api.select([]);
+  context.pinStopsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select one or more route stops (the circles) first.");
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const st = routeData(api, r.groupId).stops[0];
+  api.set(st.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(st.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.select([st.circle]);
+  context.pinStopsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Pinned 1 stop\(s\)\./);
+  api.set(st.position, { "array.4": 2, "array.2": 2 });
+  api.set(st.circle, { position: { x: 100000, y: 0, z: 0 } });
+  context.pinStopsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Pinned 0 stop\(s\)\. A is past the globe's edge, so it kept its place\./);
 });

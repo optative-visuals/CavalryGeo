@@ -119,18 +119,25 @@ adding street layers.
 
 ## Label → Routes
 
-- [ ] 22. World map (Web Mercator): Label → Routes → add London and New York → Create route →
-      a green arc bowing upward between them; in the map's Controls animate
-      London → New York · Leg 1 draw on % 0 → 100 → it draws from London to New York; leg ends
-      are round.
-- [ ] 23. Keyframe London → New York · Arc height 0 → 60 → the arc rises smoothly; the ends stay put.
-- [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the
-      globe → it hides behind the globe, and a high arc peeks over the edge.
-- [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops
-      ticked → a "Route: Paris → Lyon → Marseille" group with 2 legs, 3 pins, 3 labels;
-      routes stay above map layers after Add layers.
+- [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
+      → a "Route: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each
+      leg attached to its two stops.
+- [ ] 23. Drag a stop in the viewer → its legs follow it. In the map's Controls, animate
+      Paris → Lyon → Marseille · Leg 1 draw on % 0 → 100 → leg 1 draws on from Paris to Lyon.
+- [ ] 24. Play a Fly here with the route in view → the stops ride along with the map and the curves
+      keep their shape.
+- [ ] 25. Drag a stop, select it and press **Pin here** → it stays where you put it as the
+      camera moves.
+- [ ] 25b. In Controls, change Arc height, Lean and Flip side → every leg of the route changes.
+- [ ] 25c. Tick Leg 1 shape by hand and change its start / end handle X / Y numbers → only Leg 1
+      changes; untick it → it goes back to the plugin's shape. Stops · Hide / Colour / Size
+      change every circle.
+- [ ] 25d. Set the camera projection to 2 (globe) and rotate so a stop goes behind the Earth →
+      the stop and its legs fade out.
 - [ ] 26. Bake a leg → an editable path with the same shape as the current frame (stroke
       style is not copied).
+- [ ] 26b. An old-style route made by v0.5.0 still draws, and its Controls rows (Arc height,
+      Leg N draw on %) still work.
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
 - [ ] 27b. Label → Routes: add 3 stops, select #2, **Remove selected** → list renumbers to
       1. A, 2. C; **Clear** empties it.
