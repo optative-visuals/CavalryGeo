@@ -12,6 +12,7 @@ test("the panel bundle compiles and embeds the runtime source", () => {
   const src = buildPanel();
   assert.doesNotThrow(() => new vm.Script(src, { filename: "CavalryGeo.js" }));
   assert.ok(src.includes("var GEO_RUNTIME_SRC = "));
+  assert.ok(src.includes("var GEO_CURVE_SRC = "));
   assert.ok(src.includes("var GeoScene"));
   assert.ok(src.includes("ui.show()"));
 });

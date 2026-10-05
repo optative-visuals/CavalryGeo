@@ -154,3 +154,27 @@ test("makeGlobeProjector3: a raised point behind the globe but outside its disc 
   assert.equal(f3(X * 1.2, Y * 1.2, 0, o), true, "lifted 20% it peeks over the edge");
   near(o[0], Y * 1.2 * P.worldScale(0), 1e-6);
 });
+
+test("unproject undoes the projector for all three projections, with rotation", () => {
+  const P = require("../src/core/projection.js");
+  const cams = [];
+  [0, 1, 2].forEach((projection) => [0, 30].forEach((rotation) => [2, 6].forEach((zoom) => cams.push({ lat: 40, lon: 10, zoom, rotation, projection }))));
+  cams.forEach((cam) => {
+    const project = P.makeProjector(cam), out = [0, 0];
+    [[10, 40], [12.5, 41.2], [8, 38.5], [11, 43]].forEach(([lon, lat]) => {
+      assert.ok(project(lon, lat, out));
+      const back = P.unproject(cam, out[0], out[1]);
+      assert.ok(back, JSON.stringify(cam));
+      assert.ok(Math.abs(back.lon - lon) < 1e-6 && Math.abs(back.lat - lat) < 1e-6, JSON.stringify({ cam, lon, lat, back }));
+    });
+  });
+});
+
+test("unproject: off the globe's disc and outside Equal Earth give null; longitudes wrap", () => {
+  const P = require("../src/core/projection.js");
+  const R = P.worldScale(2);
+  assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 }, 1.01 * R, 0), null);
+  assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 1 }, 10 * R, 0), null);
+  const w = P.unproject({ lat: 0, lon: 170, zoom: 2, rotation: 0, projection: 0 }, 20 * Math.PI / 180 * R, 0);
+  assert.ok(Math.abs(w.lon - -170) < 1e-9, String(w.lon));
+});

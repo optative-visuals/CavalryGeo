@@ -71,6 +71,43 @@ var GeoProjection = (function () {
 
   function invMercY(y) { return (2 * Math.atan(Math.exp(y)) - Math.PI / 2) / D2R; }
 
+  function wrapLon(lon) { return ((lon + 540) % 360 + 360) % 360 - 180; }
+
+  // Inverse of makeProjector: Cavalry pixels (camera centre at 0, 0, north +y) back to
+  // lon / lat, or null off the globe's disc / outside the Equal Earth outline.
+  function unproject(cam, X, Y) {
+    var proj = Math.max(MERCATOR, Math.min(ORTHOGRAPHIC, Math.round(cam.projection || 0)));
+    var R = worldScale(Math.max(0, Math.min(MAX_ZOOM, cam.zoom)));
+    var rot = (cam.rotation || 0) * D2R, cr = Math.cos(rot), sr = Math.sin(rot);
+    var x = (X * cr + Y * sr) / R, y = (-X * sr + Y * cr) / R;
+    if (proj === MERCATOR) return { lon: wrapLon(cam.lon + x / D2R), lat: invMercY(y + mercY(cam.lat)) };
+    if (proj === EQUAL_EARTH) {
+      var c0 = [0, 0];
+      equalEarth(cam.lon, cam.lat, c0);
+      var ex = x + c0[0], ey = y + c0[1], t = ey / A1, t2, t6, fp;
+      for (var i = 0; i < 30; i++) {
+        t2 = t * t; t6 = t2 * t2 * t2;
+        fp = A1 + 3 * A2 * t2 + t6 * (7 * A3 + 9 * A4 * t2);
+        var dt = (t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2)) - ey) / fp;
+        t -= dt;
+        if (Math.abs(dt) < 1e-13) break;
+      }
+      if (Math.abs(t) > Math.asin(M) + 1e-9) return null;
+      t2 = t * t; t6 = t2 * t2 * t2;
+      fp = A1 + 3 * A2 * t2 + t6 * (7 * A3 + 9 * A4 * t2);
+      var lonRel = ex * M * fp / Math.cos(t) / D2R;
+      if (Math.abs(lonRel) > 180 + 1e-6) return null;
+      return { lon: wrapLon(lonRel), lat: Math.asin(Math.max(-1, Math.min(1, Math.sin(t) / M))) / D2R };
+    }
+    var rho2 = x * x + y * y;
+    if (rho2 > 1) return null;
+    var z = Math.sqrt(1 - rho2), sp0 = Math.sin(cam.lat * D2R), cp0 = Math.cos(cam.lat * D2R);
+    return {
+      lon: wrapLon(cam.lon + Math.atan2(x, z * cp0 - y * sp0) / D2R),
+      lat: Math.asin(Math.max(-1, Math.min(1, z * sp0 + y * cp0))) / D2R
+    };
+  }
+
   // Lon/lat box visible in a width x height frame (Web Mercator maths; rotation widens it).
   // Zoom is clamped exactly as makeProjector does, and the resulting box is clamped to
   // valid lon/lat ranges, so a camera keyed past MAX_ZOOM (or negative) never produces an
@@ -114,7 +151,7 @@ var GeoProjection = (function () {
   return {
     MERCATOR: MERCATOR, EQUAL_EARTH: EQUAL_EARTH, ORTHOGRAPHIC: ORTHOGRAPHIC, MAX_LAT: MAX_LAT, MAX_ZOOM: MAX_ZOOM,
     worldScale: worldScale, makeProjector: makeProjector, makeGlobeProjector3: makeGlobeProjector3,
-    mercatorViewBounds: mercatorViewBounds, mercatorViewBoxes: mercatorViewBoxes, zoomForBounds: zoomForBounds
+    mercatorViewBounds: mercatorViewBounds, mercatorViewBoxes: mercatorViewBoxes, zoomForBounds: zoomForBounds, unproject: unproject
   };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoProjection;

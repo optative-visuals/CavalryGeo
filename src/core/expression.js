@@ -15,6 +15,13 @@ var GeoExpression = (function () {
   });
   var BUBBLE_LEGEND_INPUTS = [["maxRadius", 40]];
   var IMAGERY_INPUTS = MAP_INPUTS.slice(0, 5);
+  // Route helpers (new-style routes): a stop's end point = its holder + the dragged circle; a
+  // leg's handle from both stops' holder + circle positions and the curve settings; a leg fades
+  // with whichever of its stops is hidden.
+  var END_POINT_INPUTS = [["holderX", 0], ["holderY", 0], ["stopX", 0], ["stopY", 0]];
+  var HANDLE_INPUTS = [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
+    ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0]];
+  var FADE_INPUTS = [["fromOpacity", 100], ["toOpacity", 100]];
   function inputIndex(inputs, name) {
     for (var i = 0; i < inputs.length; i++) if (inputs[i][0] === name) return i;
     return -1;
@@ -124,13 +131,29 @@ var GeoExpression = (function () {
     return runtimeSrc + "\n;\n" + inputPrelude(IMAGERY_INPUTS) + call + "\n";
   }
 
+  function routeEndPointExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(END_POINT_INPUTS) + "[_i0 + _i2, _i1 + _i3];\n";
+  }
+
+  function routeHandleExpression(curveSrc, meta, which) {
+    if (which !== "start" && which !== "end") throw new Error("Unknown handle: " + which);
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) +
+      "(_i11 ? [_i12, _i13] : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + ");\n";
+  }
+
+  function routeFadeExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
+  }
+
   return {
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
     REGION_INPUTS: REGION_INPUTS, BUBBLE_INPUTS: BUBBLE_INPUTS, VALUE_LABEL_INPUTS: VALUE_LABEL_INPUTS,
-    LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS, inputIndex: inputIndex,
+    LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS,
+    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, inputIndex: inputIndex,
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
+    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,
     legendExpression: legendExpression, bubbleLegendExpression: bubbleLegendExpression, replaceData: replaceData
   };
