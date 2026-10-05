@@ -29,7 +29,7 @@ var GeoControls = (function () {
   function recordFor(valuesId, key) { return valuesId + "|" + key; }
 
   function plan(model) {
-    var out = { rows: [], trim: [] }, V = model.valuesId, used = {};
+    var out = { rows: [], trim: [] }, V = model.valuesId;
     function direct(layer, attr, label, overrides) {
       var r = { kind: "direct", layer: layer, attr: attr, label: label };
       if (overrides) r.overrides = overrides;
@@ -50,7 +50,9 @@ var GeoControls = (function () {
       });
       if (link.length || linked.length) out.rows.push({ kind: "value", key: key, type: type, label: label, link: link, linked: linked });
     }
-    function unique(name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }
+    // A second use of a name gets " 2", " 3"...; layers, routes and data sets are counted apart.
+    function numberer() { var used = {}; return function (name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }; }
+    var layerName = numberer(), routeName = numberer(), setName = numberer();
 
     var c = model.camera;
     if (c) {
@@ -65,7 +67,7 @@ var GeoControls = (function () {
       direct(model.ocean, "hidden", "Ocean" + SEP + "Hide");
     }
     (model.layers || []).forEach(function (l) {
-      var n = unique(l.category === "extract" ? (l.name || "Feature") : (NAMES[l.category] || l.category)) + SEP;
+      var n = layerName(l.category === "extract" ? (l.name || "Feature") : (NAMES[l.category] || l.category)) + SEP;
       direct(l.id, "hidden", n + "Hide");
       direct(l.id, "opacity", n + "Opacity");
       if (l.fill) direct(l.id, FILL, n + "Fill colour");
@@ -86,7 +88,7 @@ var GeoControls = (function () {
       value("labels:size", "double", "Labels" + SEP + "Size", labels, "fontSize");
     }
     (model.routes || []).forEach(function (r) {
-      var n = r.name + SEP, k = "route:" + r.id + ":";
+      var n = routeName(r.name) + SEP, k = "route:" + r.id + ":";
       value(k + "color", "color", n + "Colour", r.legs, STROKE);
       value(k + "width", "double", n + "Width", r.legs, WIDTH);
       value(k + "lift", "double", n + "Arc height", r.legs, LIFT);
@@ -98,7 +100,7 @@ var GeoControls = (function () {
     var data = model.data || {};
     if (data.year && data.year.length) value("data:year", "double", "Data" + SEP + "Year", data.year, YEAR);
     (data.sets || []).forEach(function (s) {
-      var n = s.name + SEP, k = "data:" + s.id + ":";
+      var n = setName(s.name) + SEP, k = "data:" + s.id + ":";
       if (s.regions) {
         value(k + "low", "color", n + "Low colour", [s.regions], LOW);
         value(k + "high", "color", n + "High colour", [s.regions], HIGH);

@@ -4126,6 +4126,115 @@ test("controls: one failing control row no longer stops the rest", () => {
   assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
 });
 
+test("controls: the user's selection is restored, even when Cavalry selects the layers sync makes", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const pin = S.addPin(map, "A", 0, 0);
+  const realCreate = api.create;
+  api.create = function () { const id = realCreate.apply(this, arguments); api.select([id]); return id; };
+  api.select([pin]);
+  context.GeoControlPanel.sync(map); // makes the component and its values layer
+  assert.deepEqual(api.getSelection(), [pin]);
+  S.addPin(map, "B", 10, 10); // lands above the component, so sync brings it back to the top
+  api.select([pin]);
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(api.getSelection(), [pin]);
+});
+
+test("controls: data layers share Data · Year, and each set gets its colours and sizes", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true, prefix: "", suffix: "" });
+  const r = context.GeoControlPanel.sync(map);
+  const slots = slotsOf(api, r.valuesId), year = slots["data:year"];
+  ["regions", "bubbles", "labels"].forEach((k) => assert.equal(api.getInConnection(d.layers[k], "generator.array.7"), r.valuesId + "." + year, k));
+  assert.equal(api.get(r.valuesId, year), 2020, "starts at the layers' year");
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+    "Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour",
+    "Population · Bubble size", "Population · Bubble colour", "Population · Label size"
+  ]);
+  assert.equal(api.getInConnection(d.layers.regions, "generator.array.8"), r.valuesId + "." + slots["data:" + d.groupId + ":low"]);
+});
+
+test("controls: a regions layer whose Use middle can't be read still gets its other rows", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), E = context.GeoExpression;
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: false, labels: false, legend: false });
+  const useMiddle = "generator.array." + E.inputIndex(E.REGION_INPUTS, "useMiddle"), realGet = api.get;
+  api.get = function (id, attr) { if (id === d.layers.regions && attr === useMiddle) throw new Error("no"); return realGet.apply(this, arguments); };
+  let r;
+  assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour"]);
+});
+
+test("controls: a label helper whose connections can't be read skips only its own label", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const t1 = S.createLabel(map, "Paris", 2.35, 48.85), t2 = S.createLabel(map, "Rome", 12.5, 41.9);
+  const real = api.getOutConnections;
+  let calls = 0;
+  api.getOutConnections = function () { if (calls++ === 0) throw new Error("no"); return real.apply(this, arguments); };
+  const found = plain(S.findLabels(map));
+  assert.equal(found.length, 1);
+  assert.ok(found[0] === t1 || found[0] === t2);
+});
+
+test("controls: a leg whose name doesn't say its number is numbered by its place in the route", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
+  const realName = api.getNiceName;
+  api.getNiceName = function (id) { return id === route.legs[1] ? "Last hop" : realName.apply(this, arguments); };
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.componentId)).filter((n) => /draw on %$/.test(n));
+  assert.deepEqual(names, ["Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"]);
+  const p = plain(api._promoted(r.componentId));
+  assert.ok(p.indexOf(route.legs[0] + ".stroke.trimEnd") < p.indexOf(route.legs[1] + ".stroke.trimEnd"));
+});
+
+test("controls: sync never looks inside imagery groups (they hold thousands of tiles)", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const im = context.GeoScene.buildImagery(map, src, {}, plan);
+  const inside = new Set();
+  (function walk(id) { inside.add(id); api.getChildren(id).forEach(walk); })(im.groupId);
+  const asked = [], real = api.getChildren;
+  api.getChildren = function (id) { asked.push(id); return real.apply(this, arguments); };
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(asked.filter((id) => inside.has(id)), []);
+  assert.ok(promotedNames(api, r.componentId).indexOf("Imagery: EOX Sentinel-2 · Opacity") >= 0);
+});
+
+test("controls: without getLayerType, sync says this Cavalry can't do it", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  delete api.getLayerType;
+  assert.throws(() => context.GeoControlPanel.sync(map), /This version of Cavalry can't update a map's Controls\./);
+});
+
+test("controls: Bake updates the picked map's Controls, and doesn't need a picked map", () => {
+  const { context, api } = buildSandbox();
+  const calls = [];
+  context.GeoControlPanel.sync = (m) => { calls.push(m.cameraId); return { controls: 0 }; };
+  const loose = context.GeoScene.createMap("Loose", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }); // not in the picker
+  const a = context.GeoScene.createMapLayer(loose, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: loose.cameraId, category: "countries" }, {}, {});
+  api.select([a]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Baked 1 layer(s) at the current frame. Baked shapes no longer follow the camera.");
+  assert.deepEqual(calls, [], "no map picked: nothing to sync");
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps().find((m) => m.name === "Map");
+  assert.equal(context.mapPicker.getValue(), context.GeoScene.findMaps().findIndex((m) => m.cameraId === map.cameraId), "the new map is picked");
+  const b = context.GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([b]);
+  context.bakeBtn.onClick();
+  assert.deepEqual(calls, [map.cameraId]);
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+});
+
 test("controls: without user data, sync says this Cavalry can't do it", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);

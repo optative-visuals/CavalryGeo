@@ -147,3 +147,42 @@ test("STATE_ATTRS name the attributes each kind of member is driven on", () => {
   assert.deepEqual(G.STATE_ATTRS.valueLabels, ["generator.array.7", "generator.array.8"]);
   assert.ok(G.BASE.indexOf("countries") >= 0 && G.BASE.indexOf("extract") < 0);
 });
+
+test("BASE lists every base category, in order", () => {
+  assert.deepEqual(G.BASE, ["countries", "states", "lakes", "coastlines", "rivers", "cities", "buildings", "water", "parks", "roads", "railways"]);
+});
+
+test("every values row has the key its input is found again by", () => {
+  const regions = { id: "rg", useMiddle: true, state: {} }, bubbles = { id: "bb", state: {} }, vals = { id: "vl", state: {} };
+  const p = G.plan(model({
+    layers: [{ id: "ci", category: "cities", name: "", fill: true, stroke: false, point: true, state: {} }],
+    pins: [{ id: "p1", state: {} }], labels: [{ id: "t1", state: {} }],
+    routes: [{ id: "r", name: "A → B", legs: [{ id: "l1", number: 1, state: {} }] }],
+    data: { year: [regions, bubbles, vals], sets: [{ id: "dg", name: "GDP", regions, bubbles, labels: vals }] }
+  }));
+  assert.deepEqual(p.rows.filter((r) => r.kind === "value").map((r) => [r.label, r.key]), [
+    ["Cities · Detail", "layer:ci:detail"], ["Cities · Dot size", "layer:ci:dot"],
+    ["Pins · Hide", "pins:hidden"], ["Pins · Colour", "pins:color"], ["Pins · Size", "pins:size"],
+    ["Labels · Hide", "labels:hidden"], ["Labels · Colour", "labels:color"], ["Labels · Size", "labels:size"],
+    ["A → B · Colour", "route:r:color"], ["A → B · Width", "route:r:width"], ["A → B · Arc height", "route:r:lift"],
+    ["Data · Year", "data:year"],
+    ["GDP · Low colour", "data:dg:low"], ["GDP · High colour", "data:dg:high"], ["GDP · Middle colour", "data:dg:middle"], ["GDP · No-data colour", "data:dg:noData"],
+    ["GDP · Bubble size", "data:dg:bubbleSize"], ["GDP · Label size", "data:dg:labelSize"]
+  ]);
+});
+
+test("routes and data sets with the same name are numbered, separately from the layers", () => {
+  const leg = (id) => [{ id, number: 1, state: {} }];
+  const regions = (id) => ({ id, useMiddle: false, state: {} });
+  const r1 = regions("rg1"), r2 = regions("rg2");
+  const p = G.plan(model({
+    layers: [{ id: "cn", category: "countries", name: "", fill: true, stroke: false, point: false, state: {} }],
+    routes: [{ id: "a", name: "A → B", legs: leg("l1") }, { id: "b", name: "A → B", legs: leg("l2") }, { id: "c", name: "Countries", legs: leg("l3") }],
+    data: { year: [r1, r2], sets: [{ id: "d1", name: "GDP", regions: r1, bubbles: null, labels: null }, { id: "d2", name: "GDP", regions: r2, bubbles: null, labels: null }] }
+  }));
+  const L = labels(p);
+  assert.ok(L.indexOf("Countries · Hide") >= 0, "the layer keeps its name");
+  assert.deepEqual(L.filter((l) => / · Colour$/.test(l)), ["A → B · Colour", "A → B 2 · Colour", "Countries · Colour"]);
+  assert.deepEqual(L.filter((l) => / · Low colour$/.test(l)), ["GDP · Low colour", "GDP 2 · Low colour"]);
+  assert.equal(row(p, "A → B 2 · Leg 1 draw on %").layer, "l2");
+});

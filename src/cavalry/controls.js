@@ -24,7 +24,7 @@ var GeoControlPanel = (function () {
   function one(attr, value) { var o = {}; o[attr] = value; return o; }
 
   function requireApis() {
-    ["setUserData", "getUserDataKey", "hasUserDataKey", "removeArrayIndex"].forEach(function (fn) {
+    ["setUserData", "getUserDataKey", "hasUserDataKey", "removeArrayIndex", "getLayerType"].forEach(function (fn) {
       if (!has(fn)) throw new Error("This version of Cavalry can't update a map's Controls.");
     });
   }
@@ -76,10 +76,11 @@ var GeoControlPanel = (function () {
   }
 
   // Sorts layers (ids or { id }) in Scene Window order under the map group: top first, a
-  // group's children right after it; layers outside the group go last.
-  function sceneOrder(groupId) {
+  // group's children right after it; layers outside the group go last. The groups in `skip`
+  // (imagery, which holds thousands of tiles) are ranked but not looked inside.
+  function sceneOrder(groupId, skip) {
     var order = {}, n = 0;
-    function visit(id) { api.getChildren(id).forEach(function (k) { order[k] = n++; visit(k); }); }
+    function visit(id) { api.getChildren(id).forEach(function (k) { order[k] = n++; if (!skip[k]) visit(k); }); }
     function at(x) { var id = typeof x === "string" ? x : x.id; return order[id] === undefined ? 1e9 : order[id]; }
     visit(groupId);
     return function (a, b) { return at(a) - at(b); };
@@ -101,10 +102,29 @@ var GeoControlPanel = (function () {
     return !!(GeoScene.STYLE[styleKey] || {})[key];
   }
 
-  function legNumber(name, fallback) { var m = /^Leg (\d+)/.exec(String(name)); return m ? Number(m[1]) : fallback; }
+  function legNumber(name) { var m = /^Leg (\d+)/.exec(String(name)); return m ? Number(m[1]) : 0; }
+
+  // Legs in number order; a leg whose name doesn't start "Leg N" goes after them (in Scene
+  // Window order) and is numbered by its place, never at or below the number before it.
+  function sortLegs(legs) {
+    legs.sort(function (a, b) { return (a.number || 1e9) - (b.number || 1e9) || a.place - b.place; });
+    var last = 0;
+    legs.forEach(function (leg, i) {
+      if (!leg.number) leg.number = Math.max(i + 1, last + 1);
+      last = leg.number;
+      delete leg.place;
+    });
+  }
+
+  function readUseMiddle(id) {
+    var attr = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.REGION_INPUTS, "useMiddle");
+    try { return !!Number(api.get(id, attr)); } catch (e) { return false; }
+  }
 
   function readModel(map, valuesId) {
-    var S = G.STATE_ATTRS, order = sceneOrder(map.groupId), routes = {}, sets = {};
+    var S = G.STATE_ATTRS, imagery = GeoScene.findImagery(map), skip = {}, routes = {}, sets = {};
+    imagery.forEach(function (im) { skip[im.groupId] = true; });
+    var order = sceneOrder(map.groupId, skip);
     var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], data: { year: [], sets: [] }, imagery: [] };
     GeoScene.findMapLayers(map).sort(order).forEach(function (l, i) {
       var c = l.meta.category;
@@ -117,22 +137,19 @@ var GeoControlPanel = (function () {
       } else if (c === "route") {
         var g = api.getParent(l.id);
         if (!routes[g]) { routes[g] = { id: g, name: stripPrefix(api.getNiceName(g), "Route: "), legs: [] }; model.routes.push(routes[g]); }
-        routes[g].legs.push({ id: l.id, number: legNumber(l.name, 1000 + i), state: linkState(l.id, S.leg) });
+        routes[g].legs.push({ id: l.id, number: legNumber(l.name), place: i, state: linkState(l.id, S.leg) });
       } else if (c === "data" && DATA_KINDS[l.meta.display]) {
         var d = l.meta.display, p = api.getParent(l.id);
         if (!sets[p]) { sets[p] = { id: p, name: stripPrefix(api.getNiceName(p), "Data: "), regions: null, bubbles: null, labels: null }; model.data.sets.push(sets[p]); }
         var member = { id: l.id, state: linkState(l.id, S[DATA_KINDS[d]]) };
-        if (d === "regions") {
-          var useMiddle = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.REGION_INPUTS, "useMiddle");
-          member.useMiddle = !!Number(api.get(l.id, useMiddle));
-        }
+        if (d === "regions") member.useMiddle = readUseMiddle(l.id);
         sets[p][d] = member;
         model.data.year.push(member);
       }
     });
-    model.routes.forEach(function (r) { r.legs.sort(function (a, b) { return a.number - b.number; }); });
+    model.routes.forEach(function (r) { sortLegs(r.legs); });
     model.labels = GeoScene.findLabels(map).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
-    model.imagery = GeoScene.findImagery(map).map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
+    model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
     return model;
   }
 

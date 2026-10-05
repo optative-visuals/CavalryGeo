@@ -450,6 +450,8 @@ bakeBtn.onClick = guard(function () {
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
+  // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
+  if (!newMapSelected()) msg += syncControls(currentMap());
   say(msg);
 });
 

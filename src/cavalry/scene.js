@@ -478,7 +478,9 @@ var GeoScene = (function () {
     api.getCompLayers(false).forEach(function (id) {
       var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
       if (!meta || meta.category !== "labelDriver" || meta.camera !== map.cameraId) return;
-      (api.getOutConnections(id, A.DRIVER_OUTPUT_ATTR) || []).forEach(function (c) {
+      var conns = [];
+      try { conns = api.getOutConnections(id, A.DRIVER_OUTPUT_ATTR) || []; } catch (e) { return; } // skips only this label
+      conns.forEach(function (c) {
         var s = String(c), dot = s.indexOf(".");
         if (dot > 0 && s.slice(dot + 1) === "position") out.push(s.slice(0, dot));
       });
