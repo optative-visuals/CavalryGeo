@@ -170,11 +170,32 @@ test("unproject undoes the projector for all three projections, with rotation", 
   });
 });
 
-test("unproject: off the globe's disc and outside Equal Earth give null; longitudes wrap", () => {
+test("unproject: off the globe's disc and outside Equal Earth give null", () => {
   const P = require("../src/core/projection.js");
   const R = P.worldScale(2);
   assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 }, 1.01 * R, 0), null);
   assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 1 }, 10 * R, 0), null);
-  const w = P.unproject({ lat: 0, lon: 170, zoom: 2, rotation: 0, projection: 0 }, 20 * Math.PI / 180 * R, 0);
-  assert.ok(Math.abs(w.lon - -170) < 1e-9, String(w.lon));
+  assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 1 }, 1e300, 1e300), null, "a huge y never lands on a finite latitude");
+  assert.equal(P.unproject({ lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 1 }, 0, 1e300), null);
+});
+
+test("unproject (Mercator) does not wrap: a stop pinned east of the date line re-projects where it was dropped", () => {
+  const P = require("../src/core/projection.js");
+  const cam = { lat: 0, lon: 180, zoom: 2, rotation: 0, projection: 0 };
+  const project = P.makeProjector(cam), a = [0, 0];
+  project(178, 10, a);
+  const back = P.unproject(cam, a[0] + 30, a[1]);
+  const b = [0, 0];
+  project(back.lon, back.lat, b);
+  near(b[0], a[0] + 30, 1e-6);
+  near(b[1], a[1], 1e-6);
+  const east = P.unproject(cam, 20 * Math.PI / 180 * P.worldScale(2), 0);
+  near(east.lon, 200, 1e-9);
+});
+
+test("unproject (Mercator) clamps the latitude to the map's edge, so it re-projects where it was dropped", () => {
+  const P = require("../src/core/projection.js");
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  assert.equal(P.unproject(cam, 0, 1e6 * P.worldScale(2)).lat, P.MAX_LAT);
+  assert.equal(P.unproject(cam, 0, -1e6 * P.worldScale(2)).lat, -P.MAX_LAT);
 });
