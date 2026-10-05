@@ -4662,3 +4662,23 @@ test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores ot
   assert.equal(api.get(s.position, "array.5"), 10);
   assert.deepEqual(plain(context.GeoScene.pinStops(map, [map.cameraId])), { pinned: 0, offGlobe: [] });
 });
+
+test("controls: a new route gets stop, curve and hand rows; values drive every handle", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: true });
+  const s = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, s.componentId)).slice(7);
+  assert.deepEqual(names.slice(0, 6), ["Labels · Hide", "Labels · Colour", "Labels · Size", "Stops · Hide", "Stops · Colour", "Stops · Size"]);
+  assert.deepEqual(names.slice(6, 11), ["A → B → C · Colour", "A → B → C · Width", "A → B → C · Arc height", "A → B → C · Lean", "A → B → C · Flip side"]);
+  assert.equal(names[11], "A → B → C · Leg 1 draw on %");
+  assert.equal(names.length, 6 + 5 + 2 * 6);
+  const d = routeData(api, r.groupId), slots = slotsOf(api, s.valuesId);
+  const arc = slots["route:" + r.groupId + ":arc"];
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), s.valuesId + "." + arc)));
+  assert.equal(api.get(s.valuesId, arc), 40);
+  const size = slots["stops:size"];
+  d.stops.forEach((st) => ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(st.circle, a), s.valuesId + "." + size)));
+  const hx = slots["leg:" + d.legs[0].line + ":startX"];
+  assert.equal(api.get(s.valuesId, hx), api.get(d.legs[0].startHandle, "array.12"), "hand X starts with the seeded value");
+});

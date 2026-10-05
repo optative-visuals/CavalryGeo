@@ -14,6 +14,9 @@ var GeoControls = (function () {
   var LOW = IN + E.inputIndex(E.REGION_INPUTS, "low"), HIGH = IN + E.inputIndex(E.REGION_INPUTS, "high");
   var MIDDLE = IN + E.inputIndex(E.REGION_INPUTS, "middle"), NO_DATA = IN + E.inputIndex(E.REGION_INPUTS, "noData");
   var MAX_RADIUS = IN + E.inputIndex(E.BUBBLE_INPUTS, "maxRadius"), TEXT_SIZE = IN + E.inputIndex(E.VALUE_LABEL_INPUTS, "textSize");
+  var H = function (name) { return "array." + E.inputIndex(E.HANDLE_INPUTS, name); };
+  var H_ARC = H("arc"), H_LEAN = H("lean"), H_FLIP = H("flip"), H_HAND = H("hand"), H_X = H("handX"), H_Y = H("handY");
+  var RADIUS_X = "generator.radius.x", RADIUS_Y = "generator.radius.y";
   var BASE = ["countries", "states", "lakes", "coastlines", "rivers", "cities", "buildings", "water", "parks", "roads", "railways"];
   var NAMES = { countries: "Countries", states: "States", lakes: "Lakes", coastlines: "Coastlines", rivers: "Rivers", cities: "Cities",
     buildings: "Buildings", water: "Water", parks: "Parks", roads: "Roads", railways: "Railways" };
@@ -21,7 +24,8 @@ var GeoControls = (function () {
   // link state (incoming connection, keyframes, geoLinks record) into model.*.state.
   var STATE_ATTRS = {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
-    regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE]
+    regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
+    stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y]
   };
   var SEP = " · ";
 
@@ -35,20 +39,24 @@ var GeoControls = (function () {
       if (overrides) r.overrides = overrides;
       out.rows.push(r);
     }
-    // One values input driving `attr` on the members it may: already ours → linked; wired
-    // elsewhere, animated, or unlinked by the user on purpose → left alone; otherwise → link.
-    function value(key, type, label, members, attr) {
+    // One values input driving each target ({ m: member, attr }) it may: already ours → linked;
+    // wired elsewhere, animated, or unlinked by the user on purpose → left alone; otherwise → link.
+    function valueTargets(key, type, label, targets) {
       var rec = recordFor(V, key), link = [], linked = [];
-      members.forEach(function (m) {
-        var s = (m.state && m.state[attr]) || {};
+      targets.forEach(function (t) {
+        var s = (t.m.state && t.m.state[t.attr]) || {};
         if (s.from) {
-          if (s.from.indexOf(V + ".") === 0) linked.push({ layer: m.id, attr: attr });
+          if (s.from.indexOf(V + ".") === 0) linked.push({ layer: t.m.id, attr: t.attr });
           return;
         }
         if (s.keyed || s.record === rec) return;
-        link.push({ layer: m.id, attr: attr });
+        link.push({ layer: t.m.id, attr: t.attr });
       });
       if (link.length || linked.length) out.rows.push({ kind: "value", key: key, type: type, label: label, link: link, linked: linked });
+    }
+    // The same attribute on each of several members.
+    function value(key, type, label, members, attr) {
+      valueTargets(key, type, label, members.map(function (m) { return { m: m, attr: attr }; }));
     }
     // A second use of a name gets " 2", " 3"...; layers, routes and data sets are counted apart.
     function numberer() { var used = {}; return function (name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }; }
@@ -87,6 +95,14 @@ var GeoControls = (function () {
       value("labels:color", "color", "Labels" + SEP + "Colour", labels, FILL);
       value("labels:size", "double", "Labels" + SEP + "Size", labels, "fontSize");
     }
+    var stopsM = model.stops || [];
+    if (stopsM.length) {
+      value("stops:hidden", "bool", "Stops" + SEP + "Hide", stopsM, "hidden");
+      value("stops:color", "color", "Stops" + SEP + "Colour", stopsM, FILL);
+      var sizeTargets = [];
+      stopsM.forEach(function (m) { sizeTargets.push({ m: m, attr: RADIUS_X }, { m: m, attr: RADIUS_Y }); });
+      valueTargets("stops:size", "double", "Stops" + SEP + "Size", sizeTargets);
+    }
     (model.routes || []).forEach(function (r) {
       var n = routeName(r.name) + SEP, k = "route:" + r.id + ":";
       value(k + "color", "color", n + "Colour", r.legs, STROKE);
@@ -95,6 +111,25 @@ var GeoControls = (function () {
       r.legs.forEach(function (leg, i) {
         direct(leg.id, "stroke.trimEnd", n + "Leg " + (leg.number || i + 1) + " draw on %");
         out.trim.push(leg.id);
+      });
+    });
+    (model.newRoutes || []).forEach(function (r) {
+      var n = routeName(r.name) + SEP, k = "route:" + r.id + ":", handles = [];
+      r.legs.forEach(function (leg) { handles.push(leg.start, leg.end); });
+      value(k + "color", "color", n + "Colour", r.legs, STROKE);
+      value(k + "width", "double", n + "Width", r.legs, WIDTH);
+      value(k + "arc", "double", n + "Arc height", handles, H_ARC);
+      value(k + "lean", "double", n + "Lean", handles, H_LEAN);
+      value(k + "flip", "bool", n + "Flip side", handles, H_FLIP);
+      r.legs.forEach(function (leg, i) {
+        var ln = n + "Leg " + (leg.number || i + 1) + " ", lk = "leg:" + leg.id + ":";
+        direct(leg.id, "stroke.trimEnd", ln + "draw on %");
+        out.trim.push(leg.id);
+        value(lk + "hand", "bool", ln + "shape by hand", [leg.start, leg.end], H_HAND);
+        value(lk + "startX", "double", ln + "start handle X", [leg.start], H_X);
+        value(lk + "startY", "double", ln + "start handle Y", [leg.start], H_Y);
+        value(lk + "endX", "double", ln + "end handle X", [leg.end], H_X);
+        value(lk + "endY", "double", ln + "end handle Y", [leg.end], H_Y);
       });
     });
     var data = model.data || {};
@@ -126,6 +161,8 @@ var GeoControls = (function () {
     add(model.valuesId); add(model.camera); add(model.ocean);
     (model.layers || []).concat(model.pins || [], model.labels || [], model.imagery || []).forEach(add);
     (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); });
+    (model.stops || []).forEach(add);
+    (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); });
     var data = model.data || {};
     (data.year || []).forEach(add);
     (data.sets || []).forEach(function (s) { add(s.regions); add(s.bubbles); add(s.labels); });
