@@ -4,7 +4,7 @@ Everything the panel does, section by section. New here? Start with the
 [quick start](../README.md#quick-start) in the README.
 
 The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Extract and
-Bake are at the bottom of Layers; Label has its own **Pins / Routes** switch.
+Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch.
 
 - [Map](#map)
 - [Layers](#layers)
@@ -59,8 +59,16 @@ Every map has a **<map> Controls** layer at the top of its group. Select it and 
 
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
 press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
-kept, after the plugin's. To give one pin (or label, or leg) its own colour, right-click its
-setting on that layer and choose **Disconnect**; it then stays separate.
+kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.
+
+- **One layer, its own value:** to give one layer its own value for a shared setting (one pin's
+  colour, one leg's width, one data layer's Year…), right-click that setting on the layer and
+  choose **Disconnect**; it then stays separate.
+- **Maps made before the Controls:** the first **Refresh controls** links only the layers that
+  already show the same value. A layer you had set differently (say, one red pin) keeps its value
+  and stays separate, as if you had disconnected it.
+- **Imagery:** building imagery again replaces its group, so keyframes on its
+  `<imagery> · Opacity` and `<imagery> · Hide` rows are lost — key them again after a rebuild.
 
 ## Layers
 
@@ -110,7 +118,8 @@ Put satellite photos, styled maps or terrain under a Web Mercator map.
 
 ## Extract and Bake
 
-Both are at the bottom of the **Layers** section.
+Both are in the **Layers** section, below **Add layers** (Refresh controls and Clear download
+cache come after them).
 
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
@@ -128,10 +137,11 @@ Both are at the bottom of the **Layers** section.
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
   stops make a flight arc, more make a journey. Set **Lift %** (how high the arcs bow), tick
   **Pins at stops** and **Labels at stops** if you want them, and press **Create route**.
-- Each leg is its own layer: animate its **Trim** (Stroke tab) to draw it on, and keyframe its
-  **lift** to raise or flatten the arc. On a globe, arcs rise off the surface and hide behind it.
-- For a journey, stagger each leg's Trim keys (leg 2 starts where leg 1 ends) to draw the route
-  leg by leg.
+- Each leg is its own layer. To draw a leg on, animate its `<route> · Leg N draw on %` row
+  (0 → 100) in the map's Controls; `<route> · Arc height` raises or flattens every arc of the
+  route. On a globe, arcs rise off the surface and hide behind it.
+- For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
+  route leg by leg.
 - Route legs show **Detail** and **Point Radius** from ordinary map layers — you can ignore both
   (Detail 0 hides the leg).
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
@@ -146,8 +156,10 @@ Both are at the bottom of the **Layers** section.
   it couldn't match. Tick **Look up unmatched names** to place cities.
 - Turn on **Coloured regions**, **Bubbles**, **Value labels** and **Legend**, then **Add to map**.
   Each goes in its own layer inside a `Data: <column>` group and moves with the camera.
-- Keyframe a data layer's **Year** to animate through time; change colours, range and sizes on the
-  layers. After editing the sheet, press **Refresh data** — your styling and keyframes are kept.
+- Keyframe **Data · Year** in the map's Controls to animate through time: it drives every data
+  layer of the map, so regions, bubbles and labels stay in step. Each set's colours and sizes are
+  there too (`<set> · Low colour`, `<set> · Bubble size`…); the range is on the layers. After
+  editing the sheet, press **Refresh data** — your styling and keyframes are kept.
 
 ## Cache and settings
 
@@ -173,6 +185,5 @@ Both are at the bottom of the **Layers** section.
   imagery provider's licence for your use (EOX and MapTiler's free plan are non‑commercial).
 - Data maps colour whole countries only (not states or provinces), value labels use Cavalry's
   default font, and private sheets can't be read.
-- Each data layer has its own Year input — keyframe them together (or connect them) to keep
-  regions, bubbles and labels in sync. Data layers also show Detail and Point Radius inputs they
-  don't use, and the legend's numbers always use the compact format.
+- Data layers show Detail and Point Radius inputs they don't use, and the legend's numbers always
+  use the compact format.
