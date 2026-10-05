@@ -4291,6 +4291,97 @@ test("preview: a drag that paused before release renders full detail once, not t
   }
 });
 
+const OVERLAY = {
+  colors: { accent: "#a63d2f", text: "#4a3423" },
+  pins: [{ lon: 2, lat: 45 }],
+  labels: [{ lon: 3, lat: 46, text: "Here" }],
+  routes: [{ stops: [{ lon: 0, lat: 44 }, { lon: 4, lat: 44 }], legs: [{ from: { lon: 0, lat: 44 }, to: { lon: 4, lat: 44 }, arc: 30, lean: 0, flip: false }] }]
+};
+const texts = (draw, color) => draw._paths.filter((x) => x.paint.color === color && (x.path.cmds || []).some((c) => c[0] === "addText"));
+
+test("preview overlay: pins, labels, route legs and stops in the overlay's colours", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setOverlay(OVERLAY);
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length, 1, "pins: one fill path");
+  assert.equal(strokes(p._draw, "#a63d2f").length, 2, "legs + stop circles");
+  assert.equal(texts(p._draw, "#4a3423").length, 1, "labels");
+  p.setOverlay(null);
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length + strokes(p._draw, "#a63d2f").length, 0);
+});
+
+test("preview draft and spot: dashed accent line with dots, and a white ring", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setOverlay(OVERLAY);
+  p.setDraft([{ lon: 1, lat: 45 }, { lon: 3, lat: 45 }]);
+  p.setSpot({ lon: 2, lat: 44 });
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length, 2, "pins + draft dots");
+  assert.equal(strokes(p._draw, "#a63d2f").length, 3, "legs + stop circles + dashed draft line");
+  assert.equal(strokes(p._draw, "#ffffff").length, 1, "the spot ring");
+});
+
+test("preview click: a short press and release reports the place; a drag doesn't", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 102, y: 61 });
+  p._draw.onMouseRelease({ x: 102, y: 61 }, "left");
+  assert.equal(clicks.length, 1);
+  const want = context.GeoPreview.fromPx({ lat: 45, lon: 2, zoom: p._view().zoom, width: 320, height: 180 }, 100, 60);
+  assert.ok(Math.abs(clicks[0][0] - want.lon) < 1e-6 && Math.abs(clicks[0][1] - want.lat) < 1e-6, "the press point's place");
+  assert.equal(p.frameCamera().lon, before.lon, "a click doesn't pan");
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 60 });
+  p._draw.onMouseRelease({ x: 140, y: 60 }, "left");
+  assert.equal(clicks.length, 1, "a drag isn't a click");
+  assert.notEqual(p.frameCamera().lon, before.lon, "the drag panned");
+});
+
+test("preview click: − / + and result dots keep their meaning; no onClick means no click", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p, picks } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const o = p._overlay();
+  p._draw.onMousePress({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p._draw.onMouseRelease({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Dot" }], -1);
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  p._draw.onMouseRelease({ x: 160, y: 90 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.deepEqual(plain(picks), [0]);
+  const plainPreview = makePreview(context).p; // no onClick
+  plainPreview.setWidth(320);
+  plainPreview._draw.onMousePress({ x: 100, y: 60 }, "left");
+  plainPreview._draw.onMouseRelease({ x: 100, y: 60 }, "left"); // must not throw
+});
+
+test("preview options: double-click zoom can be turned off; frame off hides the green frame; hint sets the tooltip", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { doubleClickZoom: false, frame: false, dim: false, hint: "Click to add a stop · drag to move · + / − to zoom" });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const z = p.frameCamera().zoom;
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.equal(p.frameCamera().zoom, z);
+  p._render();
+  assert.equal(strokes(p._draw, "#33CE70").length, 0, "no green frame");
+  assert.equal(p._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
+});
+
 // ---- Preview in the Map tab ----------------------------------------------------------
 function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
 
