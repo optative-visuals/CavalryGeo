@@ -333,7 +333,7 @@ function addStarterLayers(map) {
     fetched.forEach(function (r) {
       if (!r.enc.f.length) return;
       GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
-        { camera: map.cameraId, category: r.category }, GeoScene.STYLE[r.category], {});
+        { camera: map.cameraId, category: r.category }, GeoScene.layerStyle(map, r.category), {});
     });
     GeoScene.restackBaseLayers(map, DRAW_ORDER);
     return true;
@@ -402,7 +402,7 @@ addLayersBtn.onClick = guard(function () {
   fetched.forEach(function (r) {
     if (!r.enc.f.length) { empty.push(CATEGORY_LABEL[r.category]); return; }
     GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
-      { camera: map.cameraId, category: r.category }, GeoScene.STYLE[r.category], {});
+      { camera: map.cameraId, category: r.category }, GeoScene.layerStyle(map, r.category), {});
     added++;
   });
   if (selected.some(isOsm) && creditCheck.getValue() && !GeoScene.hasAttribution(map)) GeoScene.createAttribution(map);

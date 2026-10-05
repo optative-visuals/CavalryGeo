@@ -1324,6 +1324,83 @@ test("pins, route legs and route stop pins are drawn in the panel's green", () =
   stopPins.forEach((id) => assert.equal(api.get(id, "material.materialColor"), "#1F8F4E"));
 });
 
+// ---- Map styles: every map remembers its style and new layers follow it ----
+function styledMap(context, styleName) {
+  const style = context.GeoStyles.builtIn(styleName);
+  return context.GeoScene.createMap("Styled", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, style);
+}
+
+test("map styles: a new map remembers Dark by default and its Ocean stays slate", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const rec = plain(api.getUserDataKey(map.groupId, "geoStyle"));
+  assert.equal(rec.name, "Dark");
+  assert.equal(rec.colors.ocean, "#1d2a33");
+  assert.equal(rec.widths.routes, 3);
+  assert.equal(context.GeoScene.styleOf(map).name, "Dark");
+});
+
+test("map styles: a map made in Vintage draws its Ocean, pins, labels, credits and layers in Vintage", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Vintage");
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#a9c4c0");
+  assert.equal(api.get(G.addPin(map, "Here", 0, 0), "material.materialColor"), "#a63d2f");
+  assert.equal(api.get(G.createLabel(map, "Here", 0, 0), "material.materialColor"), "#4a3423");
+  assert.equal(api.get(G.createAttribution(map), "material.materialColor"), "#4a3423");
+  assert.equal(api.get(G.createImageryCredit(map, "Credit"), "material.materialColor"), "#4a3423");
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  assert.equal(api.get(c, "material.materialColor"), "#e8d9b5");
+  assert.equal(api.get(c, "stroke.strokeColor"), "#8b6b4a");
+  assert.equal(api.get(c, "stroke.width"), 1.6);
+});
+
+test("map styles: new-style and old-style routes take the map's accent, route width and text colour", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Blueprint");
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30, labels: true });
+  r.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+  r.stops.forEach((circle) => assert.equal(api.get(circle, "material.materialColor"), "#ffffff"));
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.stops.forEach((s) => assert.equal(api.get(s.label, "material.materialColor"), "#ffffff"));
+  delete api.setGenerator;
+  const old = G.createRoute(map, [{ name: "C", lon: 0, lat: 0 }, { name: "D", lon: 5, lat: 5 }], { lift: 30, pins: true, labels: false });
+  old.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+});
+
+test("map styles: data layers take the map's text and ocean colours; bubbles keep their own", () => {
+  const { context, api } = buildSandbox();
+  const map = styledMap(context, "Light");
+  const r = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true });
+  assert.equal(api.get(r.layers.regions, "stroke.strokeColor"), "#cfe3ec");
+  assert.equal(api.get(r.layers.regions, "stroke.width"), 0.5);
+  assert.equal(api.get(r.layers.labels, "material.materialColor"), "#333333");
+  assert.equal(api.get(r.layers.legend, "material.materialColor"), "#333333");
+  assert.equal(api.get(r.layers.bubbles, "material.materialColor"), "#bc4749");
+});
+
+test("map styles: a map without a remembered style (made before styles) draws in Dark", () => {
+  const { context, api } = buildSandbox();
+  const map = styledMap(context, "Mono");
+  api.setUserData(map.groupId, "geoStyle", null);
+  assert.equal(context.GeoScene.styleOf(map).name, "Dark");
+  assert.equal(api.get(context.GeoScene.addPin(map, "Here", 0, 0), "material.materialColor"), "#1F8F4E");
+});
+
+test("map styles: Add layers on the Layers tab draws in the picked map's style", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const map = styledMap(context, "Neon night");
+  context.refreshMaps(map.cameraId);
+  context.checks.countries.widget.onClick(); // ticks the Countries toggle, as the existing Add layers tests do
+  context.addLayersBtn.onClick();
+  const countries = context.GeoScene.findMapLayers(map).find((l) => l.meta.category === "countries");
+  assert.ok(countries, context.statusLabel.getText());
+  assert.equal(api.get(countries.id, "material.materialColor"), "#14142a");
+  assert.equal(api.get(countries.id, "stroke.strokeColor"), "#2de2e6");
+});
+
 test("creating a map leaves the user's selection alone, even if Cavalry selects the new Ocean", () => {
   const { context, api } = buildSandbox();
   const realPrimitive = api.primitive.bind(api);
