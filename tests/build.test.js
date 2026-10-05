@@ -31,6 +31,8 @@ function makeFakeApi() {
   var connections = [];
   var files = Object.create(null);
   var COMP_ID = "comp#1";
+  var comp = { startFrame: 0, endFrame: 9, playbackStart: 0, playbackEnd: 9 };   // like Cavalry: frameRange follows start / end, the play range does not
+  var outFrames = {};  // layerId -> out frame (a layer made in a comp ending at 9 has out frame 10)
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
   var timers = [];
   var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
@@ -44,7 +46,7 @@ function makeFakeApi() {
   // Like Cavalry: a layer with no parent sits at the composition's top level.
   function siblingsOf(id) { var key = parents[id] || COMP_ID; return childOrder[key] || (childOrder[key] = []); }
   function leave(id) { var sib = siblingsOf(id), i = sib.indexOf(id); if (i >= 0) sib.splice(i, 1); }
-  function addToComp(id) { delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
+  function addToComp(id) { outFrames[id] = comp.endFrame + 1; delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
   // One step up (toward the top of the Scene Window) or down within the layer's container.
   function step(id, by) {
     var sib = siblingsOf(id), i = sib.indexOf(id), j = i + by;
@@ -89,6 +91,9 @@ function makeFakeApi() {
       if (at >= 0) top.splice(at + 1, 0, id); else top.unshift(id);
     },
     getParent: function (id) { return parents[id] || ""; },
+    getInFrame: function () { return 0; },
+    getOutFrame: function (id) { return outFrames[id]; },
+    setOutFrame: function (id, f) { outFrames[id] = f; },
     getChildren: function (parentId) { return (childOrder[parentId] || []).slice(); },
     getNiceName: function (id) { return niceNames[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
@@ -129,6 +134,7 @@ function makeFakeApi() {
     getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
     set: function (id, obj) {
+      if (id === COMP_ID) { Object.keys(obj).forEach(function (k) { if (k in comp) comp[k] = obj[k]; }); }
       var o = ensure(id);
       Object.keys(obj).forEach(function (k) {
         // Like Cavalry: a JavaScript Utility has no transform attributes.
@@ -140,7 +146,8 @@ function makeFakeApi() {
     },
     get: function (id, attr) {
       if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
-      if (id === COMP_ID && attr === "frameRange") return { x: 0, y: 9 };
+      if (id === COMP_ID && attr === "frameRange") return { x: comp.startFrame, y: comp.endFrame };
+      if (id === COMP_ID && attr in comp) return comp[attr];
       var pm = PROMOTED_SLOT.exec(attr);
       if (pm && promoted[id] && promoted[id][Number(pm[1])]) return promoted[id][Number(pm[1])][pm[2]];
       var k = keyframes[id] && keyframes[id][attr];
@@ -691,16 +698,20 @@ test("Map tab: a successful Search pre-fills the Pins tab, so Pin here works str
   assert.ok(api.getCompLayers().some((id) => api.getNiceName(id) === "Pin: Paris"));
 });
 
-test("Fly to keys the camera from the current frame to the selected place", () => {
+// Fly here's Start / End frames: a comp long enough that a flight doesn't need the extend dialog.
+function longComp(api) { api.set(api.getActiveComp(), { endFrame: 500, playbackEnd: 500 }); }
+function flyRange(context, start, end) { context.flyStartField.setValue(start); context.flyEndField.setValue(end); }
+
+test("Fly to keys the camera from Start to End on the selected place", () => {
   const { context, api } = buildSandbox();
+  longComp(api);
   createWorldMap(context);
   const map = context.currentMap();
   context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
   context.refreshResultPicker();
   context.resultPicker.setValue(1);
   context.resultPicker.onValueChanged(); // the preview follows the pick, so Fly here goes there
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
   assert.doesNotMatch(context.statusLabel.getText(), /world view/, "the world-view note only when World view is picked");
@@ -708,9 +719,9 @@ test("Fly to keys the camera from the current frame to the selected place", () =
   api.setFrame(29);
   assert.ok(Math.abs(api.get(map.cameraId, "array.0") - 48.8566) < 1e-9);
   assert.equal(api.getFrame(), 29);
-  context.flyFramesField.setValue(1);
+  flyRange(context, 20, 20);
   context.flyBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Use at least 2 frames/);
+  assert.match(context.statusLabel.getText(), /Set End at least 1 frame after Start/);
 });
 
 test("Fly to the world view", () => {
@@ -718,33 +729,210 @@ test("Fly to the world view", () => {
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(5);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view: frames 0–4\./);
   // In Cavalry this was mistaken twice for a flight to the searched place: say why.
   assert.match(context.statusLabel.getText(), /Flying to the world view — to fly somewhere else, search for a place and pick it first\./);
 });
 
-// F9: the comp's default fake frame range is 0..9; a flight of 15 frames from frame 0
-// runs past it, and the status should say so.
-test("Fly to notes when the flight ends after the composition's last frame (F9)", () => {
-  const { context, api } = buildSandbox();
+// F9: the comp's default fake frame range is 0..9; a flight from frame 0 to 14 runs past it, so
+// Fly here asks before it extends the composition (the full set is in the tests below).
+test("Fly to asks before a flight that ends after the composition's last frame (F9)", () => {
+  const { context, api, ui } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(15);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
   context.flyBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Note: the flight ends after the composition's last frame \(9\)\./);
+  assert.equal(asked.length, 1);
+  assert.match(context.statusLabel.getText(), /The composition was extended to frame 14 so the flight isn't cut off\./);
 });
 
 test("Fly to says nothing extra when the flight stays inside the composition (F9)", () => {
-  const { context, api } = buildSandbox();
+  const { context, api, ui } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(5);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
-  assert.doesNotMatch(context.statusLabel.getText(), /Note: the flight ends/);
+  assert.equal(asked.length, 0, "no dialog inside the composition");
+  assert.doesNotMatch(context.statusLabel.getText(), /extended/);
+  assert.equal(api.get(api.getActiveComp(), "endFrame"), 9);
+});
+
+// Fly here's Start / End frames, chaining and extending the composition.
+function flyWorld(context) {
+  createWorldMap(context);
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  return context.currentMap();
+}
+function camTimes(api, map) { return [0, 1, 2].map((i) => plain(api.getKeyframeTimes(map.cameraId, "array." + i))); }
+const range = (a, b) => { const r = []; for (let f = a; f <= b; f++) r.push(f); return r; };
+
+test("Map tab: Start begins at the playhead and End 100 frames later; From and to label them", () => {
+  const { context, ui } = buildSandbox({ setup: (api) => api.setFrame(12) });
+  assert.equal(context.flyStartField.getValue(), 12);
+  assert.equal(context.flyEndField.getValue(), 112);
+  assert.equal(context.fromLabel.getText(), "From");
+  assert.equal(context.toLabel.getText(), "to");
+  const row = context.sectionPages.pages[0]._items.filter((n) => holds(n, context.flyBtn) && n instanceof ui.HLayout)[0];
+  assert.deepEqual(row._items, [context.jumpBtn, context.fromLabel, context.flyStartField, context.toLabel, context.flyEndField, context.flyBtn]);
+  const quiet = buildSandbox().context;
+  assert.equal(quiet.flyStartField.getValue(), 0);
+  assert.equal(quiet.flyEndField.getValue(), 100);
+});
+
+test("Map tab: the Start and End fields hide with Jump here and Fly here while New map is picked", () => {
+  const { context } = buildSandbox();
+  const widgets = ["jumpBtn", "fromLabel", "flyStartField", "toLabel", "flyEndField", "flyBtn"];
+  widgets.forEach((w) => assert.equal(context[w].isHidden(), true, w + " hidden with no map"));
+  createWorldMap(context);
+  widgets.forEach((w) => assert.equal(context[w].isHidden(), false, w + " shown with a map"));
+});
+
+test("Fly here keys exactly Start to End, restores the playhead and moves the fields on for the next flight", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  flyRange(context, 30, 49);
+  api.setFrame(7);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 30–49."), 0);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, range(30, 49)));
+  assert.equal(api.getFrame(), 7, "the playhead goes back where it was");
+  assert.equal(context.flyStartField.getValue(), 49, "Start moves to the old End");
+  assert.equal(context.flyEndField.getValue(), 68, "End moves on by the same length");
+});
+
+test("Fly here starts from the camera as it is at the Start frame, not at the playhead", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 50, "array.1": 60, "array.2": 8 });
+  api.keyframe(map.cameraId, 40, { "array.0": 10, "array.1": 20, "array.2": 3 });
+  api.setFrame(0);
+  flyRange(context, 40, 49);
+  context.flyBtn.onClick();
+  api.setFrame(40);
+  assert.equal(api.get(map.cameraId, "array.0"), 10);
+  assert.equal(api.get(map.cameraId, "array.1"), 20);
+  assert.equal(api.get(map.cameraId, "array.2"), 3);
+  assert.equal(plain(api.getKeyframeTimes(map.cameraId, "array.0"))[0], 0, "the earlier key stays");
+});
+
+test("Fly here refuses an End less than 1 frame after Start and changes nothing", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  [[20, 20], [20, 15]].forEach(([s, e]) => {
+    flyRange(context, s, e);
+    context.flyBtn.onClick();
+    assert.equal(context.statusLabel.getText(), "Error: Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+    assert.deepEqual(camTimes(api, map), [[], [], []]);
+    assert.equal(context.flyStartField.getValue(), s, "the fields stay as they were");
+  });
+});
+
+test("Fly here refuses a Start before the composition's first frame", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  api.set(api.getActiveComp(), { startFrame: 5 });
+  const map = flyWorld(context);
+  flyRange(context, 3, 20);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Start is before the composition's first frame (5).");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+});
+
+test("Fly here past the composition's end asks, and Yes extends the composition, the layers that reached its end and the play range", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp();
+  const atEnd = api.create("group", "Reaches the end"), atEndMinusOne = api.create("group", "Out frame 9"), trimmed = api.create("group", "Trimmed");
+  api.setOutFrame(atEndMinusOne, 9);
+  api.setOutFrame(trimmed, 4);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Extend the timeline");
+  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 14. Continue?");
+  assert.equal(api.get(comp, "endFrame"), 14);
+  assert.equal(api.get(comp, "frameRange").y, 14);
+  assert.equal(api.get(comp, "playbackEnd"), 14);
+  assert.equal(api.getOutFrame(atEnd), 15);
+  assert.equal(api.getOutFrame(atEndMinusOne), 15);
+  assert.equal(api.getOutFrame(trimmed), 4, "a layer trimmed to end earlier is left alone");
+  assert.equal(api.getOutFrame(map.cameraId), 15);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, range(0, 14)));
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 14 so the flight isn't cut off."), 0);
+  assert.ok(context.statusLabel.getText().indexOf("Press Build imagery") > 0);
+  assert.equal(context.flyStartField.getValue(), 14);
+  assert.equal(context.flyEndField.getValue(), 28);
+});
+
+test("Fly here past the composition's end: No cancels and changes nothing", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp(), layer = api.create("group", "Reaches the end");
+  const asked = withModal(ui, false);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(context.statusLabel.getText(), "Cancelled. Set End to 9 or earlier to stay within your composition.");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  assert.equal(api.get(comp, "playbackEnd"), 9);
+  assert.equal(api.getOutFrame(layer), 10);
+  assert.equal(context.flyStartField.getValue(), 0);
+  assert.equal(context.flyEndField.getValue(), 14);
+});
+
+test("Fly here past the composition's end with no dialog available refuses and never extends silently", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp(), layer = api.create("group", "Reaches the end");
+  assert.equal(context.questionDialog(), null);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: End is after your composition's last frame (9). Set End to 9 or earlier, or lengthen the composition first.");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  assert.equal(api.getOutFrame(layer), 10);
+});
+
+test("GeoScene.extendComp: null when the comp already reaches the frame; keeps a shorter play range", () => {
+  const { context, api } = buildSandbox();
+  const comp = api.getActiveComp(), layer = api.create("group", "Layer");
+  assert.equal(context.GeoScene.extendComp(9), null);
+  assert.equal(context.GeoScene.extendComp(3), null);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  api.set(comp, { playbackEnd: 5 });
+  const r = context.GeoScene.extendComp(20);
+  assert.deepEqual(plain(r), { oldEnd: 9, newEnd: 20, layers: 1 });
+  assert.equal(api.get(comp, "endFrame"), 20);
+  assert.equal(api.get(comp, "playbackEnd"), 5, "a play range that stopped earlier stays");
+  assert.equal(api.getOutFrame(layer), 21);
+});
+
+test("GeoScene.extendComp: one layer failing never stops the rest, and a Cavalry without out frames still extends the comp", () => {
+  const { context, api } = buildSandbox();
+  const comp = api.getActiveComp(), a = api.create("group", "A"), b = api.create("group", "B"), c = api.create("group", "C");
+  const real = api.setOutFrame;
+  api.setOutFrame = (id, f) => { if (id === b) throw new Error("locked"); real(id, f); };
+  const r = context.GeoScene.extendComp(12);
+  assert.equal(r.layers, 2);
+  assert.equal(api.getOutFrame(a), 13);
+  assert.equal(api.getOutFrame(b), 10);
+  assert.equal(api.getOutFrame(c), 13);
+  assert.equal(api.get(comp, "endFrame"), 12);
+  delete api.setOutFrame;
+  assert.equal(context.GeoScene.extendComp(15).layers, 0);
+  assert.equal(api.get(comp, "endFrame"), 15);
 });
 
 // F13: newly added base layers must not bury an existing pin/label/extract - restack
@@ -2626,7 +2814,7 @@ test("Build imagery re-plans (does not start downloading a stale plan) after Fly
   useCustomTiles(context);
   context.buildImageryBtn.onClick(); // plans
   assert.match(context.buildImageryBtn.getText(), /tiles$/);
-  context.flyFramesField.setValue(5);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   context.buildImageryBtn.onClick(); // must re-plan, not start downloading the stale plan
   assert.match(context.statusLabel.getText(), /tiles needed/);
@@ -3756,8 +3944,8 @@ test("Map tab: after moving the preview, Fly here goes to the green frame", () =
   const map = context.currentMap();
   context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
   context.preview.zoomBy(1);
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  longComp(api);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the preview frame: frames 20–29\./);
   api.setFrame(29);
@@ -3772,8 +3960,8 @@ test("Map tab: with the preview unavailable, Fly here still names the picked res
   createWorldMap(context);
   searchFinds(context, [PARIS]);
   mapSearch(context, "Paris");
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  longComp(api);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
 });
@@ -3821,8 +4009,7 @@ test("Map tab: Jump here and Fly here leave the preview where it is and only mov
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
   const world = context.preview.frameCamera();
-  context.flyFramesField.setValue(5);
-  api.setFrame(0);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view/);
   assert.deepEqual(plain(context.preview.frameCamera()), plain(world), "no recentre after Fly");

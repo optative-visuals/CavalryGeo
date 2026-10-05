@@ -37,9 +37,14 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
   green frame. With **New map** picked, **Create map here** makes a map at the frame.
-- **Flying the camera:** pick a place, set **Frames** and press **Fly here** — the camera zooms
-  out, travels and zooms in smoothly from the current frame (with World view picked it flies back
-  out). Build imagery afterwards for sharp imagery along the way.
+- **Flying the camera:** pick a place, set **From** and **to** (the first and last frame of the
+  flight; they open on the playhead and 100 frames later) and press **Fly here** — the camera zooms
+  out, travels and zooms in smoothly, leaving from where the camera is at the From frame (with
+  World view picked it flies back out). The two fields then move on, so pick another place and
+  press **Fly here** again to chain a second flight that starts where the first ended. If the
+  flight ends after your composition's last frame, Fly here asks first; on Yes it lengthens the
+  composition, the layers that reach its end and the play range to the end of the flight, and on
+  No it changes nothing. Build imagery afterwards for sharp imagery along the way.
 - **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
   **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
   follows.

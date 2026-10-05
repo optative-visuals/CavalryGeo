@@ -874,6 +874,29 @@ var GeoScene = (function () {
   }
 
   // ---- Fly-to -------------------------------------------------------------------
+  // Lengthens the composition to newEnd. Layers already made keep their own out frames (they would
+  // cut a longer flight off), so every layer that reached the old end is moved to newEnd + 1 (a
+  // layer's out frame is one past its last frame); layers trimmed to end earlier are left alone.
+  // The play range follows only when it reached the old end. Returns null when nothing is needed.
+  function extendComp(newEnd) {
+    var comp = api.getActiveComp(), oldEnd = compFrameRange().end, layers = 0;
+    if (!(newEnd > oldEnd)) return null;
+    if (typeof api.getOutFrame === "function" && typeof api.setOutFrame === "function") {
+      api.getCompLayers(false).forEach(function (id) {
+        try {
+          if (Number(api.getOutFrame(id)) >= oldEnd) { api.setOutFrame(id, newEnd + 1); layers++; }
+        } catch (e) { /* one layer that can't be extended never stops the rest */ }
+      });
+    }
+    var playsToEnd = false;
+    try { playsToEnd = Number(api.get(comp, A.COMP_PLAYBACK_END_ATTR)) >= oldEnd; } catch (e) { /* no play range to keep */ }
+    var end = {}, play = {};
+    end[A.COMP_END_ATTR] = newEnd;
+    api.set(comp, end);
+    if (playsToEnd) { play[A.COMP_PLAYBACK_END_ATTR] = newEnd; api.set(comp, play); } // after the comp is long enough to hold it
+    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+  }
+
   function flyCamera(map, points, startFrame) {
     var end = startFrame + points.length - 1, attrs = [0, 1, 2].map(function (i) { return A.CAMERA_ARRAY_ATTR + "." + i; });
     attrs.forEach(function (attr) {
@@ -933,6 +956,6 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera, findLabels: findLabels, findOcean: findOcean
+    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean
   };
 })();

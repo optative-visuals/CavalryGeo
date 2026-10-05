@@ -63,9 +63,14 @@ var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place,
 var searchBtn = GeoStyle.primaryButton("Search");
 var resultPicker = new ui.DropDown();
 var jumpBtn = GeoStyle.button("Jump here");
-var flyFramesField = new ui.NumericField(100);
-flyFramesField.setType(0);
-flyFramesField.setMin(2);
+// Fly here runs from Start to End (frames). Both open on the playhead and 100 frames on, and move
+// on after each flight so the next one chains from where this one ended.
+function playhead() {
+  try { var f = Number(api.getFrame()); return isFinite(f) ? Math.round(f) : 0; } catch (e) { return 0; }
+}
+var flyStartField = new ui.NumericField(playhead());
+var flyEndField = new ui.NumericField(playhead() + 100);
+[flyStartField, flyEndField].forEach(function (f) { f.setType(0); f.setMin(0); });
 var flyBtn = GeoStyle.primaryButton("Fly here");
 
 // Search and Fly here share one width so they line up above each other on the right.
@@ -75,7 +80,8 @@ if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_
 
 // The preview: settled by probing Cavalry (2026-10).
 var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
-var framesLabel = new ui.Label("Frames");
+var fromLabel = new ui.Label("From");
+var toLabel = new ui.Label("to");
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
@@ -125,7 +131,7 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
-  [jumpBtn, framesLabel, flyFramesField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  [jumpBtn, fromLabel, flyStartField, toLabel, flyEndField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
 }
@@ -220,17 +226,36 @@ jumpBtn.onClick = guard(function () {
   previewShowCurrent();
 });
 
+// Flies from the Start frame to the End frame. Everything is checked (and a longer composition
+// asked for) before anything changes; the flight leaves from the camera as it is at Start.
 flyBtn.onClick = guard(function () {
-  var map = currentMap(), s = GeoScene.compSize(), start = GeoScene.readCamera(map.cameraId), t = pickedTarget(start.projection);
-  var frame = api.getFrame();
-  var pts = GeoFly.path(start, t.cam, flyFramesField.getValue(), s.width);
-  var range = GeoScene.flyCamera(map, pts, frame);
-  api.setFrame(frame);
+  var map = currentMap(), from = Math.round(Number(flyStartField.getValue())), to = Math.round(Number(flyEndField.getValue()));
+  if (!(to >= from + 1)) throw new Error("Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+  var comp = GeoScene.compFrameRange();
+  if (from < comp.start) throw new Error("Start is before the composition's first frame (" + comp.start + ").");
+  var t = pickedTarget(GeoScene.readCamera(map.cameraId).projection), s = GeoScene.compSize(), extended = false;
+  if (to > comp.end) {
+    var dialog = questionDialog();
+    if (!dialog) throw new Error("End is after your composition's last frame (" + comp.end + "). Set End to " + comp.end + " or earlier, or lengthen the composition first.");
+    if (!dialog.showQuestion("Extend the timeline", "This flight ends at frame " + to + ", after your composition's last frame (" + comp.end +
+      "). Fly here will extend the composition, and the layers that reach its end, to frame " + to + ". Continue?")) {
+      say("Cancelled. Set End to " + comp.end + " or earlier to stay within your composition.");
+      return;
+    }
+    extended = !!GeoScene.extendComp(to);
+  }
+  var previous = api.getFrame(), range;
+  try {
+    api.setFrame(from);
+    var pts = GeoFly.path(GeoScene.readCamera(map.cameraId), t.cam, to - from + 1, s.width);
+    range = GeoScene.flyCamera(map, pts, from);
+  } finally { api.setFrame(previous); }
   var msg = "Flight to " + t.name + ": frames " + range.start + "–" + range.end + ".";
+  if (extended) msg += " The composition was extended to frame " + to + " so the flight isn't cut off.";
   if (t.world) msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
   msg += " Press Build imagery (Imagery tab) for sharp imagery along the way.";
-  var compEnd = GeoScene.compFrameRange().end;
-  if (range.end > compEnd) msg += " Note: the flight ends after the composition's last frame (" + compEnd + ").";
+  flyStartField.setValue(to);
+  flyEndField.setValue(to + (to - from));
   say(msg);
   resetImageryPlan();
   previewShowCurrent();
@@ -255,7 +280,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Preview"),
     preview.layout,
     GeoStyle.heading("Camera"),
-    row(jumpBtn, framesLabel, flyFramesField, flyBtn),
+    row(jumpBtn, fromLabel, flyStartField, toLabel, flyEndField, flyBtn),
     createHereBtn
   ]));
 });
