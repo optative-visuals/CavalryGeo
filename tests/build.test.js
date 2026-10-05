@@ -32,8 +32,24 @@ function makeFakeApi() {
   var COMP_ID = "comp#1";
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
   var timers = [];
+  var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
+  var userData = {};   // layerId -> { key: value }
+  var attrNames = {};  // layerId -> { attr: custom name }
+  var overrides = {};  // layerId -> { attr: { hardMin, ... } }
+  var paints = {};     // layerId -> { fill, stroke }
+  var PROMOTED_SLOT = /^promotedAttributes\.(\d+)\.(name|notes)$/;
 
   function ensure(id) { if (!store[id]) store[id] = {}; return store[id]; }
+  // Like Cavalry: a layer with no parent sits at the composition's top level.
+  function siblingsOf(id) { var key = parents[id] || COMP_ID; return childOrder[key] || (childOrder[key] = []); }
+  function leave(id) { var sib = siblingsOf(id), i = sib.indexOf(id); if (i >= 0) sib.splice(i, 1); }
+  function addToComp(id) { delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
+  // One step up (toward the top of the Scene Window) or down within the layer's container.
+  function step(id, by) {
+    var sib = siblingsOf(id), i = sib.indexOf(id), j = i + by;
+    if (i < 0 || j < 0 || j >= sib.length) return;
+    sib[i] = sib[j]; sib[j] = id;
+  }
 
   return {
     // Like Cavalry, a new script layer already has one empty dynamic slot (index 0).
@@ -42,17 +58,25 @@ function makeFakeApi() {
       if (type === "javaScript") ensure(id)["array.0"] = 0;
       if (type === "javaScriptShape") ensure(id)["generator.array.0"] = 0;
       if (type === "group") ensure(id).hidden = false;
-      return id;
+      return addToComp(id);
     },
     // Like Cavalry: a primitive shape is a basicShape layer.
     primitive: function (kind, name) { return this.create("basicShape", name); },
-    createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return id; },
+    createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return addToComp(id); },
     parent: function (id, parentId) {
-      if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
+      leave(id);
       parents[id] = parentId;
       (childOrder[parentId] = childOrder[parentId] || []).unshift(id); // newly parented layers land on top
     },
-    getParent: function (id) { return parents[id] || null; },
+    // Like Cavalry: moves the layer to the top level, directly below its former parent group.
+    unParent: function (id) {
+      var former = parents[id];
+      leave(id);
+      delete parents[id];
+      var top = childOrder[COMP_ID] = childOrder[COMP_ID] || [], at = former ? top.indexOf(former) : -1;
+      if (at >= 0) top.splice(at + 1, 0, id); else top.unshift(id);
+    },
+    getParent: function (id) { return parents[id] || ""; },
     getChildren: function (parentId) { return (childOrder[parentId] || []).slice(); },
     getNiceName: function (id) { return niceNames[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
@@ -72,24 +96,39 @@ function makeFakeApi() {
     getAssetWindowLayers: function () { return Object.keys(assets); },
     getAssetFilePath: function (id) { return assets[id]; },
     // Like Cavalry, adding an asset to the comp selects the new footage layer.
-    addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return id; },
+    addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return addToComp(id); },
     layerExists: function (id) { return Object.prototype.hasOwnProperty.call(niceNames, id); },
     deleteLayer: function (id) {
       (childOrder[id] || []).slice().forEach(function (c) { this.deleteLayer(c); }, this);
-      if (parents[id] && childOrder[parents[id]]) childOrder[parents[id]] = childOrder[parents[id]].filter(function (x) { return x !== id; });
+      leave(id);
+      // Like Cavalry: a deleted layer's promotions and connections go with it.
+      Object.keys(promoted).forEach(function (c) { promoted[c] = promoted[c].filter(function (p) { return p.attribute.indexOf(id + ".") !== 0; }); });
+      delete promoted[id]; delete userData[id];
+      for (var ci = connections.length - 1; ci >= 0; ci--) { if (connections[ci][0] === id || connections[ci][2] === id) connections.splice(ci, 1); }
       delete niceNames[id]; delete parents[id]; delete childOrder[id]; delete store[id];
     },
     addDynamic: function (id, arr) {
       var o = ensure(id), n = 0;
       while (o[arr + "." + n] !== undefined) n++;
       o[arr + "." + n] = 0;
+      return arr + "." + n; // like Cavalry: the new attribute's path
     },
-    renameAttribute: function () { /* display name only */ },
+    renameAttribute: function (id, attr, name) { (attrNames[id] = attrNames[id] || {})[attr] = name; },
+    getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
-    set: function (id, obj) { var o = ensure(id); Object.keys(obj).forEach(function (k) { o[k] = obj[k]; }); },
+    set: function (id, obj) {
+      var o = ensure(id);
+      Object.keys(obj).forEach(function (k) {
+        var m = PROMOTED_SLOT.exec(k);
+        if (m && promoted[id] && promoted[id][Number(m[1])]) { promoted[id][Number(m[1])][m[2]] = obj[k]; return; }
+        o[k] = obj[k];
+      });
+    },
     get: function (id, attr) {
       if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
       if (id === COMP_ID && attr === "frameRange") return { x: 0, y: 9 };
+      var pm = PROMOTED_SLOT.exec(attr);
+      if (pm && promoted[id] && promoted[id][Number(pm[1])]) return promoted[id][Number(pm[1])][pm[2]];
       var k = keyframes[id] && keyframes[id][attr];
       if (k && Object.keys(k).length) {
         var fs = Object.keys(k).map(Number).sort(function (a, b) { return a - b; }), v = k[fs[0]];
@@ -98,9 +137,62 @@ function makeFakeApi() {
       }
       return ensure(id)[attr];
     },
-    setFill: function () {},
-    setStroke: function () {},
-    connect: function (a, b, c, d) { connections.push([a, b, c, d]); },
+    setFill: function (id, on) { (paints[id] = paints[id] || {}).fill = !!on; },
+    setStroke: function (id, on) { (paints[id] = paints[id] || {}).stroke = !!on; },
+    hasFill: function (id) { return !!(paints[id] && paints[id].fill); },
+    hasStroke: function (id) { return !!(paints[id] && paints[id].stroke); },
+    // Like Cavalry: connecting into a Component's "promotedAttributes" list appends a promotion.
+    connect: function (a, b, c, d) {
+      if (d === "promotedAttributes") { (promoted[c] = promoted[c] || []).push({ attribute: a + "." + b, name: "", notes: "" }); return; }
+      connections.push([a, b, c, d]);
+    },
+    disconnect: function (a, b, c, d) {
+      for (var i = connections.length - 1; i >= 0; i--) { var k = connections[i]; if (k[0] === a && k[1] === b && k[2] === c && k[3] === d) connections.splice(i, 1); }
+    },
+    getLayerType: function (id) { return String(id).split("#")[0]; },
+    getInConnection: function (id, attr) {
+      var m = /^promotedAttributes\.(\d+)\.attribute$/.exec(attr);
+      if (m) {
+        var p = (promoted[id] || [])[Number(m[1])];
+        if (!p) throw new Error("Couldn't find attribute with path: " + id + "." + attr);
+        return p.attribute;
+      }
+      for (var i = connections.length - 1; i >= 0; i--) { var k = connections[i]; if (k[2] === id && k[3] === attr) return k[0] + "." + k[1]; }
+      return "";
+    },
+    getInConnectedAttributes: function (id) {
+      var out = (promoted[id] || []).map(function (p, i) { return "promotedAttributes." + i + ".attribute"; });
+      connections.forEach(function (k) { if (k[2] === id && out.indexOf(k[3]) < 0) out.push(k[3]); });
+      return out;
+    },
+    getOutConnections: function (id, attr) {
+      return connections.filter(function (k) { return k[0] === id && k[1] === attr; }).map(function (k) { return k[2] + "." + k[3]; });
+    },
+    // Like Cavalry: two arguments, the list item's path; later items shift down.
+    removeArrayIndex: function (id, path) {
+      if (arguments.length !== 2) throw new Error("Argument count does not match function definition. Expected 2 but got " + arguments.length);
+      var m = /^promotedAttributes\.(\d+)$/.exec(path);
+      if (m && promoted[id]) promoted[id].splice(Number(m[1]), 1);
+    },
+    setUserData: function (id, key, value) { (userData[id] = userData[id] || {})[key] = JSON.parse(JSON.stringify(value)); },
+    getUserDataKey: function (id, key) { var v = (userData[id] || {})[key]; return v === undefined ? null : JSON.parse(JSON.stringify(v)); },
+    hasUserDataKey: function (id, key) { return !!userData[id] && Object.prototype.hasOwnProperty.call(userData[id], key); },
+    setAttributeDefinitionOverride: function (id, attr, key, value) { overrides[id] = overrides[id] || {}; (overrides[id][attr] = overrides[id][attr] || {})[key] = value; },
+    // Like Cavalry: no arguments, acts on the selection; moves to the top of its group.
+    bringToFront: function () {
+      if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
+      selection.forEach(function (id) {
+        var sib = siblingsOf(id), i = sib.indexOf(id);
+        if (i >= 0) { sib.splice(i, 1); sib.unshift(id); }
+      });
+    },
+    // Like Cavalry: no arguments, act on the selection, one step within the layer's current parent.
+    bringForward: function () {
+      if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
+      selection.forEach(function (id) { step(id, -1); });
+    },
+    _promoted: function (id) { return (promoted[id] || []).map(function (p) { return p.attribute; }); },
+    _overrides: overrides,
     _connections: connections,
     getCompLayers: function () { return Object.keys(niceNames); },
     getActiveComp: function () { return COMP_ID; },
@@ -110,17 +202,15 @@ function makeFakeApi() {
     moveToBack: function () {
       if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
       selection.forEach(function (id) {
-        var sib = childOrder[parents[id]]; if (!sib) return;
-        childOrder[parents[id]] = sib.filter(function (x) { return x !== id; }).concat([id]);
+        var sib = siblingsOf(id), i = sib.indexOf(id);
+        if (i < 0) return;
+        sib.splice(i, 1); sib.push(id);
         moveToBackCalls.push(id);
       });
     },
     moveBackward: function () {
       if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
-      selection.forEach(function (id) {
-        var sib = childOrder[parents[id]], i = sib ? sib.indexOf(id) : -1;
-        if (i >= 0 && i < sib.length - 1) { sib[i] = sib[i + 1]; sib[i + 1] = id; }
-      });
+      selection.forEach(function (id) { step(id, 1); });
     },
     processEvents: function () {},
     filePathExists: function (p) { return Object.prototype.hasOwnProperty.call(files, p); },
@@ -402,7 +492,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -3094,7 +3184,7 @@ test("each section has grey headings in order", () => {
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
@@ -3766,4 +3856,629 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
   context.refreshMapsBtn.onClick();
   context.preview._render();
   assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
+});
+
+// ---- Map controls ------------------------------------------------------------------
+function controlsMap(context) { createWorldMap(context); return context.GeoScene.findMaps()[0]; }
+// Cavalry keeps non-breaking spaces in a script input's name but strips plain ones, so the
+// plugin writes U+00A0 there; tests compare names with plain spaces.
+const NBSP = "\u00a0";
+function plainSpaces(name) { return String(name).split(NBSP).join(" "); }
+function promotedNames(api, comp) {
+  return api._promoted(comp).map((s) => { const d = s.indexOf("."); return plainSpaces(api.getCustomAttributeName(s.slice(0, d), s.slice(d + 1))); });
+}
+// The map's Controls component: the one in the composition with user data geoControls === the camera.
+function controlsOf(api, map) {
+  return api.getCompLayers(false).find((id) => api.getLayerType(id) === "component" && api.hasUserDataKey(id, "geoControls") && api.getUserDataKey(id, "geoControls") === map.cameraId);
+}
+function siblingsOfLayer(api, id) { const p = api.getParent(id); return api.getChildren(p || api.getActiveComp()); }
+// Whether `id` sits directly above `below` in the same parent.
+function directlyAbove(api, id, below) {
+  const sib = siblingsOfLayer(api, below), i = sib.indexOf(id);
+  return i >= 0 && i === sib.indexOf(below) - 1;
+}
+function slotsOf(api, valuesId) { return plain(api.getUserDataKey(valuesId, "geoSlots")); }
+const CAMERA_NAMES = ["Camera · Zoom", "Camera · Centre latitude", "Camera · Centre longitude", "Camera · Rotation", "Camera · Projection (0 flat · 1 Equal Earth · 2 globe)"];
+
+test("controls: a sync puts \"<Map> Controls\" just above the map group with the camera and Ocean", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const kids = api.getChildren(map.groupId);
+  assert.ok(directlyAbove(api, r.componentId, map.groupId), "directly above the group");
+  assert.equal(api.getParent(r.componentId), "", "at the composition's top level");
+  assert.equal(kids.indexOf(r.componentId), -1, "not inside the group");
+  assert.equal(api.getLayerType(r.componentId), "component");
+  assert.equal(api.getNiceName(r.componentId), "Map Controls");
+  assert.deepEqual(api.getChildren(r.componentId), [r.valuesId]);
+  assert.equal(api.getNiceName(r.valuesId), "Map control values");
+  assert.equal(api.get(r.valuesId, "expression"), "0;");
+  const c = map.cameraId, ocean = kids.find((id) => api.getNiceName(id) === "Ocean");
+  assert.deepEqual(plain(api._promoted(r.componentId)), [c + ".array.2", c + ".array.0", c + ".array.1", c + ".array.3", c + ".array.4", ocean + ".material.materialColor", ocean + ".hidden"]);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)), CAMERA_NAMES.concat(["Ocean · Colour", "Ocean · Hide"]));
+  assert.deepEqual(plain(api._overrides[c]["array.4"]), { hardMin: 0, hardMax: 2, step: 1 });
+  assert.equal(r.controls, 7);
+});
+
+test("controls: a map layer gets direct rows and a Detail value that drives the layer", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const C = require("../src/core/codec.js");
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Here", rings: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }] });
+  const id = context.GeoScene.createMapLayer(map, "Map: Countries", enc, { camera: map.cameraId, category: "countries" }, context.GeoScene.STYLE.countries, {});
+  const r = context.GeoControlPanel.sync(map);
+  const detail = slotsOf(api, r.valuesId)["layer:" + id + ":detail"];
+  assert.deepEqual(plain(api._promoted(r.componentId)).slice(7), [id + ".hidden", id + ".opacity", id + ".material.materialColor", id + ".stroke.strokeColor", id + ".stroke.width", r.valuesId + "." + detail]);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Countries · Hide", "Countries · Opacity", "Countries · Fill colour", "Countries · Outline colour", "Countries · Outline width", "Countries · Detail"]);
+  assert.equal(api.getInConnection(id, "generator.array.5"), r.valuesId + "." + detail);
+  assert.equal(api.get(r.valuesId, detail), 100, "starts with the layer's own Detail");
+  assert.equal(api.getCustomAttributeName(id, "generator.array.5"), "detail", "the layer's own input keeps its name");
+});
+
+test("controls: pins share one Hide, Colour and Size, and a later pin links too", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r.valuesId + "." + color));
+  assert.equal(api.getCustomAttributeName(r.valuesId, color), "Pins" + NBSP + "·" + NBSP + "Colour");
+  assert.equal(api.get(r.valuesId, color), "#1F8F4E", "starts with the pins' colour");
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
+  const c = S.addPin(map, "C", 20, 20);
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(c, "material.materialColor"), r.valuesId + "." + color);
+  assert.ok(directlyAbove(api, r.componentId, map.groupId), "the component stays where it was");
+  assert.equal(plain(api._promoted(r.componentId)).filter((s) => s === r.valuesId + "." + color).length, 1);
+});
+
+test("controls: a pin the user disconnected stays unlinked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  api.disconnect(r.valuesId, color, b, "material.materialColor");
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(b, "material.materialColor"), "");
+  assert.equal(api.getInConnection(a, "material.materialColor"), r.valuesId + "." + color);
+});
+
+test("controls: on the first sync a pin coloured differently keeps its colour and stays unlinked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene, C = "material.materialColor";
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10), c = S.addPin(map, "C", 20, 20); // c is on top: the first target
+  api.set(a, { [C]: "#FF0000" });
+  api.set(b, { [C]: { r: 31, g: 143, b: 78, a: 255 } }); // the same green as c, read as an object
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  assert.equal(api.get(r.valuesId, color), "#1F8F4E", "seeded from the first target");
+  assert.equal(api.getInConnection(c, C), r.valuesId + "." + color);
+  assert.equal(api.getInConnection(b, C), r.valuesId + "." + color);
+  assert.equal(api.getInConnection(a, C), "", "the red pin is left alone");
+  assert.equal(api.get(a, C), "#FF0000");
+  assert.equal(plain(api.getUserDataKey(a, "geoLinks"))[C], context.GeoControls.recordFor(r.valuesId, "pins:color"));
+  assert.equal(api.getInConnection(a, "hidden"), r.valuesId + "." + slotsOf(api, r.valuesId)["pins:hidden"], "its other settings still link");
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(a, C), "", "a later sync still leaves it alone");
+});
+
+test("controls: pins added one at a time, with a sync after each, all end up linked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene, C = "material.materialColor";
+  const pins = [];
+  let r;
+  ["A", "B", "C"].forEach((name, i) => {
+    pins.push(S.addPin(map, name, i * 10, i * 10));
+    if (i === 2) api.set(pins[2], { [C]: "#0000FF" }); // the input already exists: it links as usual
+    r = context.GeoControlPanel.sync(map);
+  });
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  pins.forEach((id) => assert.equal(api.getInConnection(id, C), r.valuesId + "." + color));
+});
+
+test("controls: the user's own promotions stay, after the plugin's, with their names", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  let r = context.GeoControlPanel.sync(map);
+  const other = api.create("basicShape", "Other");
+  api.connect(other, "position", r.componentId, "promotedAttributes");
+  const n = api._promoted(r.componentId).length - 1;
+  api.set(r.componentId, { ["promotedAttributes." + n + ".name"]: "My position" });
+  S.addPin(map, "A", 0, 0);
+  r = context.GeoControlPanel.sync(map);
+  const p = plain(api._promoted(r.componentId)), last = p.length - 1;
+  assert.equal(p[last], other + ".position");
+  assert.equal(api.get(r.componentId, "promotedAttributes." + last + ".name"), "My position");
+  assert.ok(p.indexOf(r.valuesId + "." + slotsOf(api, r.valuesId)["pins:color"]) < last);
+});
+
+test("controls: the user's promotions of this map's own layers stay too (a pin's and the Ocean's position)", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const pin = S.addPin(map, "A", 0, 0);
+  let r = context.GeoControlPanel.sync(map);
+  const ocean = oceanOf(api, map);
+  api.connect(pin, "position", r.componentId, "promotedAttributes");
+  api.set(r.componentId, { ["promotedAttributes." + (api._promoted(r.componentId).length - 1) + ".name"]: "Pin position" });
+  api.connect(ocean, "position", r.componentId, "promotedAttributes");
+  api.set(r.componentId, { ["promotedAttributes." + (api._promoted(r.componentId).length - 1) + ".name"]: "Ocean position" });
+  S.createLabel(map, "Paris", 2.35, 48.85); // adds rows after the pins, so the list is rebuilt
+  S.addPin(map, "B", 10, 10);
+  r = context.GeoControlPanel.sync(map);
+  const p = plain(api._promoted(r.componentId)), n = p.length;
+  assert.deepEqual(p.slice(n - 2), [pin + ".position", ocean + ".position"]);
+  assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 2) + ".name"), "Pin position");
+  assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 1) + ".name"), "Ocean position");
+  assert.ok(promotedNames(api, r.componentId).indexOf("Labels · Colour") >= 0);
+});
+
+test("controls: the Controls component remembers which promotions are the plugin's", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(api.getUserDataKey(r.componentId, "geoPromoted")), plain(api._promoted(r.componentId)));
+  // An older component without the record gets it on a sync that changes nothing.
+  api.setUserData(r.componentId, "geoPromoted", null);
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(api.getUserDataKey(r.componentId, "geoPromoted")), plain(api._promoted(r.componentId)));
+});
+
+test("controls: a plugin row that is no longer wanted is removed (a layer whose fill was turned off)", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const C = require("../src/core/codec.js");
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Here", rings: [[[0, 0], [10, 0], [10, 10], [0, 0]]] }] });
+  const id = context.GeoScene.createMapLayer(map, "Map: Countries", enc, { camera: map.cameraId, category: "countries" }, context.GeoScene.STYLE.countries, {});
+  let r = context.GeoControlPanel.sync(map);
+  assert.ok(api._promoted(r.componentId).indexOf(id + ".material.materialColor") >= 0);
+  api.setFill(id, false);
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api._promoted(r.componentId).indexOf(id + ".material.materialColor"), -1);
+});
+
+test("controls: only the changed tail of the list is removed and added again", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.createLabel(map, "Paris", 2.35, 48.85);
+  let r = context.GeoControlPanel.sync(map);
+  const before = plain(api._promoted(r.componentId));
+  assert.equal(before.length, 10); // camera 5, Ocean 2, Labels 3
+  const removed = [], realRemove = api.removeArrayIndex;
+  api.removeArrayIndex = function (id, path) { removed.push(path); return realRemove.apply(this, arguments); };
+  S.addPin(map, "A", 0, 0); // the pins' rows go in before the labels'
+  r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, ["promotedAttributes.9", "promotedAttributes.8", "promotedAttributes.7"]);
+  const after = plain(api._promoted(r.componentId));
+  assert.deepEqual(after.slice(0, 7), before.slice(0, 7));
+  assert.deepEqual(after.slice(10), before.slice(7));
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size", "Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  removed.length = 0;
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, [], "a second sync removes nothing");
+});
+
+test("controls: if the old list can't be cleared, sync stops instead of growing the list", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.createLabel(map, "Paris", 2.35, 48.85);
+  let r = context.GeoControlPanel.sync(map);
+  const before = plain(api._promoted(r.componentId));
+  api.removeArrayIndex = function () { throw new Error("nope"); };
+  S.addPin(map, "A", 0, 0);
+  assert.throws(() => context.GeoControlPanel.sync(map), /^Error: Couldn't clear the old controls list\.$/);
+  assert.deepEqual(plain(api._promoted(r.componentId)), before);
+  assert.throws(() => context.GeoControlPanel.sync(map), /Couldn't clear the old controls list\./);
+  assert.deepEqual(plain(api._promoted(r.componentId)), before, "still not grown on a second try");
+});
+
+test("controls: the promotion count comes from the highest promotedAttributes slot", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const real = api.getInConnectedAttributes;
+  // Other inputs whose names merely start with "promotedAttributes." must not count as slots.
+  api.getInConnectedAttributes = function (id) { return real.call(this, id).concat(id === r.componentId ? ["promotedAttributes.extra", "promotedAttributesX.1.attribute"] : []); };
+  const removed = [], realRemove = api.removeArrayIndex;
+  api.removeArrayIndex = function (id, path) { removed.push(path); return realRemove.apply(this, arguments); };
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(removed, []);
+  assert.equal(api._promoted(r.componentId).length, 7);
+});
+
+test("controls: syncing again changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin(map, "A", 0, 0);
+  const r1 = context.GeoControlPanel.sync(map);
+  const before = { promoted: plain(api._promoted(r1.componentId)), slots: slotsOf(api, r1.valuesId), conns: api._connections.length };
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.componentId, r1.componentId);
+  assert.equal(r2.valuesId, r1.valuesId);
+  assert.deepEqual(plain(api._promoted(r2.componentId)), before.promoted);
+  assert.deepEqual(slotsOf(api, r2.valuesId), before.slots);
+  assert.equal(api._connections.length, before.conns);
+});
+
+test("controls: a deleted Controls component is made again and relinks the pins", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.deleteLayer(r1.componentId);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.notEqual(r2.valuesId, r1.valuesId);
+  assert.ok(directlyAbove(api, r2.componentId, map.groupId), "the new component is placed above the group");
+  const color = slotsOf(api, r2.valuesId)["pins:color"];
+  [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r2.valuesId + "." + color));
+});
+
+test("controls: labels share Hide, Colour and Size", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const t = context.GeoScene.createLabel(map, "Paris", 2.35, 48.85);
+  assert.deepEqual(plain(context.GeoScene.findLabels(map)), [t]);
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  assert.equal(api.getInConnection(t, "fontSize"), r.valuesId + "." + slotsOf(api, r.valuesId)["labels:size"]);
+});
+
+test("controls: a route gets shared colour, width and arc height, then each leg's draw on %", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+    "Paris → London → Rome · Colour", "Paris → London → Rome · Width", "Paris → London → Rome · Arc height",
+    "Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"
+  ]);
+  assert.equal(plain(api._promoted(r.componentId))[10], route.legs[0] + ".stroke.trimEnd");
+  route.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.trim"), true));
+  const lift = slotsOf(api, r.valuesId)["route:" + route.groupId + ":lift"];
+  route.legs.forEach((leg) => assert.equal(api.getInConnection(leg, "generator.array.7"), r.valuesId + "." + lift));
+  assert.equal(api.get(r.valuesId, lift), 30);
+});
+
+test("controls: one failing control row no longer stops the rest", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.addPin(map, "A", 0, 0); S.addPin(map, "B", 10, 10);
+  const realAdd = api.addDynamic.bind(api);
+  let calls = 0;
+  api.addDynamic = function () { calls++; if (calls === 2) throw new Error("boom"); return realAdd.apply(null, arguments); };
+  let r;
+  assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
+  const slots1 = slotsOf(api, r.valuesId);
+  assert.ok(slots1["pins:hidden"] && slots1["pins:size"], "the inputs made before and after the failure are recorded");
+  assert.equal(slots1["pins:color"], undefined, "the failed row has no input yet");
+  const pinRows = () => plain(promotedNames(api, r.componentId)).filter((n) => /^Pins · /.test(n));
+  assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Size"]);
+  api.addDynamic = realAdd;
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.valuesId, r.valuesId);
+  const slots2 = slotsOf(api, r.valuesId);
+  assert.equal(slots2["pins:hidden"], slots1["pins:hidden"], "the same input is reused");
+  assert.equal(slots2["pins:size"], slots1["pins:size"], "the same input is reused");
+  assert.ok(slots2["pins:color"]);
+  assert.equal(new Set(Object.keys(slots2).map((k) => slots2[k])).size, Object.keys(slots2).length, "no input is added twice");
+  assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
+});
+
+test("controls: the user's selection is restored, even when Cavalry selects the layers sync makes", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const pin = S.addPin(map, "A", 0, 0);
+  const realCreate = api.create;
+  api.create = function () { const id = realCreate.apply(this, arguments); api.select([id]); return id; };
+  api.select([pin]);
+  context.GeoControlPanel.sync(map); // makes the component and its values layer
+  assert.deepEqual(api.getSelection(), [pin]);
+  S.addPin(map, "B", 10, 10);
+  api.select([pin]);
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(api.getSelection(), [pin]);
+});
+
+test("controls: data layers share Data · Year, and each set gets its colours and sizes", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true, prefix: "", suffix: "" });
+  const r = context.GeoControlPanel.sync(map);
+  const slots = slotsOf(api, r.valuesId), year = slots["data:year"];
+  ["regions", "bubbles", "labels"].forEach((k) => assert.equal(api.getInConnection(d.layers[k], "generator.array.7"), r.valuesId + "." + year, k));
+  assert.equal(api.get(r.valuesId, year), 2020, "starts at the layers' year");
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+    "Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour",
+    "Population · Bubble size", "Population · Bubble colour", "Population · Label size"
+  ]);
+  assert.equal(api.getInConnection(d.layers.regions, "generator.array.8"), r.valuesId + "." + slots["data:" + d.groupId + ":low"]);
+});
+
+test("controls: a regions layer whose Use middle can't be read still gets its other rows", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), E = context.GeoExpression;
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: false, labels: false, legend: false });
+  const useMiddle = "generator.array." + E.inputIndex(E.REGION_INPUTS, "useMiddle"), realGet = api.get;
+  api.get = function (id, attr) { if (id === d.layers.regions && attr === useMiddle) throw new Error("no"); return realGet.apply(this, arguments); };
+  let r;
+  assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
+  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour"]);
+});
+
+test("controls: a label helper whose connections can't be read skips only its own label", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  const t1 = S.createLabel(map, "Paris", 2.35, 48.85), t2 = S.createLabel(map, "Rome", 12.5, 41.9);
+  const real = api.getOutConnections;
+  let calls = 0;
+  api.getOutConnections = function () { if (calls++ === 0) throw new Error("no"); return real.apply(this, arguments); };
+  const found = plain(S.findLabels(map));
+  assert.equal(found.length, 1);
+  assert.ok(found[0] === t1 || found[0] === t2);
+});
+
+test("controls: a leg whose name doesn't say its number is numbered by its place in the route", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
+  const realName = api.getNiceName;
+  api.getNiceName = function (id) { return id === route.legs[1] ? "Last hop" : realName.apply(this, arguments); };
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.componentId)).filter((n) => /draw on %$/.test(n));
+  assert.deepEqual(names, ["Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"]);
+  const p = plain(api._promoted(r.componentId));
+  assert.ok(p.indexOf(route.legs[0] + ".stroke.trimEnd") < p.indexOf(route.legs[1] + ".stroke.trimEnd"));
+});
+
+test("controls: sync never looks inside imagery groups (they hold thousands of tiles)", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const im = context.GeoScene.buildImagery(map, src, {}, plan);
+  const inside = new Set();
+  (function walk(id) { inside.add(id); api.getChildren(id).forEach(walk); })(im.groupId);
+  const asked = [], real = api.getChildren;
+  api.getChildren = function (id) { asked.push(id); return real.apply(this, arguments); };
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(asked.filter((id) => inside.has(id)), []);
+  assert.ok(promotedNames(api, r.componentId).indexOf("Imagery: EOX Sentinel-2 · Opacity") >= 0);
+});
+
+test("controls: without getLayerType, sync says this Cavalry can't do it", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  delete api.getLayerType;
+  assert.throws(() => context.GeoControlPanel.sync(map), /This version of Cavalry can't update a map's Controls\./);
+});
+
+test("controls: Bake updates the picked map's Controls, and doesn't need a picked map", () => {
+  const { context, api } = buildSandbox();
+  const calls = [];
+  context.GeoControlPanel.sync = (m) => { calls.push(m.cameraId); return { controls: 0 }; };
+  const loose = context.GeoScene.createMap("Loose", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }); // not in the picker
+  const a = context.GeoScene.createMapLayer(loose, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: loose.cameraId, category: "countries" }, {}, {});
+  api.select([a]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Baked 1 layer(s) at the current frame. Baked shapes no longer follow the camera.");
+  assert.deepEqual(calls, [], "no map picked: nothing to sync");
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps().find((m) => m.name === "Map");
+  assert.equal(context.mapPicker.getValue(), context.GeoScene.findMaps().findIndex((m) => m.cameraId === map.cameraId), "the new map is picked");
+  const b = context.GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([b]);
+  context.bakeBtn.onClick();
+  assert.deepEqual(calls, [map.cameraId]);
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+});
+
+test("controls: without user data, sync says this Cavalry can't do it", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  delete api.setUserData;
+  assert.throws(() => context.GeoControlPanel.sync(map), /This version of Cavalry can't update a map's Controls\./);
+});
+
+test("controls: a map made by Search gets its Controls component straight away", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const map = context.GeoScene.findMaps()[0];
+  const top = controlsOf(api, map);
+  assert.equal(api.getLayerType(top), "component");
+  assert.equal(api.getNiceName(top), map.name + " Controls");
+  assert.ok(directlyAbove(api, top, map.groupId));
+  assert.ok(promotedNames(api, top).indexOf("Countries · Fill colour") >= 0, "starter layers are in it");
+});
+
+test("controls: adding a pin updates the Controls", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.lonField.setValue(2.35); context.latField.setValue(48.85);
+  context.pinCoordBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  const comp = controlsOf(api, map);
+  assert.ok(promotedNames(api, comp).indexOf("Pins · Colour") >= 0);
+  assert.ok(!/couldn't/.test(context.statusLabel.getText()), context.statusLabel.getText());
+});
+
+test("controls: a failed update keeps the action and says how to retry", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.pinCoordBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 1);
+  assert.match(context.statusLabel.getText(), /^Pin added at .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+});
+
+test("controls: Refresh controls lives on the Layers tab and (re)builds the Controls", () => {
+  const { context, api } = buildSandbox();
+  assert.ok(holds(context.sectionPages.pages[1], context.refreshControlsBtn));
+  context.refreshControlsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  context.refreshControlsBtn.onClick();
+  const comp = controlsOf(api, map);
+  assert.equal(api.getLayerType(comp), "component");
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + api._promoted(comp).length + " setting(s) in \"Map Controls\". Select it to see them.");
+});
+
+// ---- Map controls: where the component sits, selection, readable names ------------------
+test("controls: a new map's Controls sits directly above its group at the top level, with its values layer inside", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const top = api.getChildren(api.getActiveComp());
+  assert.ok(top.indexOf(r.componentId) >= 0);
+  assert.equal(top.indexOf(r.componentId), top.indexOf(map.groupId) - 1);
+  assert.equal(api.getChildren(map.groupId).indexOf(r.componentId), -1);
+  assert.deepEqual(api.getChildren(r.componentId), [r.valuesId]);
+  assert.equal(api.getParent(r.valuesId), r.componentId);
+});
+
+test("controls: with two maps, each Controls sits directly above its own group", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.makeMap("Second", context.worldViewCamera(0));
+  const maps = context.GeoScene.findMaps();
+  assert.equal(maps.length, 2);
+  const rs = maps.map((m) => context.GeoControlPanel.sync(m));
+  maps.forEach((m, i) => {
+    assert.ok(directlyAbove(api, rs[i].componentId, m.groupId), m.name);
+    assert.equal(api.getNiceName(rs[i].componentId), m.name + " Controls");
+  });
+  assert.notEqual(rs[0].componentId, rs[1].componentId);
+});
+
+test("controls: adding a pin and syncing leaves the component where it is", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r1 = context.GeoControlPanel.sync(map);
+  const before = api.getChildren(api.getActiveComp());
+  context.GeoScene.addPin(map, "A", 0, 0);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.componentId, r1.componentId);
+  assert.deepEqual(api.getChildren(api.getActiveComp()), before);
+  assert.ok(directlyAbove(api, r2.componentId, map.groupId));
+});
+
+test("controls: a Controls component made inside the group by the earlier build is moved out, keeping its id and promotions", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const old = api.create("component", "Map Controls");
+  api.parent(old, map.groupId);
+  api.setUserData(old, "geoControls", map.cameraId);
+  const other = api.create("basicShape", "Other");
+  api.parent(other, map.groupId);
+  api.connect(other, "position", old, "promotedAttributes");
+  api.set(old, { "promotedAttributes.0.name": "My position" });
+  assert.ok(api.getChildren(map.groupId).indexOf(old) >= 0);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.componentId, old, "the same component");
+  assert.equal(api.getChildren(map.groupId).indexOf(old), -1, "no longer in the group");
+  assert.ok(directlyAbove(api, old, map.groupId));
+  assert.equal(api.getParent(old), "");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 1, "no second component");
+  const p = plain(api._promoted(old));
+  assert.equal(p[p.length - 1], other + ".position", "the user's promotion is kept");
+  assert.equal(api.get(old, "promotedAttributes." + (p.length - 1) + ".name"), "My position");
+});
+
+test("controls: a Controls component the user moved into another group is found and left there", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r1 = context.GeoControlPanel.sync(map);
+  const home = api.create("group", "My controls");
+  api.parent(r1.componentId, home);
+  context.GeoScene.addPin(map, "A", 0, 0);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.componentId, r1.componentId);
+  assert.equal(api.getParent(r2.componentId), home, "not moved");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 1, "no second component");
+  assert.ok(promotedNames(api, r2.componentId).indexOf("Pins · Colour") >= 0, "still kept up to date");
+});
+
+test("controls: a Controls component the user nudged elsewhere in the top level is left where it is", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.create("group", "Other stuff");
+  api.select([r1.componentId]);
+  api.moveBackward(); // one step down: no longer directly above its group
+  const before = api.getChildren(api.getActiveComp());
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(api.getChildren(api.getActiveComp()), before);
+});
+
+test("controls: a map made by Search ends with its Controls selected; a pin doesn't select it", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const map = context.GeoScene.findMaps()[0];
+  assert.deepEqual(plain(api.getSelection()), [controlsOf(api, map)]);
+  api.select([map.groupId]);
+  context.lonField.setValue(2.35); context.latField.setValue(48.85);
+  context.pinCoordBtn.onClick();
+  assert.deepEqual(plain(api.getSelection()), [map.groupId], "the pin leaves the user's selection alone");
+});
+
+test("controls: Create map here selects the new map's Controls", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  context.preview.available = () => true;
+  context.preview.frameCamera = () => ({ lat: 10, lon: 20, zoom: 3 });
+  context.createHereBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  assert.ok(map, context.statusLabel.getText());
+  const comp = controlsOf(api, map);
+  assert.ok(comp);
+  assert.deepEqual(plain(api.getSelection()), [comp]);
+});
+
+test("controls: script inputs get non-breaking spaces in their names, built-in attributes keep plain spaces", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin(map, "A", 0, 0);
+  const r = context.GeoControlPanel.sync(map);
+  const cam = api.getCustomAttributeName(map.cameraId, "array.2");
+  assert.equal(cam.indexOf(" "), -1, "no plain space on the camera's input");
+  assert.equal(cam, "Camera" + NBSP + "·" + NBSP + "Zoom");
+  const val = api.getCustomAttributeName(r.valuesId, slotsOf(api, r.valuesId)["pins:color"]);
+  assert.equal(val.indexOf(" "), -1, "no plain space on a values-layer input");
+  assert.ok(val.indexOf(NBSP) >= 0);
+  assert.equal(api.getCustomAttributeName(oceanOf(api, map), "material.materialColor"), "Ocean · Colour", "built-in attributes keep plain spaces");
+});
+
+test("controls: without unParent or the step calls, sync still makes the component and leaves it where it landed", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  delete api.unParent; delete api.bringForward; delete api.moveBackward;
+  let r;
+  assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
+  assert.equal(api.getLayerType(r.componentId), "component");
+  assert.ok(promotedNames(api, r.componentId).length > 0);
+});
+
+test("controls: two maps with the same name each keep their own Controls (never claimed by name)", () => {
+  const { context, api } = buildSandbox();
+  const S = context.GeoScene, cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  const m1 = S.createMap("Twin", cam);
+  const r1 = context.GeoControlPanel.sync(m1);
+  api.connect(api.create("basicShape", "Other"), "position", r1.componentId, "promotedAttributes");
+  const promoted = plain(api._promoted(r1.componentId));
+  const m2 = S.createMap("Twin", cam); // a duplicated group: same name, new camera
+  assert.notEqual(m2.cameraId, m1.cameraId);
+  const r2 = context.GeoControlPanel.sync(m2);
+  assert.notEqual(r2.componentId, r1.componentId);
+  assert.notEqual(r2.valuesId, r1.valuesId);
+  assert.equal(api.getUserDataKey(r1.componentId, "geoControls"), m1.cameraId);
+  assert.equal(api.getUserDataKey(r2.componentId, "geoControls"), m2.cameraId);
+  assert.equal(api.getUserDataKey(r1.valuesId, "geoValues"), m1.cameraId);
+  assert.deepEqual(plain(api._promoted(r1.componentId)), promoted, "the first map's Controls is untouched");
+  assert.equal(controlsOf(api, m1), r1.componentId);
+  assert.ok(directlyAbove(api, r1.componentId, m1.groupId));
+  assert.ok(directlyAbove(api, r2.componentId, m2.groupId));
+  assert.equal(context.GeoControlPanel.sync(m1).componentId, r1.componentId, "and a later sync still finds its own");
 });

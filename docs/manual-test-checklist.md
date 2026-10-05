@@ -62,8 +62,8 @@ adding street layers.
 - [ ] 6e. Find a courtyard building (an OSM building with an inner ring, e.g. a large
       block with a central courtyard) or a river/lake with an island → it renders with
       a visible hole, not as a solid filled blob.
-- [ ] 7. Drag a layer's **detail** from 100 to 20 → small countries/cities disappear
-      first; keyframe it → it animates.
+- [ ] 7. In the map's Controls, drag Countries · Detail (or Cities · Detail) from 100 to 20 →
+      small countries/cities disappear first; keyframe it → it animates.
 - [ ] 7b. Countries show a thin white border between every neighbouring country;
       States / provinces add thinner, lighter lines only (no darker patches).
 - [ ] 8. Set the camera projection to 2 (Orthographic) → a globe; animate centerLon → it
@@ -120,9 +120,10 @@ adding street layers.
 ## Label → Routes
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add London and New York → Create route →
-      a green arc bowing upward between them; turn on Trim and animate End 0 → 100 →
-      it draws from London to New York; leg ends are round.
-- [ ] 23. Keyframe the leg's **lift** 0 → 60 → the arc rises smoothly; the ends stay put.
+      a green arc bowing upward between them; in the map's Controls animate
+      London → New York · Leg 1 draw on % 0 → 100 → it draws from London to New York; leg ends
+      are round.
+- [ ] 23. Keyframe London → New York · Arc height 0 → 60 → the arc rises smoothly; the ends stay put.
 - [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the
       globe → it hides behind the globe, and a high arc peeks over the edge.
 - [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops
@@ -142,9 +143,9 @@ adding street layers.
       matched, 0 unmatched"; Place = Code, Value = Population, Year = Year.
 - [ ] 29. Turn on Coloured regions + Legend → Add to map → France, Japan and Brazil coloured, every other
       country light grey; legend bottom-right with "Population", min and max.
-- [ ] 30. Keyframe the regions layer's Year 2000 → 2020 → colours change smoothly; the legend doesn't
-      change (auto range covers all years).
-- [ ] 31. Change the regions layer's low/high colours → the legend follows.
+- [ ] 30. Keyframe Data · Year (map's Controls) 2000 → 2020 → colours change smoothly; the legend
+      doesn't change (auto range covers all years).
+- [ ] 31. Change Population · Low colour / High colour in the Controls → the map and legend follow.
 - [ ] 32. Add Bubbles and Value labels → circles sized by population at each country; labels like
       "67.6"; both animate with Year.
 - [ ] 33. Edit a number in the Google Sheet → Refresh data → the map updates; your colours and Year
@@ -153,7 +154,7 @@ adding street layers.
       in the Unmatched list.
 - [ ] 35. A private (not shared) sheet link → Load → the "Anyone with the link" message.
 - [ ] 36. Regions off, Bubbles + Legend on → the bubble legend shows two reference circles with their values.
-- [ ] 37. With data layers present, the Extract source list (bottom of Layers) doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
+- [ ] 37. With data layers present, the Extract source list (Layers tab) doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
 - [ ] 38. A city list (e.g. "Location,Visitors" with Paris, Lyon) with "Look up unmatched names" ticked → bubbles at the cities; Refresh data keeps them.
 - [ ] 39. A World Bank download (API_…csv from data.worldbank.org, hosted at a public link) → Load detects Country Code and the year columns.
 
@@ -190,6 +191,28 @@ adding street layers.
 - [ ] 48. Add attribution → an "Imagery credit" line appears above the OSM credit; Clear download cache →
       built imagery still shows; Clear imagery tiles → asks for a second press (and refuses while
       downloading or building); confirm → tiles and downloaded images are removed and re-download on the next Build.
+
+## Map controls
+
+- [ ] C1. Make a new map (Search, or Create map here) → "<map> Controls" sits just above the map
+      group, not inside it, and is selected, so the Attribute Editor opens on it; its Controls tab
+      lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names. Add a
+      pin → the selection stays where it was.
+- [ ] C2. Change Countries · Fill colour and Countries · Detail there → the map updates.
+- [ ] C3. Add two pins → one Pins · Colour changes both; disconnect one pin's colour on the pin,
+      press Refresh controls → that pin stays separate.
+- [ ] C3b. Open a scene saved before the Controls existed, with two pins where one was recoloured
+      by hand → Refresh controls → the other pin follows Pins · Colour, the recoloured one keeps
+      its colour (and stays separate on later refreshes).
+- [ ] C4. Make a route → Leg 1 draw on % animates the first leg drawing on.
+- [ ] C5. Add a data set → Data · Year changes regions, bubbles and labels together.
+- [ ] C6. Promote any other setting onto the Controls layer yourself (also try a pin's Position),
+      then add a layer → your settings are still there, at the end, with their names.
+- [ ] C7. Save, reopen the scene, add a pin → no duplicate controls; the pin links to Pins · Colour.
+- [ ] C8. Open a map made before this change (Controls inside the map group) → press Refresh
+      controls → the Controls layer moves out to just above the group, with its promotions intact.
+- [ ] C9. Drag a Controls layer into another group, then add a pin → the layer stays there and
+      still gets the new Pins settings; no second Controls layer appears.
 
 ## Scene persistence and install
 

@@ -4,7 +4,7 @@ Everything the panel does, section by section. New here? Start with the
 [quick start](../README.md#quick-start) in the README.
 
 The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Extract and
-Bake are at the bottom of Layers; Label has its own **Pins / Routes** switch.
+Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch.
 
 - [Map](#map)
 - [Layers](#layers)
@@ -40,8 +40,43 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 - **Flying the camera:** pick a place, set **Frames** and press **Fly here** — the camera zooms
   out, travels and zooms in smoothly from the current frame (with World view picked it flies back
   out). Build imagery afterwards for sharp imagery along the way.
-- **Animating by hand:** keyframe the Camera layer's `zoom`, `centerLat` / `centerLon` or
-  `rotation` inputs. Everything in the map follows.
+- **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
+  **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
+  follows.
+
+## Map controls
+
+Every map has a **<map> Controls** layer, just above the map's group in the Scene Window (not
+inside it). The plugin selects it when you make a map, so the Attribute Editor opens on it. Open
+the **Controls** tab there to find the map's settings in one place:
+
+- **Camera:** zoom, centre, rotation and projection (0 flat, 1 Equal Earth, 2 globe).
+- **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
+  (for cities) dot size.
+- **Pins** and **Labels:** one hide, colour and size for all of them.
+- **Routes:** colour, width and arc height for each route, and each leg's **draw on %** to animate.
+- **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
+- **Imagery:** opacity and hide.
+
+The list updates whenever the plugin adds something to the map. If you change the map yourself,
+press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
+kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.
+
+- **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
+  you like (another group, further down the stack); the plugin still finds it and keeps it up to date.
+- **Deleting a map:** deleting a map's group does not delete its Controls layer, because it sits
+  outside the group. Delete that layer too.
+- **Maps made before this change:** their Controls layer sat inside the map's group. Press
+  **Refresh controls** once and it moves out to just above the group, keeping its settings.
+
+- **One layer, its own value:** to give one layer its own value for a shared setting (one pin's
+  colour, one leg's width, one data layer's Year…), right-click that setting on the layer and
+  choose **Disconnect**; it then stays separate.
+- **Maps made before the Controls:** the first **Refresh controls** links only the layers that
+  already show the same value. A layer you had set differently (say, one red pin) keeps its value
+  and stays separate, as if you had disconnected it.
+- **Imagery:** building imagery again replaces its group, so keyframes on its
+  `<imagery> · Opacity` and `<imagery> · Hide` rows are lost — key them again after a rebuild.
 
 ## Layers
 
@@ -51,8 +86,8 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
   the camera's current view — zoom in before adding them.
-- Each map layer has a **Detail** slider: lower it to thin out small or minor features, and
-  keyframe it for a "map filling in" effect.
+- Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
+  minor features, and keyframe it for a "map filling in" effect.
 - Keep the **© OpenStreetMap contributors** credit (added for you) in any scene that uses street
   data.
 
@@ -91,7 +126,8 @@ Put satellite photos, styled maps or terrain under a Web Mercator map.
 
 ## Extract and Bake
 
-Both are at the bottom of the **Layers** section.
+Both are in the **Layers** section, below **Add layers** (Refresh controls and Clear download
+cache come after them).
 
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
@@ -109,10 +145,11 @@ Both are at the bottom of the **Layers** section.
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
   stops make a flight arc, more make a journey. Set **Lift %** (how high the arcs bow), tick
   **Pins at stops** and **Labels at stops** if you want them, and press **Create route**.
-- Each leg is its own layer: animate its **Trim** (Stroke tab) to draw it on, and keyframe its
-  **lift** to raise or flatten the arc. On a globe, arcs rise off the surface and hide behind it.
-- For a journey, stagger each leg's Trim keys (leg 2 starts where leg 1 ends) to draw the route
-  leg by leg.
+- Each leg is its own layer. To draw a leg on, animate its `<route> · Leg N draw on %` row
+  (0 → 100) in the map's Controls; `<route> · Arc height` raises or flattens every arc of the
+  route. On a globe, arcs rise off the surface and hide behind it.
+- For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
+  route leg by leg.
 - Route legs show **Detail** and **Point Radius** from ordinary map layers — you can ignore both
   (Detail 0 hides the leg).
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
@@ -127,8 +164,10 @@ Both are at the bottom of the **Layers** section.
   it couldn't match. Tick **Look up unmatched names** to place cities.
 - Turn on **Coloured regions**, **Bubbles**, **Value labels** and **Legend**, then **Add to map**.
   Each goes in its own layer inside a `Data: <column>` group and moves with the camera.
-- Keyframe a data layer's **Year** to animate through time; change colours, range and sizes on the
-  layers. After editing the sheet, press **Refresh data** — your styling and keyframes are kept.
+- Keyframe **Data · Year** in the map's Controls to animate through time: it drives every data
+  layer of the map, so regions, bubbles and labels stay in step. Each set's colours and sizes are
+  there too (`<set> · Low colour`, `<set> · Bubble size`…); the range is on the layers. After
+  editing the sheet, press **Refresh data** — your styling and keyframes are kept.
 
 ## Cache and settings
 
@@ -154,6 +193,5 @@ Both are at the bottom of the **Layers** section.
   imagery provider's licence for your use (EOX and MapTiler's free plan are non‑commercial).
 - Data maps colour whole countries only (not states or provinces), value labels use Cavalry's
   default font, and private sheets can't be read.
-- Each data layer has its own Year input — keyframe them together (or connect them) to keep
-  regions, bubbles and labels in sync. Data layers also show Detail and Point Radius inputs they
-  don't use, and the legend's numbers always use the compact format.
+- Data layers show Detail and Point Radius inputs they don't use, and the legend's numbers always
+  use the compact format.
