@@ -212,3 +212,15 @@ test("wrapLon keeps longitudes in -180..180", () => {
   assert.equal(P.wrapLon(-190), 170);
   assert.equal(P.wrapLon(20), 20);
 });
+
+test("budget keeps on-screen features, largest first, under the point cap", () => {
+  const sq = (x, y, d) => [[x, y], [x + d, y], [x + d, y + d], [x, y + d], [x, y]];
+  const layer = (rings) => P.prepare({ features: rings.map((r, i) => ({ name: "f" + i, rings: [r] })) });
+  const view = { lat: 0, lon: 0, zoom: 4, width: 320, height: 180 };
+  const big = layer([sq(-5, -5, 8)]), small = layer([sq(1, 1, 1), sq(2, 2, 1)]), far = layer([sq(150, 60, 1)]);
+  const out = P.budget([{ kind: "fill", color: "#111111", prepared: small }, { kind: "line", color: "#222222", prepared: big }, { kind: "fill", color: "#333333", prepared: far }], view, 10);
+  assert.deepEqual(out.map((l) => l.color), ["#111111", "#222222"], "layer order kept; the off-screen layer dropped");
+  assert.equal(out[1].features.length, 1, "the big square (5 points) is kept first");
+  assert.equal(out[0].features.length, 1, "only one small square (5 points) still fits");
+  assert.deepEqual(P.budget([], view, 10), []);
+});

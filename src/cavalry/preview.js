@@ -8,14 +8,14 @@ var GeoPreviewPanel = (function () {
   var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff", OTHER_NAME = "#a6a6a6";
   var PILL = "#000000a6", GLYPH = "#e6e6e6"; // the zoom readout and − / + drawn inside the map
   var SPOT = "#ffffff", DRAFT = "#1F8F4E";
-  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5;
+  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5, STREET_POINTS = 15000;
   var HINT = "Drag to move · double-click or + / − to zoom";
 
   function create(opts) {
     var p = {}, draw = null, error = null;
     var view = { lat: 20, lon: 0, zoom: 0, width: 320, height: 180 }, source = null, places = [], picked = -1, current = null;
     var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, running = false, failed = false, sized = false;
-    var levels = {}, lakes = null;
+    var levels = {}, lakes = null, streets = null;
     var colors = { water: WATER, land: LAND, border: BORDER };
     var overlay = null, draft = null, spot = null, press = null, panning = false;
 
@@ -155,6 +155,16 @@ var GeoPreviewPanel = (function () {
         var big = GeoPreview.visible(lakeData(), view).filter(function (f) { return (f.bbox.x1 - f.bbox.x0) * s >= MIN_LAKE_PX || (f.bbox.y1 - f.bbox.y0) * s >= MIN_LAKE_PX; });
         if (big.length) draw.addPath(ringsPath(GeoPreview.project(big, view)), { color: colors.water });
       }
+      if (streets && !dragging) {
+        GeoPreview.budget(streets, view, STREET_POINTS).forEach(function (l) {
+          var rings = GeoPreview.project(l.features, view);
+          if (!rings.length) return;
+          if (l.kind === "fill") { draw.addPath(ringsPath(rings), { color: l.color }); return; }
+          var path = new cavalry.Path();
+          rings.forEach(function (r) { for (var i = 0; i < r.length; i += 2) { if (i === 0) path.moveTo(r[0], sy(r[1])); else path.lineTo(r[i], sy(r[i + 1])); } });
+          draw.addPath(path.toObject(), { color: l.color, stroke: true, strokeWidth: 1 });
+        });
+      }
       var f = GeoPreview.frameRect(view, c.width, c.height);
       if (opts.dim) draw.addPath(appendPaths(rectPath({ x: 0, y: 0, w: view.width, h: view.height }, false), rectPath(f, true)), { color: DIM });
       if (opts.frame !== false) draw.addPath(rectPath(f, false).toObject(), { color: FRAME, stroke: true, strokeWidth: 2 });
@@ -233,6 +243,7 @@ var GeoPreviewPanel = (function () {
       setView(GeoPreview.viewForCamera(cam, c.width, c.height, view.width, view.height), src || null);
     });
     p.setPlaces = guarded(function (list, index) { places = list || []; picked = typeof index === "number" ? index : -1; changed(); });
+    p.setStreets = guarded(function (list) { streets = list && list.length ? list : null; changed(); });
     p.setOverlay = guarded(function (model) { overlay = model || null; changed(); });
     p.setDraft = guarded(function (list) { draft = list && list.length ? list.slice() : null; changed(); });
     p.setSpot = guarded(function (s) { spot = s || null; changed(); });

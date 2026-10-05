@@ -841,12 +841,23 @@ function routesFollowPicked() {
 }
 routeResultPicker.onValueChanged = guard(routesFollowPicked);
 
+var streetCache = {}; // layer id -> GeoPreview.prepare(...) of its data (street layers never change after they're made)
+function previewStreetLayers(map) {
+  return GeoScene.previewStreets(map).map(function (s) {
+    if (!streetCache[s.id]) streetCache[s.id] = GeoPreview.prepare(GeoScene.readPreviewLayer(s.id));
+    return { kind: s.kind, color: s.color, prepared: streetCache[s.id] };
+  });
+}
+
 // Hands the picked map's pins, labels and routes to every preview. Never throws: on a read
 // failure the previews keep what they had.
 function refreshPreviews() {
-  var model = null;
-  try { model = newMapSelected() ? null : GeoScene.previewModel(currentMap()); } catch (e) { return; }
-  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setOverlay(model); });
+  var model = null, streets = null;
+  try {
+    model = newMapSelected() ? null : GeoScene.previewModel(currentMap());
+    streets = newMapSelected() ? null : previewStreetLayers(currentMap());
+  } catch (e) { return; }
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) { p.setOverlay(model); p.setStreets(streets); } });
 }
 
 // The selected layer to send along a route: the first selected layer that isn't part of the map.

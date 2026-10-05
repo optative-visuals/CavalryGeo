@@ -1265,6 +1265,19 @@ var GeoScene = (function () {
   }
   function lonLat(lon, lat) { return isFinite(lon) && isFinite(lat) ? { lon: lon, lat: lat } : null; }
 
+  // The map's street-level layers for the previews (ids, how to draw, colour); data is read
+  // separately (readPreviewLayer) so the panel can keep it.
+  function previewStreets(map) {
+    var look = styleOf(map), out = [];
+    findMapLayers(map).forEach(function (l) {
+      var c = l.meta.category;
+      if (c === "roads" || c === "railways") out.push({ id: l.id, kind: "line", color: look.colors[c] });
+      else if (c === "water" || c === "parks") out.push({ id: l.id, kind: "fill", color: look.colors[c] });
+      else if (c === "extract" && l.meta.source !== "cities") out.push({ id: l.id, kind: LINE_SOURCES.indexOf(l.meta.source) >= 0 ? "line" : "fill", color: look.colors.extract });
+    });
+    return out;
+  }
+  function readPreviewLayer(id) { return GeoCodec.decodeLayer(readLayerData(id)); }
   function previewModel(map) {
     var look = styleOf(map), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR + ".";
     var out = { colors: { accent: look.colors.accent, text: look.colors.text }, pins: [], labels: [], routes: [] };
@@ -1326,6 +1339,6 @@ var GeoScene = (function () {
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
-    previewModel: previewModel
+    previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
 })();

@@ -6578,3 +6578,54 @@ test("Map styles: picking a style recolours the Label previews too", () => {
   pickStyle(context, "Light");
   [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => assert.equal(pv._draw._background, "#cfe3ec"));
 });
+
+test("previewStreets lists roads, railways, water, parks and extracts with their style colours; buildings and data are left out", () => {
+  const { context } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("S", { lat: 0, lon: 0, zoom: 12, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Light"));
+  const C = require("../src/core/codec.js");
+  const line = C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const area = C.encodeLayer({ kind: "polygon", features: [{ name: "Park", rings: [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0]]] }] });
+  const add = (cat, enc) => G.createMapLayer(map, cat, enc, { camera: map.cameraId, category: cat }, G.layerStyle(map, cat), {});
+  const roads = add("roads", line), parks = add("parks", area);
+  add("buildings", area);
+  const list = plain(G.previewStreets(map));
+  assert.deepEqual(list.map((s) => [s.id, s.kind, s.color]).sort(), [[parks, "fill", "#d5e6c8"], [roads, "line", "#c9c2b2"]].sort());
+  assert.equal(G.readPreviewLayer(roads).features[0].name, "Road");
+});
+
+test("preview streets: drawn within the budget, and not while dragging", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+  const prepared = context.GeoPreview.prepare({ features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render();
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 1);
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 60 });
+  p._render();
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 0, "hidden while dragging");
+});
+
+test("refreshPreviews hands the map's street layers to every preview (read once, then cached)", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const C = require("../src/core/codec.js");
+  const road = C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const id = G.createMapLayer(map, "Map: Roads", road, { camera: map.cameraId, category: "roads" }, G.layerStyle(map, "roads"), {});
+  let reads = 0;
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { reads++; return real(x); };
+  context.refreshPreviews();
+  context.refreshPreviews();
+  assert.equal(reads, 1, "decoded once");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    pv.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+    pv._render();
+    assert.equal(strokes(pv._draw, "#8a948e").length, 1, "Dark roads colour");
+  });
+  assert.ok(api && id);
+});

@@ -225,6 +225,25 @@ var GeoPreview = (function () {
     return segs;
   }
 
+  // Which street features to draw: those on view, largest first, until maxPoints points are used
+  // (a feature that doesn't fit is skipped so smaller ones can still be drawn). Keeps layer order.
+  function budget(layers, view, maxPoints) {
+    var ok = shows(view), all = [], used = 0, keep = layers.map(function () { return []; });
+    layers.forEach(function (l, li) {
+      l.prepared.features.forEach(function (f) {
+        if (!ok(f.bbox)) return;
+        var n = 0;
+        f.rings.forEach(function (r) { n += r.length / 2; });
+        all.push({ li: li, f: f, n: n, size: Math.max(f.bbox.x1 - f.bbox.x0, f.bbox.y1 - f.bbox.y0) });
+      });
+    });
+    all.sort(function (a, b) { return b.size - a.size; });
+    all.forEach(function (e) { if (used + e.n > maxPoints) return; used += e.n; keep[e.li].push(e.f); });
+    var out = [];
+    layers.forEach(function (l, i) { if (keep[i].length) out.push({ kind: l.kind, color: l.color, features: keep[i] }); });
+    return out;
+  }
+
   // Dash segments along a rectangle's outline (clockwise from the top-left corner).
   function dashes(rect, dash, gap) {
     return dashPolyline([[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h], [rect.x, rect.y]], dash, gap);
@@ -234,6 +253,6 @@ var GeoPreview = (function () {
     worldX: worldX, worldY: worldY, lonOf: lonOf, latOf: latOf, toPx: toPx, fromPx: fromPx, pan: pan, zoomAt: zoomAt,
     frameRect: frameRect, frameCamera: frameCamera, viewForCamera: viewForCamera, cameraRect: cameraRect, detailFor: detailFor,
     prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, distinctPlaces: distinctPlaces, dashes: dashes,
-    isClick: isClick, legCurve: legCurve, dashPolyline: dashPolyline, wrapLon: wrapLon };
+    budget: budget, isClick: isClick, legCurve: legCurve, dashPolyline: dashPolyline, wrapLon: wrapLon };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoPreview;

@@ -269,6 +269,7 @@ adding street layers.
 ## Previews
 
 - [ ] Map, Pins and Routes previews show the picked map's pins, labels and routes (curved like the real legs) in the map's style colours.
+- [ ] On a street map (roads, water, parks added), zoom the previews in: the streets show; dragging stays smooth (they hide while dragging and come back).
 - [ ] Pins: a click fills Lat / Lon, shows a white ring and the place name; Pin at coordinates puts the pin there. Typed text is kept.
 - [ ] Routes: clicking three places adds three named stops and a dashed draft route; Create route makes it; the previews then show it.
 - [ ] Double-clicking on the Routes preview adds one stop and doesn't zoom; − / + still zoom; dragging moves without adding.
