@@ -40,9 +40,11 @@ then animate them through the years.
 ![A population data map with a legend](docs/images/data.jpg)
 
 ### And more
-A map preview in the panel to find and frame a place before the camera moves, pins and labels for
-places, **Extract** to pull one country or street into its own layer, and **Bake** to turn any map
-layer into a plain editable shape. The panel tells you when a new version is out.
+A **Controls** layer for every map that gathers its camera, colours, layers, routes and data
+settings in one place, a map preview in the panel to find and frame a place before the camera
+moves, pins and labels for places, **Extract** to pull one country or street into its own layer,
+and **Bake** to turn any map layer into a plain editable shape. The panel tells you when a new
+version is out.
 
 ## Install
 
@@ -53,7 +55,7 @@ layer into a plain editable shape. The panel tells you when a new version is out
 3. Open **Scripts → CavalryGeo**. No restart needed.
 
 To update, drag in the files from a newer release and replace the old ones.
-Tested with Cavalry on Windows; macOS hasn't been tried yet.
+Tested with Cavalry on Windows and macOS.
 
 ## Quick start
 
@@ -62,7 +64,7 @@ Tested with Cavalry on Windows; macOS hasn't been tried yet.
 2. On **Layers**, turn on **Countries** and **Coastlines** and press **Add layers**.
 3. With the playhead at the start, pick **World view** in the place list on **Map** and press
    **Jump here**, then pick Paris again and press **Fly here**. The camera now flies from the
-   world into Paris.
+   world into Paris between the **From** and **To** frames (change them to time the flight).
 4. On **Imagery**, press **Build imagery** and say **Yes**. Play it back.
 
 Everything else — routes, data maps, pins, streets, extract and bake — is in the
