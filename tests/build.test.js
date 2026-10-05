@@ -6629,3 +6629,79 @@ test("refreshPreviews hands the map's street layers to every preview (read once,
   });
   assert.ok(api && id);
 });
+
+function streetFixture(context) {
+  const G = context.GeoScene, map = context.currentMap(), C = require("../src/core/codec.js");
+  const enc = (n) => C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], ...Array.from({ length: n }, (_, i) => [0.001 * (i + 1), 0.001 * (i + 1)])]] }] });
+  const add = (cat, e, meta = {}) => G.createMapLayer(map, "Map: " + cat, e, Object.assign({ camera: map.cameraId, category: cat }, meta), G.layerStyle(map, cat), {});
+  return { G, map, enc, add };
+}
+
+test("previewStreets lists layers bottom first: parks, water, railways, roads, extracts", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, map, enc, add } = streetFixture(context);
+  const ex = G.createMapLayer(map, "Map: extract", enc(2), { camera: map.cameraId, category: "extract", source: "rivers" }, G.layerStyle(map, "extractLine"), {}), roads = add("roads", enc(2)), parks = add("parks", enc(2)), rail = add("railways", enc(2)), water = add("water", enc(2));
+  assert.deepEqual(plain(G.previewStreets(map).map((s) => s.id)), [parks, water, rail, roads, ex]);
+});
+
+test("street cache: changed data under the same id is re-read, and removed layers are pruned", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, map, enc, add } = streetFixture(context);
+  const a = add("roads", enc(2)), b = add("rail" + "ways", enc(2));
+  let reads = [];
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { reads.push(x); return real(x); };
+  context.refreshPreviews();
+  context.refreshPreviews();
+  assert.deepEqual(reads.slice().sort(), [a, b].sort(), "each read once");
+  const other = add("roads", enc(6));
+  api.set(a, { "generator.expression": api.get(other, "generator.expression") });
+  api.deleteLayer(other);
+  reads = [];
+  context.refreshPreviews();
+  assert.deepEqual(reads, [a], "only the changed layer is re-read");
+  api.deleteLayer(b);
+  context.refreshPreviews();
+  reads = [];
+  add("railways", enc(2)); // a new layer
+  context.refreshPreviews();
+  assert.equal(reads.length, 1, "only the new layer is read; the removed layer left no stale entry");
+  assert.ok(map);
+});
+
+test("refreshPreviews scans the comp's layers once for pins, routes and streets together", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, enc, add } = streetFixture(context);
+  const road = add("roads", enc(2));
+  context.refreshPreviews(); // decodes and caches
+  const realGet = api.get.bind(api), realFind = G.findMapLayers;
+  let exprReads = 0, finds = 0;
+  api.get = (id, attr) => { if (id === road && attr === "generator.expression") exprReads++; return realGet(id, attr); };
+  G.findMapLayers = (m) => { finds++; return realFind(m); };
+  context.refreshPreviews();
+  assert.equal(finds, 1);
+  assert.equal(exprReads, 1, "the layer's expression is read once per refresh");
+});
+
+test("a street layer that fails to read doesn't stop the overlay or the other streets", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, enc, add } = streetFixture(context);
+  const bad = add("parks", enc(2)), good = add("roads", enc(2));
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { if (x === bad) throw new Error("boom"); return real(x); };
+  let overlays = 0;
+  const pv = context.pinsPreview, realSet = pv.setOverlay;
+  pv.setOverlay = (m) => { overlays++; return realSet(m); };
+  context.refreshPreviews();
+  assert.equal(overlays, 1, "overlay refreshed");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => {
+    p.showCamera({ lat: 0.003, lon: 0.003, zoom: 14 }, "camera");
+    p._render();
+    assert.equal(strokes(p._draw, "#8a948e").length, 1, "the good street layer still draws");
+  });
+  assert.ok(good);
+});

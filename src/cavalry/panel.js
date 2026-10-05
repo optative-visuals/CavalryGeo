@@ -841,12 +841,20 @@ function routesFollowPicked() {
 }
 routeResultPicker.onValueChanged = guard(routesFollowPicked);
 
-var streetCache = {}; // layer id -> GeoPreview.prepare(...) of its data (street layers never change after they're made)
-function previewStreetLayers(map) {
-  return GeoScene.previewStreets(map).map(function (s) {
-    if (!streetCache[s.id]) streetCache[s.id] = GeoPreview.prepare(GeoScene.readPreviewLayer(s.id));
-    return { kind: s.kind, color: s.color, prepared: streetCache[s.id] };
+var streetCache = {}; // layer id -> { sig, prepared }: GeoPreview.prepare(...) of the layer's data, re-read when its sig changes
+function previewStreetLayers(map, layers) {
+  var list = GeoScene.previewStreets(map, layers), keep = {}, out = [];
+  list.forEach(function (s) {
+    keep[s.id] = true;
+    var hit = streetCache[s.id];
+    if (!hit || hit.sig !== s.sig) {
+      try { hit = streetCache[s.id] = { sig: s.sig, prepared: GeoPreview.prepare(GeoScene.readPreviewLayer(s.id)) }; }
+      catch (e) { delete streetCache[s.id]; return; } // a layer that won't read is skipped
+    }
+    out.push({ kind: s.kind, color: s.color, prepared: hit.prepared });
   });
+  Object.keys(streetCache).forEach(function (id) { if (!keep[id]) delete streetCache[id]; });
+  return out;
 }
 
 // Hands the picked map's pins, labels and routes to every preview. Never throws: on a read
@@ -854,8 +862,11 @@ function previewStreetLayers(map) {
 function refreshPreviews() {
   var model = null, streets = null;
   try {
-    model = newMapSelected() ? null : GeoScene.previewModel(currentMap());
-    streets = newMapSelected() ? null : previewStreetLayers(currentMap());
+    if (!newMapSelected()) {
+      var map = currentMap(), layers = GeoScene.findMapLayers(map); // one scan of the comp for both
+      model = GeoScene.previewModel(map, layers);
+      try { streets = previewStreetLayers(map, layers); } catch (e2) { streets = null; }
+    }
   } catch (e) { return; }
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) { p.setOverlay(model); p.setStreets(streets); } });
 }

@@ -138,8 +138,9 @@ var GeoScene = (function () {
   function findMapLayers(map) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
-      var meta = layerMeta(id);
-      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta });
+      var expr = readExpr(id, A.MAP_EXPR_ATTR), meta = GeoExpression.readTag(expr, "GEO_META");
+      // size (the expression's length, data included) tells a caller whether a layer's data changed
+      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length });
     });
     return out;
   }
@@ -1267,23 +1268,31 @@ var GeoScene = (function () {
 
   // The map's street-level layers for the previews (ids, how to draw, colour); data is read
   // separately (readPreviewLayer) so the panel can keep it.
-  function previewStreets(map) {
+  // Bottom first (the map's stacking): parks, water, railways, roads, then extracts. layers is an
+  // optional findMapLayers(map) result, so a caller reading several things scans the comp once.
+  // sig changes when the layer's data does.
+  var STREET_ORDER = ["parks", "water", "railways", "roads", "extract"];
+  function previewStreets(map, layers) {
     var look = styleOf(map), out = [];
-    findMapLayers(map).forEach(function (l) {
-      var c = l.meta.category;
-      if (c === "roads" || c === "railways") out.push({ id: l.id, kind: "line", color: look.colors[c] });
-      else if (c === "water" || c === "parks") out.push({ id: l.id, kind: "fill", color: look.colors[c] });
-      else if (c === "extract" && l.meta.source !== "cities") out.push({ id: l.id, kind: LINE_SOURCES.indexOf(l.meta.source) >= 0 ? "line" : "fill", color: look.colors.extract });
+    (layers || findMapLayers(map)).forEach(function (l) {
+      var c = l.meta.category, rank = STREET_ORDER.indexOf(c);
+      if (rank < 0) return;
+      if (c === "roads" || c === "railways") out.push({ id: l.id, sig: l.size, rank: rank, kind: "line", color: look.colors[c] });
+      else if (c === "water" || c === "parks") out.push({ id: l.id, sig: l.size, rank: rank, kind: "fill", color: look.colors[c] });
+      else if (l.meta.source !== "cities") out.push({ id: l.id, sig: l.size, rank: rank, kind: LINE_SOURCES.indexOf(l.meta.source) >= 0 ? "line" : "fill", color: look.colors.extract });
     });
+    out.forEach(function (s, i) { s.i = i; });
+    out.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
+    out.forEach(function (s) { delete s.rank; delete s.i; });
     return out;
   }
   function readPreviewLayer(id) { return GeoCodec.decodeLayer(readLayerData(id)); }
-  function previewModel(map) {
+  function previewModel(map, layers) {
     var look = styleOf(map), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR + ".";
     var out = { colors: { accent: look.colors.accent, text: look.colors.text }, pins: [], labels: [], routes: [] };
     var LIFT = A.MAP_ARRAY_ATTR + "." + E.inputIndex(E.ROUTE_INPUTS, "lift"), oldRoutes = {}, oldOrder = [];
     function sameSpot(a, b) { return Math.abs(a.lon - b.lon) < 1e-9 && Math.abs(a.lat - b.lat) < 1e-9; }
-    findMapLayers(map).forEach(function (l) {
+    (layers || findMapLayers(map)).forEach(function (l) {
       var c = l.meta.category;
       if (c !== "pin" && c !== "label" && c !== "route") return;
       var layer;
