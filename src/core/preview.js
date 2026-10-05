@@ -1,6 +1,7 @@
 // Map preview maths: a flat Web Mercator view in preview pixels (origin top-left, y down),
 // the fixed frame in the middle and its camera, detail levels, culling, simplification and
 // hit-testing. Preview zoom z means the world is 256 * 2^z px wide (like GeoProjection).
+if (typeof GeoCurve === "undefined" && typeof require !== "undefined") { var GeoCurve = require("./curve.js"); }
 var GeoPreview = (function () {
   var D2R = Math.PI / 180, MAX_LAT = 85.0511287798;
   var FRAME_FRACTION = 0.6, CAMERA_MIN_ZOOM = 0, CAMERA_MAX_ZOOM = 18, MIN_FEATURE_PX = 2;
@@ -188,11 +189,28 @@ var GeoPreview = (function () {
     return kept.sort(function (a, b) { return a - b; });
   }
 
-  // Dash segments along a rectangle's outline (clockwise from the top-left corner).
-  function dashes(rect, dash, gap) {
-    var pts = [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h], [rect.x, rect.y]];
+  var CLICK_PX = 4;
+  // A press and release that moved less than CLICK_PX is a click; more is a drag.
+  function isClick(a, b) { var dx = b.x - a.x, dy = b.y - a.y; return dx * dx + dy * dy < CLICK_PX * CLICK_PX; }
+
+  // A route leg on the preview: the same Bézier the real leg uses. GeoCurve works y-up (like
+  // Cavalry), the preview y-down, so y is flipped in and out. Arc height is a share of the leg's
+  // own length, so no scaling is needed. 17 points (16 steps).
+  function legCurve(view, from, to, opts) {
+    var p0 = toPx(view, from.lon, from.lat), p1 = toPx(view, to.lon, to.lat);
+    var h = GeoCurve.handles([p0[0], -p0[1]], [p1[0], -p1[1]], opts || {});
+    var c0 = [p0[0] + h.start[0], p0[1] - h.start[1]], c1 = [p1[0] + h.end[0], p1[1] - h.end[1]], out = [];
+    for (var i = 0; i <= 16; i++) {
+      var t = i / 16, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+      out.push([a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]]);
+    }
+    return out;
+  }
+
+  // Dash segments along a polyline ([[x, y], ...]), the pattern carrying on round corners.
+  function dashPolyline(pts, dash, gap) {
     var segs = [], phase = 0;
-    for (var e = 0; e < 4; e++) {
+    for (var e = 0; e + 1 < pts.length; e++) {
       var ax = pts[e][0], ay = pts[e][1], bx = pts[e + 1][0], by = pts[e + 1][1];
       var len = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay)), pos = 0;
       while (pos < len) {
@@ -207,9 +225,15 @@ var GeoPreview = (function () {
     return segs;
   }
 
+  // Dash segments along a rectangle's outline (clockwise from the top-left corner).
+  function dashes(rect, dash, gap) {
+    return dashPolyline([[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h], [rect.x, rect.y]], dash, gap);
+  }
+
   return { FRAME_FRACTION: FRAME_FRACTION, CAMERA_MIN_ZOOM: CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM: CAMERA_MAX_ZOOM, LEVELS: LEVELS,
     worldX: worldX, worldY: worldY, lonOf: lonOf, latOf: latOf, toPx: toPx, fromPx: fromPx, pan: pan, zoomAt: zoomAt,
     frameRect: frameRect, frameCamera: frameCamera, viewForCamera: viewForCamera, cameraRect: cameraRect, detailFor: detailFor,
-    prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, distinctPlaces: distinctPlaces, dashes: dashes };
+    prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, distinctPlaces: distinctPlaces, dashes: dashes,
+    isClick: isClick, legCurve: legCurve, dashPolyline: dashPolyline, wrapLon: wrapLon };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoPreview;

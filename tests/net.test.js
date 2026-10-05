@@ -403,3 +403,9 @@ test("settings round-trip and tolerate a broken file", () => {
   fakeApi.writeToFile("C:/fake/CavalryGeo_assets/settings.json", "{broken");
   assert.deepEqual(plainObj(net.loadSettings()), {});
 });
+
+test("reverse: a failed or empty lookup gives null and never throws", () => {
+  assert.equal(buildGeoNet([500], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null);
+  assert.equal(buildGeoNet([200], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null, "body [] has no name");
+  assert.equal(buildGeoNet([-1, -1, -1, -1, -1], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null, "network failures");
+});

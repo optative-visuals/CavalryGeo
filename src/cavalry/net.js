@@ -166,6 +166,18 @@ var GeoNet = (function () {
     return out;
   }
 
+  // What is at this spot (a name, or null). Shares Search's one-request-per-second budget, waiting
+  // its turn instead of refusing, so quick clicks still work. Never throws.
+  function reverse(lat, lon, zoom) {
+    try {
+      while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+      lastSearch = Date.now();
+      var r = get(NOMINATIM, GeoSearch.reversePath(lat, lon, zoom));
+      if (r.status !== 200) return null;
+      return GeoSearch.reverseName(JSON.parse(r.body));
+    } catch (e) { return null; }
+  }
+
   // Overpass timeouts and out-of-memory conditions are often reported as HTTP 200
   // with a "remark" field describing the error and empty/partial elements. Treat
   // that like a failed status: try the next mirror, and never cache it.
@@ -283,7 +295,7 @@ var GeoNet = (function () {
   }
 
   return {
-    search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces,
+    search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
