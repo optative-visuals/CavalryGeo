@@ -26,8 +26,10 @@ function syncControls(map, select) {
     if (select && r && r.componentId && typeof api.select === "function") {
       try { api.select([r.componentId]); } catch (e) { /* cosmetic */ }
     }
+    try { refreshPreviews(); } catch (e) { /* cosmetic */ }
     return "";
   } catch (e) {
+    try { refreshPreviews(); } catch (e2) { /* cosmetic */ }
     return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Layers tab) to try again.";
   }
 }
@@ -116,7 +118,10 @@ function refreshStylePicker(name) {
     mapStylePicker.setValue(sel);
   } finally { refreshingStyles = false; }
 }
-function previewStyle() { if (preview.available()) preview.setColors(GeoStyles.previewColors(pickedStyle())); }
+function previewStyle() {
+  var colors = GeoStyles.previewColors(pickedStyle());
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setColors(colors); });
+}
 (function () {
   var s = {};
   try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
@@ -139,15 +144,23 @@ function previewFollowPicked() {
 }
 // Centres the preview on the picked map's camera and shows it as the dashed frame.
 function previewShowMap() {
-  if (!preview.available() || newMapSelected()) { if (preview.available()) preview.setCurrentCamera(null); return; }
+  var labelOnes = [pinsPreview, routesPreview].filter(function (p) { return p && p.available(); });
+  if (newMapSelected()) {
+    if (preview.available()) preview.setCurrentCamera(null);
+    labelOnes.forEach(function (p) { p.setCurrentCamera(null); p.showCamera(worldViewCamera(0), "world"); });
+    refreshPreviews();
+    return;
+  }
   var cam = GeoScene.readCamera(maps[mapPicker.getValue()].cameraId);
-  preview.setCurrentCamera(cam);
-  preview.showCamera(cam, "camera");
+  if (preview.available()) { preview.setCurrentCamera(cam); preview.showCamera(cam, "camera"); }
+  labelOnes.forEach(function (p) { p.setCurrentCamera(cam); p.showCamera(cam, "camera"); });
+  refreshPreviews();
 }
 // After Jump or Fly: the dashed frame shows where the camera is now; the view stays put.
 function previewShowCurrent() {
-  if (!preview.available() || newMapSelected()) return;
-  preview.setCurrentCamera(GeoScene.readCamera(currentMap().cameraId));
+  if (newMapSelected()) return;
+  var cam = GeoScene.readCamera(currentMap().cameraId);
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
 }
 
 // "New map" is always the last entry, and the one selected when the scene has no maps.
@@ -347,6 +360,7 @@ function styleMap() {
 }
 applyStyleBtn.onClick = guard(function () {
   var map = styleMap(), style = pickedStyle(), r = GeoScene.applyMapStyle(map, style);
+  refreshPreviews();
   var left = r.skipped ? " " + r.skipped + " animated or connected colour" + (r.skipped === 1 ? " was" : "s were") + " left alone." : "";
   say("Applied " + style.name + " to " + map.name + "." + left);
 });
@@ -369,6 +383,7 @@ saveStyleBtn.onClick = guard(function () {
   GeoScene.setMapStyle(map, style);
   refreshStylePicker(style.name);
   previewStyle();
+  refreshPreviews();
   say("Saved style \"" + style.name + "\" from " + map.name + ".");
 });
 deleteStyleBtn.onClick = guard(function () {
@@ -703,6 +718,42 @@ var lonField = new ui.NumericField(0); lonField.setType(1); lonField.setMin(-180
 var pinCoordBtn = GeoStyle.button("Pin at coordinates");
 var labelCoordBtn = GeoStyle.button("Label at coordinates");
 
+// Label previews: the picked map, a click on Pins sets the spot, a click on Routes adds a stop.
+// No green frame or dim (those mark the Map tab's Jump / Fly target), no double-click zoom.
+function labelPreview(hint, onClick, onPick) {
+  return GeoPreviewPanel.create({
+    compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onFail: function () {},
+    yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, redraw: PREVIEW_REDRAW, hint: hint
+  });
+}
+// guard() drops its arguments, so the click handlers get them passed on here.
+function guardClick(fn) { return function (lon, lat) { guard(function () { fn(lon, lat); })(); }; }
+function round4(v) { return Math.round(v * 1e4) / 1e4; }
+var spotName = null; // the name the last Pins click put in the text box
+function pinsClick(lon, lat) {
+  lon = round4(lon); lat = round4(lat);
+  latField.setValue(lat); lonField.setValue(lon);
+  pinsPreview.setSpot({ lon: lon, lat: lat });
+  sayNow("Looking up the place…");
+  var name = GeoNet.reverse(lat, lon, pinsPreview.frameCamera().zoom), typed = labelText.getText().trim();
+  var ours = !typed || (spotName !== null && typed === spotName);
+  if (ours) { labelText.setText(name || ""); spotName = name || null; }
+  say("Spot set: " + (name || coordName()) + ". Press Pin at coordinates or Label at coordinates.");
+}
+var pinsPreview = labelPreview("Click to set the spot · drag to move · + / − to zoom", guardClick(pinsClick), function (i) {
+  if (i < 0 || i >= pinResults.length) return;
+  pinResultPicker.setValue(i);
+  pinsFollowPicked();
+});
+// Centres the Pins preview on the picked search result and shows the results as dots.
+function pinsFollowPicked() {
+  if (!pinsPreview.available()) return;
+  var i = pinResultPicker.getValue();
+  pinsPreview.setPlaces(pinResults.map(function (r) { return { lat: r.lat, lon: r.lon, name: r.name }; }), i);
+  if (i >= 0 && i < pinResults.length) pinsPreview.showCamera(camForResult(pinResults[i], 0));
+}
+pinResultPicker.onValueChanged = guard(pinsFollowPicked);
+
 function labelOr(fallback) { return labelText.getText().trim() || fallback; }
 function coordName() { return latField.getValue().toFixed(4) + ", " + lonField.getValue().toFixed(4); }
 // A Map tab search fills the Pins page too, so Pin here works without searching again.
@@ -712,6 +763,7 @@ function prefillPins(q, found) {
   pinMemo.q = q;
   pinMemo.found = found.slice();
   fillPlaces(pinResultPicker, pinResults);
+  pinsFollowPicked();
 }
 function pinPlace() {
   var idx = pinResultPicker.getValue();
@@ -722,6 +774,7 @@ function pinPlace() {
 function pinSearch() {
   pinResults = searchInto(pinSearchField, pinResultPicker, pinMemo);
   if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here or Label here.");
+  pinsFollowPicked();
 }
 pinSearchBtn.onClick = guard(pinSearch);
 searchOnCommit(pinSearchField, pinMemo, pinSearch);
@@ -765,6 +818,37 @@ var addTravellerBtn = GeoStyle.button("Add to route");
 var createRouteBtn = GeoStyle.primaryButton("Create route");
 var pinStopsBtn = GeoStyle.button("Pin here");
 
+function routesClick(lon, lat) {
+  lon = round4(lon); lat = round4(lat);
+  var last = stops[stops.length - 1];
+  if (last && Math.abs(last.lon - lon) < 1e-9 && Math.abs(last.lat - lat) < 1e-9) { say("That's already the last stop."); return; }
+  sayNow("Looking up the place…");
+  var name = GeoNet.reverse(lat, lon, routesPreview.frameCamera().zoom) || (lat.toFixed(4) + ", " + lon.toFixed(4));
+  stops.push({ name: name, lon: lon, lat: lat });
+  refreshStops();
+  say("Added stop " + stops.length + ": " + name + ".");
+}
+var routesPreview = labelPreview("Click to add a stop · drag to move · + / − to zoom", guardClick(routesClick), function (i) {
+  if (i < 0 || i >= routeResults.length) return;
+  routeResultPicker.setValue(i);
+  routesFollowPicked();
+});
+function routesFollowPicked() {
+  if (!routesPreview.available()) return;
+  var i = routeResultPicker.getValue();
+  routesPreview.setPlaces(routeResults.map(function (r) { return { lat: r.lat, lon: r.lon, name: r.name }; }), i);
+  if (i >= 0 && i < routeResults.length) routesPreview.showCamera(camForResult(routeResults[i], 0));
+}
+routeResultPicker.onValueChanged = guard(routesFollowPicked);
+
+// Hands the picked map's pins, labels and routes to every preview. Never throws: on a read
+// failure the previews keep what they had.
+function refreshPreviews() {
+  var model = null;
+  try { model = newMapSelected() ? null : GeoScene.previewModel(currentMap()); } catch (e) { return; }
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setOverlay(model); });
+}
+
 // The selected layer to send along a route: the first selected layer that isn't part of the map.
 function travellerLayer(map) {
   var sel = [];
@@ -775,11 +859,13 @@ function travellerLayer(map) {
 
 function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
+  if (typeof routesPreview !== "undefined" && routesPreview && routesPreview.available()) routesPreview.setDraft(stops);
 }
 
 function routeSearch() {
   routeResults = searchInto(routeSearchField, routeResultPicker, routeMemo);
   if (routeResults.length) say(routeResults.length + " result(s). Pick one, then Add stop.");
+  routesFollowPicked();
 }
 routeSearchBtn.onClick = guard(routeSearch);
 searchOnCommit(routeSearchField, routeMemo, routeSearch);
@@ -870,6 +956,8 @@ TAB_BUILDERS.push(function (tabs) {
     pinResultPicker,
     labelText,
     row(pinHereBtn, labelHereBtn),
+    GeoStyle.heading("Preview (click to set the spot, drag to move)"),
+    pinsPreview.layout,
     GeoStyle.heading("At coordinates"),
     row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
     row(pinCoordBtn, labelCoordBtn)
@@ -878,6 +966,8 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Stops"),
     row(routeSearchField, routeSearchBtn),
     row(routeResultPicker, addStopBtn),
+    GeoStyle.heading("Preview (click to add a stop, drag to move)"),
+    routesPreview.layout,
     stopsList,
     row(removeStopBtn, clearStopsBtn),
     GeoStyle.heading("Style"),
@@ -1378,6 +1468,7 @@ function showSection(name) {
   sectionTabs.select(target[0]);
   sectionPages.setPage(i);
   if (target[1]) showLabelPage(target[1]);
+  if (name === "Map" || target[0] === "Label") { try { refreshPreviews(); } catch (e) { /* cosmetic */ } }
 }
 
 function buildUi() {
@@ -1405,7 +1496,10 @@ function buildUi() {
   ui.show();
   // The preview follows the panel's width (Cavalry's Draw doesn't stretch by itself).
   function fitPreview() {
-    try { var g = sectionTabs.widget.geometry(); if (g && g.width > 50) preview.setWidth(g.width); } catch (e) { /* older Cavalry */ }
+    try {
+      var g = sectionTabs.widget.geometry();
+      if (g && g.width > 50) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width); });
+    } catch (e) { /* older Cavalry */ }
   }
   ui.onResize = fitPreview;
   fitPreview();

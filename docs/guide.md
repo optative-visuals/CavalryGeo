@@ -42,7 +42,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
   exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
-  green frame. With **New map** picked, **Create map here** makes a map at the frame.
+  green frame. With **New map** picked, **Create map here** makes a map at the frame. The previews also draw the picked map's pins, labels and routes in its style colours.
 - **Flying the camera:** pick a place, set **From:** and **To:** (the first and last frame of the
   flight; they open on the playhead and 100 frames later) and press **Fly here** — the camera zooms
   out, travels and zooms in smoothly, leaving from where the camera is at the From frame (with
@@ -163,6 +163,7 @@ cache come after them).
 
 - Search for a place under **Label → Pins** (a Map search fills it in for you) and press
   **Pin here** or **Label here**, or place them at exact coordinates.
+- **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom.
 - Labels hide automatically when their place turns to the far side of a globe.
 
 ## Label: routes
@@ -171,6 +172,7 @@ cache come after them).
   stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
   with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
   the stop), and press **Create route**.
+- **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it.
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
   camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
   with it. Until you press **Pin here**, a dragged stop is a fixed offset on screen, so it slides

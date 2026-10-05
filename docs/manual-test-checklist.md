@@ -266,6 +266,14 @@ adding street layers.
 - [ ] Save "Mine" again: asked to replace; No keeps the old one. Delete style removes "Mine"; Delete on a built-in refuses.
 - [ ] Imagery keys and source are still there after saving a style (and vice versa).
 
+## Previews
+
+- [ ] Map, Pins and Routes previews show the picked map's pins, labels and routes (curved like the real legs) in the map's style colours.
+- [ ] Pins: a click fills Lat / Lon, shows a white ring and the place name; Pin at coordinates puts the pin there. Typed text is kept.
+- [ ] Routes: clicking three places adds three named stops and a dashed draft route; Create route makes it; the previews then show it.
+- [ ] Double-clicking on the Routes preview adds one stop and doesn't zoom; − / + still zoom; dragging moves without adding.
+- [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
+
 ## Scene persistence and install
 
 - [ ] 20. Save the scene, close Cavalry, reopen the `.cv` → maps still render and

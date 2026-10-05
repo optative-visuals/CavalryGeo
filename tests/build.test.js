@@ -399,8 +399,10 @@ function buildSandbox(options = {}) {
   // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
   // the timers they cause (downloads, builds, a preview they create), so leave that one out
   // (found by asking the preview for its timer).
-  const own = context.preview && context.preview._timer && context.preview._timer();
-  if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    const own = pv && pv._timer && pv._timer();
+    if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
+  });
   return { context: context, api: api, ui: ui };
 }
 
@@ -3709,8 +3711,121 @@ test("each section has grey headings in order", () => {
   assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
+});
+
+// ---- Label previews ----
+function lookupGives(context, name) { const asked = []; context.GeoNet.reverse = (lat, lon, zoom) => { asked.push([lat, lon, zoom]); return name; }; return asked; }
+function clickAt(pv, x, y) { pv._draw.onMousePress({ x, y }, "left"); pv._draw.onMouseRelease({ x, y }, "left"); }
+
+test("Label previews: Pins and Routes each get a preview under its heading, with double-click zoom off", () => {
+  const { context } = buildSandbox();
+  const pages = context.sectionPages.pages;
+  assert.ok(holds(pages[3], context.pinsPreview.layout) && holds(pages[3], context.routesPreview.layout));
+  assert.equal(context.pinsPreview._draw._toolTip, "Click to set the spot · drag to move · + / − to zoom");
+  assert.equal(context.routesPreview._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
+});
+
+test("Pins preview: a click fills Lat / Lon, sets the ring, and puts the looked-up name in the empty text box", () => {
+  const { context } = buildSandbox();
+  const asked = lookupGives(context, "Gare du Nord");
+  clickAt(context.pinsPreview, 100, 60);
+  assert.equal(asked.length, 1);
+  const lat = context.latField.getValue(), lon = context.lonField.getValue();
+  assert.equal(Math.round(lat * 1e4) / 1e4, lat, "4 decimals");
+  assert.equal(context.labelText.getText(), "Gare du Nord");
+  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates or Label at coordinates.");
+  lookupGives(context, "Gare de l'Est");
+  clickAt(context.pinsPreview, 120, 70);
+  assert.equal(context.labelText.getText(), "Gare de l'Est", "an earlier click's name is replaced");
+  context.labelText.setText("My cafe");
+  lookupGives(context, "Somewhere");
+  clickAt(context.pinsPreview, 130, 70);
+  assert.equal(context.labelText.getText(), "My cafe", "typed text is never overwritten");
+});
+
+test("Pins preview: a failed lookup says the coordinates and clears a stale looked-up name", () => {
+  const { context } = buildSandbox();
+  lookupGives(context, "Gare du Nord");
+  clickAt(context.pinsPreview, 100, 60);
+  lookupGives(context, null);
+  clickAt(context.pinsPreview, 140, 80);
+  assert.equal(context.labelText.getText(), "");
+  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates or Label at coordinates.");
+});
+
+test("Pins preview: Pin at coordinates after a click pins the looked-up name there, and the previews redraw with it", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  lookupGives(context, "Here");
+  clickAt(context.pinsPreview, 100, 60);
+  context.pinCoordBtn.onClick();
+  const pins = context.GeoScene.previewModel(context.currentMap()).pins;
+  assert.equal(pins.length, 1);
+  assert.ok(Math.abs(pins[0].lat - context.latField.getValue()) < 1e-9);
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    pv._render();
+    assert.ok(fills(pv._draw, "#1F8F4E").length >= 1, "each preview draws the new pin");
+  });
+  assert.ok(api);
+});
+
+test("Routes preview: each click adds a looked-up stop and the draft is drawn; a failed lookup names it by coordinates", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  lookupGives(context, "Paris");
+  clickAt(context.routesPreview, 100, 60);
+  lookupGives(context, "Lyon");
+  clickAt(context.routesPreview, 140, 100);
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["Paris", "Lyon"]);
+  assert.equal(context.statusLabel.getText(), "Added stop 2: Lyon.");
+  lookupGives(context, null);
+  clickAt(context.routesPreview, 180, 120);
+  const s = context.stops[2];
+  assert.equal(s.name, s.lat.toFixed(4) + ", " + s.lon.toFixed(4));
+  context.routesPreview._render();
+  assert.ok(strokes(context.routesPreview._draw, "#1F8F4E").length >= 1, "the dashed draft line");
+  assert.equal(context.stopsList._model.length, 3);
+});
+
+test("Routes preview: the same spot as the last stop is refused without a lookup; a double-click adds once and doesn't zoom", () => {
+  const { context } = buildSandbox();
+  const asked = lookupGives(context, "Paris");
+  clickAt(context.routesPreview, 100, 60);
+  const z = context.routesPreview.frameCamera().zoom;
+  clickAt(context.routesPreview, 100, 60);
+  context.routesPreview._draw.onMouseDoubleClick({ x: 100, y: 60 }, "left");
+  assert.equal(context.stops.length, 1);
+  assert.equal(asked.length, 1);
+  assert.equal(context.statusLabel.getText(), "That's already the last stop.");
+  assert.equal(context.routesPreview.frameCamera().zoom, z);
+});
+
+test("Previews follow the map: picking a map centres the Label previews on its camera; Create route redraws them", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  [context.pinsPreview, context.routesPreview].forEach((pv) => {
+    assert.ok(Math.abs(pv.frameCamera().lat - cam.lat) < 1e-6 && Math.abs(pv.frameCamera().lon - cam.lon) < 1e-6);
+  });
+  lookupGives(context, "A"); clickAt(context.routesPreview, 100, 60);
+  lookupGives(context, "B"); clickAt(context.routesPreview, 200, 120);
+  context.createRouteBtn.onClick();
+  const m = context.GeoScene.previewModel(context.currentMap());
+  assert.equal(m.routes.length, 1);
+  context.pinsPreview._render();
+  assert.ok(strokes(context.pinsPreview._draw, "#1F8F4E").length >= 2, "legs and stop circles on the Pins preview too");
+});
+
+test("Pins search shows its results on the Pins preview; clicking a result dot picks it", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS, PARIS_TX]);
+  context.pinSearchField.setText("Paris");
+  context.pinSearchBtn.onClick();
+  const pv = context.pinsPreview;
+  const f = pv.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS.lat) < 1e-6 && Math.abs(f.lon - PARIS.lon) < 1e-6, "centred on the picked result");
+  assert.equal(context.pinResultPicker.getValue(), 0);
 });
 
 test("every page column packs items 4 apart and puts 4 before each heading that isn't first", () => {
@@ -6456,4 +6571,10 @@ test("findLabels still finds driver labels (now through labelDrivers)", () => {
   const map = G.createMap("L", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const id = G.createLabel(map, "Here", 1, 2);
   assert.deepEqual(plain(G.findLabels(map)), [id]);
+});
+
+test("Map styles: picking a style recolours the Label previews too", () => {
+  const { context } = buildSandbox();
+  pickStyle(context, "Light");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => assert.equal(pv._draw._background, "#cfe3ec"));
 });
