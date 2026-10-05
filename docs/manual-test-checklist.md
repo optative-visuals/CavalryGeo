@@ -255,6 +255,17 @@ adding street layers.
 - [ ] C9. Drag a Controls layer into another group, then add a pin → the layer stays there and
       still gets the new Pins settings; no second Controls layer appears.
 
+## Map styles
+
+- [ ] Style list shows Dark, Light, Blueprint, Vintage, Mono, Neon night; picking one recolours the preview (water, land, borders).
+- [ ] New map (Search with New map, and Create map here) is made in the picked style; Countries and Coastlines match it.
+- [ ] Apply to map on a full map (layers, pins, labels, a route with a traveller, a data map, the OSM credit): everything recolours; data colours and bubbles don't.
+- [ ] Animate one colour, Apply another style: that colour stays and the status line says 1 was left alone.
+- [ ] Add a pin and a route after applying: they match the style.
+- [ ] Change colours in the Controls, Save as style "Mine", Apply "Mine" to a second map: same look. Reopen the panel: "Mine" is still listed and picked.
+- [ ] Save "Mine" again: asked to replace; No keeps the old one. Delete style removes "Mine"; Delete on a built-in refuses.
+- [ ] Imagery keys and source are still there after saving a style (and vice versa).
+
 ## Scene persistence and install
 
 - [ ] 20. Save the scene, close Cavalry, reopen the `.cv` → maps still render and

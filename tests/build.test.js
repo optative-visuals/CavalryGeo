@@ -574,7 +574,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -1322,6 +1322,83 @@ test("pins, route legs and route stop pins are drawn in the panel's green", () =
   const stopPins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
   assert.equal(stopPins.length, 2);
   stopPins.forEach((id) => assert.equal(api.get(id, "material.materialColor"), "#1F8F4E"));
+});
+
+// ---- Map styles: every map remembers its style and new layers follow it ----
+function styledMap(context, styleName) {
+  const style = context.GeoStyles.builtIn(styleName);
+  return context.GeoScene.createMap("Styled", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, style);
+}
+
+test("map styles: a new map remembers Dark by default and its Ocean stays slate", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Test", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const rec = plain(api.getUserDataKey(map.groupId, "geoStyle"));
+  assert.equal(rec.name, "Dark");
+  assert.equal(rec.colors.ocean, "#1d2a33");
+  assert.equal(rec.widths.routes, 3);
+  assert.equal(context.GeoScene.styleOf(map).name, "Dark");
+});
+
+test("map styles: a map made in Vintage draws its Ocean, pins, labels, credits and layers in Vintage", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Vintage");
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#a9c4c0");
+  assert.equal(api.get(G.addPin(map, "Here", 0, 0), "material.materialColor"), "#a63d2f");
+  assert.equal(api.get(G.createLabel(map, "Here", 0, 0), "material.materialColor"), "#4a3423");
+  assert.equal(api.get(G.createAttribution(map), "material.materialColor"), "#4a3423");
+  assert.equal(api.get(G.createImageryCredit(map, "Credit"), "material.materialColor"), "#4a3423");
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  assert.equal(api.get(c, "material.materialColor"), "#e8d9b5");
+  assert.equal(api.get(c, "stroke.strokeColor"), "#8b6b4a");
+  assert.equal(api.get(c, "stroke.width"), 1.6);
+});
+
+test("map styles: new-style and old-style routes take the map's accent, route width and text colour", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Blueprint");
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30, labels: true });
+  r.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+  r.stops.forEach((circle) => assert.equal(api.get(circle, "material.materialColor"), "#ffffff"));
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.stops.forEach((s) => assert.equal(api.get(s.label, "material.materialColor"), "#ffffff"));
+  delete api.setGenerator;
+  const old = G.createRoute(map, [{ name: "C", lon: 0, lat: 0 }, { name: "D", lon: 5, lat: 5 }], { lift: 30, pins: true, labels: false });
+  old.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+});
+
+test("map styles: data layers take the map's text and ocean colours; bubbles keep their own", () => {
+  const { context, api } = buildSandbox();
+  const map = styledMap(context, "Light");
+  const r = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true });
+  assert.equal(api.get(r.layers.regions, "stroke.strokeColor"), "#cfe3ec");
+  assert.equal(api.get(r.layers.regions, "stroke.width"), 0.5);
+  assert.equal(api.get(r.layers.labels, "material.materialColor"), "#333333");
+  assert.equal(api.get(r.layers.legend, "material.materialColor"), "#333333");
+  assert.equal(api.get(r.layers.bubbles, "material.materialColor"), "#bc4749");
+});
+
+test("map styles: a map without a remembered style (made before styles) draws in Dark", () => {
+  const { context, api } = buildSandbox();
+  const map = styledMap(context, "Mono");
+  api.setUserData(map.groupId, "geoStyle", null);
+  assert.equal(context.GeoScene.styleOf(map).name, "Dark");
+  assert.equal(api.get(context.GeoScene.addPin(map, "Here", 0, 0), "material.materialColor"), "#1F8F4E");
+});
+
+test("map styles: Add layers on the Layers tab draws in the picked map's style", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const map = styledMap(context, "Neon night");
+  context.refreshMaps(map.cameraId);
+  context.checks.countries.widget.onClick(); // ticks the Countries toggle, as the existing Add layers tests do
+  context.addLayersBtn.onClick();
+  const countries = context.GeoScene.findMapLayers(map).find((l) => l.meta.category === "countries");
+  assert.ok(countries, context.statusLabel.getText());
+  assert.equal(api.get(countries.id, "material.materialColor"), "#14142a");
+  assert.equal(api.get(countries.id, "stroke.strokeColor"), "#2de2e6");
 });
 
 test("creating a map leaves the user's selection alone, even if Cavalry selects the new Ocean", () => {
@@ -3629,7 +3706,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -4458,6 +4535,174 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
   context.refreshMapsBtn.onClick();
   context.preview._render();
   assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
+});
+
+// ---- Map tab: Style section ----
+const SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
+function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
+function pickStyle(context, name) {
+  const i = context.mapStylePicker._entries.indexOf(name);
+  assert.ok(i >= 0, name + " is listed");
+  context.mapStylePicker.setValue(i);
+  context.mapStylePicker.onValueChanged();
+}
+
+test("Map tab Style: the section sits at the bottom of the Map tab, built-ins listed in order, Dark picked", () => {
+  const { context, ui } = buildSandbox();
+  assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
+  assert.equal(context.mapStylePicker.getValue(), 0);
+  const items = context.sectionPages.pages[0]._items;
+  const last = items.slice(-3);
+  assert.ok(context.GeoStyle.isHeading(last[0]));
+  assert.ok(holds(last[1], context.mapStylePicker) && holds(last[1], context.applyStyleBtn));
+  assert.ok(holds(last[2], context.styleNameField) && holds(last[2], context.saveStyleBtn) && holds(last[2], context.deleteStyleBtn));
+  assert.ok(ui);
+});
+
+test("Map tab Style: Apply and Save hide while New map is picked; Delete and the name box stay", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.newMapSelected(), true);
+  assert.equal(context.applyStyleBtn.isHidden(), true);
+  assert.equal(context.saveStyleBtn.isHidden(), true);
+  assert.equal(context.deleteStyleBtn.isHidden(), false);
+  assert.equal(context.styleNameField.isHidden(), false);
+  createWorldMap(context);
+  assert.equal(context.applyStyleBtn.isHidden(), false);
+  assert.equal(context.saveStyleBtn.isHidden(), false);
+});
+
+test("Map tab Style: the picked style is remembered in settings.json and used for the next new map", () => {
+  const { context, api } = buildSandbox();
+  pickStyle(context, "Vintage");
+  assert.equal(settingsOf(api).mapStyle, "Vintage");
+  createWorldMap(context);
+  const map = context.currentMap();
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Vintage");
+  const again = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono", source: "eox" }); } });
+  assert.equal(again.context.mapStylePicker._entries[again.context.mapStylePicker.getValue()], "Mono");
+});
+
+test("Map tab Style: picking a style sets the preview's background to its water colour", () => {
+  const { context } = buildSandbox();
+  pickStyle(context, "Light");
+  assert.equal(context.preview._draw._background, "#cfe3ec");
+});
+
+test("preview: setColors redraws land, borders and water in the given colours", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setColors({ water: "#cfe3ec", land: "#f2efe6", border: "#b9b4a6" });
+  p._render();
+  assert.equal(p._draw._background, "#cfe3ec");
+  assert.equal(fills(p._draw, "#f2efe6").length, 1, "land in the new colour");
+  assert.equal(strokes(p._draw, "#b9b4a6").length, 1, "borders in the new colour");
+  assert.equal(fills(p._draw, "#4a5a50").length, 0, "no old land colour left");
+  assert.equal(strokes(p._draw, "#33CE70").length, 1, "the green frame keeps its colour");
+});
+
+test("Map tab Style: Apply restyles the picked map and says so", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  pickStyle(context, "Blueprint");
+  context.applyStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Applied Blueprint to Map.");
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
+});
+
+test("Map tab Style: Apply reports colours it left alone", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  api.keyframe(oceanOf(api, map), 0, { "material.materialColor": "#000000" });
+  pickStyle(context, "Mono");
+  context.applyStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Applied Mono to Map. 1 animated or connected colour was left alone.");
+});
+
+test("Map tab Style: Save as style saves the map's colours, lists and picks the new style, keeping other settings", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox", maptilerKey: "k" }); } });
+  createWorldMap(context);
+  const map = context.currentMap();
+  api.set(oceanOf(api, map), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("  Mine ");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Saved style \"Mine\" from Map.");
+  const s = settingsOf(api);
+  assert.equal(s.source, "eox");
+  assert.equal(s.maptilerKey, "k");
+  assert.equal(s.mapStyle, "Mine");
+  assert.equal(s.mapStyles.length, 1);
+  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(s.mapStyles[0].colors.ocean, "#010203");
+  assert.deepEqual(context.mapStylePicker._entries.slice(-1), ["Mine"]);
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Mine");
+});
+
+test("Map tab Style: Save refuses an empty name and a built-in's name", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.styleNameField.setText("  ");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Type a name for the style first.");
+  context.styleNameField.setText("blueprint");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Blueprint is a built-in style — pick another name.");
+});
+
+test("Map tab Style: saving over a saved name asks first; No keeps the old one", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine", colors: { ocean: "#111111" } }] }); } });
+  createWorldMap(context);
+  const asked = withModal(ui, false);
+  context.styleNameField.setText("mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].question, /Replace the saved style Mine\?/);
+  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#111111");
+  assert.equal(context.statusLabel.getText(), "Nothing was saved.");
+  withModal(ui, true);
+  context.saveStyleBtn.onClick();
+  assert.equal(settingsOf(api).mapStyles.length, 1);
+  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#1d2a33");
+});
+
+test("Map tab Style: saving over a saved name with no dialog refuses", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine" }] }); } });
+  createWorldMap(context);
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: \"Mine\" is already saved — pick another name.");
+});
+
+test("Map tab Style: Delete removes the picked saved style and refuses built-ins", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); } });
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Other"]);
+  assert.equal(settingsOf(api).mapStyle, "Dark");
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Dark");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Built-in styles can't be deleted.");
+});
+
+test("Map tab Style: a broken styles entry in settings.json never stops the panel", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: 42, mapStyles: "junk" }); } });
+  assert.equal(context.mapStylePicker._entries.length, 6);
+  assert.equal(context.mapStylePicker.getValue(), 0);
+});
+
+test("Imagery settings are merged into settings.json, never replacing other keys", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ style: "basic", mapStyle: "Mono", mapStyles: [{ name: "Mine" }], updateCheckedAt: 5 }); } });
+  context.saveImagerySettings();
+  const s = settingsOf(api);
+  assert.equal(s.mapStyle, "Mono");
+  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(s.updateCheckedAt, 5);
+  assert.ok("source" in s);
 });
 
 // ---- Map controls ------------------------------------------------------------------
@@ -5868,4 +6113,196 @@ test("controls: a traveller without a scale helper (older record) gets no size r
   const names = plain(promotedNames(api, context.GeoControlPanel.sync(map).componentId));
   assert.ok(names.indexOf("A → B → C · Traveller size") < 0);
   assert.ok(names.indexOf("A → B → C · Traveller hide") >= 0);
+});
+
+test("map styles: Apply recolours every part of a map and remembers the style", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = context.GeoScene.createMap("Paris", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const roads = G.createMapLayer(map, "Roads", { v: 1, kind: "line", f: [] }, { camera: map.cameraId, category: "roads" }, G.layerStyle(map, "roads"), {});
+  const pin = G.addPin(map, "Here", 0, 0);
+  const label = G.createLabel(map, "Here", 0, 0);
+  const credit = G.createAttribution(map);
+  const route = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30 });
+  G.addTraveller(map, route.groupId, "dot");
+  const marker = plain(api.getUserDataKey(route.groupId, "geoTraveller")).source;
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(r.skipped, 0);
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
+  assert.equal(api.get(countries, "material.materialColor"), "#1a4a85");
+  assert.equal(api.get(countries, "stroke.strokeColor"), "#cfe3ff");
+  assert.equal(api.get(countries, "stroke.width"), 0.6);
+  assert.equal(api.get(roads, "stroke.strokeColor"), "#cfe3ff");
+  assert.equal(api.get(roads, "stroke.width"), 1.2);
+  assert.equal(api.get(pin, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(label, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(credit, "material.materialColor"), "#ffffff");
+  route.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+  route.stops.forEach((c) => assert.equal(api.get(c, "material.materialColor"), "#ffffff"));
+  assert.equal(api.get(marker, "material.materialColor"), "#ffffff");
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Blueprint");
+  assert.equal(api.get(G.addPin(map, "Later", 1, 1), "material.materialColor"), "#ffffff", "later pins follow the applied style");
+});
+
+test("map styles: Apply sets a Controls-shared colour through its control value, and skips animated or wired colours", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const a = G.addPin(map, "A", 0, 0), b = G.addPin(map, "B", 1, 1);
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  assert.equal(api.getInConnection(a, "material.materialColor"), sync.valuesId + "." + slot);
+  api.keyframe(c, 0, { "material.materialColor": "#000000" });
+  const other = api.create("javaScript", "elsewhere");
+  api.connect(other, "array.0", c, "stroke.width");
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(api.get(sync.valuesId, slot), "#a63d2f", "the shared Pins colour changed");
+  assert.notEqual(api.get(a, "material.materialColor"), "#a63d2f", "the pin itself wasn't overwritten (it is driven)");
+  assert.equal(api.get(c, "material.materialColor"), "#000000", "animated colour left alone");
+  assert.equal(api.get(c, "stroke.strokeColor"), "#8b6b4a", "the rest of the layer restyled");
+  assert.equal(r.skipped, 2);
+  assert.equal(api.getInConnection(b, "material.materialColor"), sync.valuesId + "." + slot, "the second pin is driven by the same slot");
+});
+
+test("map styles: an animated Controls value shared by two pins is skipped once, and neither pin is written", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const a = G.addPin(map, "A", 0, 0), b = G.addPin(map, "B", 1, 1);
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  api.keyframe(sync.valuesId, 0, { [slot]: "#000000" });
+  const before = [api.get(a, "material.materialColor"), api.get(b, "material.materialColor")];
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(r.skipped, 1, "one animated value, counted once");
+  assert.equal(api.get(a, "material.materialColor"), before[0], "pin A not written");
+  assert.equal(api.get(b, "material.materialColor"), before[1], "pin B not written");
+  assert.equal(api.get(sync.valuesId, slot), "#000000", "the animated value not written");
+});
+
+test("map styles: a Controls value wired from another layer is skipped and not written", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  G.addPin(map, "A", 0, 0);
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  const other = api.create("javaScript", "elsewhere");
+  api.connect(other, "array.0", sync.valuesId, slot);
+  const before = api.get(sync.valuesId, slot);
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(r.skipped, 1);
+  assert.equal(api.get(sync.valuesId, slot), before, "the connected value not written");
+});
+
+test("map styles: Apply recolours a plugin traveller marker through the Controls Traveller colour value", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const route = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30 });
+  G.addTraveller(map, route.groupId, "dot");
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["trav:" + route.groupId + ":color"];
+  assert.ok(slot, "the traveller colour is a Controls value");
+  const marker = plain(api.getUserDataKey(route.groupId, "geoTraveller")).source;
+  assert.equal(api.getInConnection(marker, "material.materialColor"), sync.valuesId + "." + slot);
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(r.skipped, 0);
+  assert.equal(api.get(sync.valuesId, slot), "#ffffff");
+});
+
+test("map styles: Extract on a Vintage map draws in Vintage's extract colour", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Vintage");
+  const enc = context.GeoCodec.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} }] });
+  const id = G.extract(map, { meta: { category: "countries" } }, enc, { name: "France", indices: [0] });
+  assert.equal(api.get(id, "material.materialColor"), "#c76b29");
+});
+
+test("map styles: the preview opens in the style remembered in settings.json", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  assert.equal(context.preview._draw._background, "#111111");
+});
+
+test("settings: a settings.json that won't parse is copied to settings.json.bak before it is replaced", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = "{not json"; } });
+  pickStyle(context, "Vintage");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], "{not json");
+  assert.equal(settingsOf(api).mapStyle, "Vintage");
+});
+
+test("settings: a settings.json holding an array or a number is treated as empty, and backed up when replaced", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = "[1,2]"; } });
+  assert.deepEqual(plain(context.GeoNet.loadSettings()), {});
+  pickStyle(context, "Light");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], "[1,2]");
+  assert.equal(settingsOf(api).mapStyle, "Light");
+});
+
+test("settings: a good settings.json is never backed up", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ apiKey: "k" }); } });
+  pickStyle(context, "Light");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], undefined);
+  assert.equal(settingsOf(api).apiKey, "k");
+});
+
+test("Map tab Style: refilling the picker never counts as picking, even if the dropdown fires on programmatic changes", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const picker = context.mapStylePicker;
+  ["clear", "addEntry", "setValue"].forEach((m) => {
+    const orig = picker[m];
+    picker[m] = function () { const r = orig.apply(this, arguments); if (picker.onValueChanged) picker.onValueChanged(); return r; };
+  });
+  const written = [], paintedAs = [], realUpdate = context.GeoNet.updateSettings, realColors = context.preview.setColors;
+  context.GeoNet.updateSettings = function (patch) { if (patch && patch.mapStyle) written.push(patch.mapStyle); return realUpdate.apply(this, arguments); };
+  context.preview.setColors = function (c) { paintedAs.push(c.water); return realColors.apply(this, arguments); };
+  api.set(oceanOf(api, context.currentMap()), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(written, ["Mine"], "only the saved name was written, never a half-filled picker's value");
+  assert.deepEqual(paintedAs, ["#010203"], "the preview was painted once, in the saved style");
+  assert.equal(settingsOf(api).mapStyle, "Mine");
+  assert.equal(context.preview._draw._background, "#010203");
+  assert.equal(picker._entries[picker.getValue()], "Mine");
+});
+
+test("map styles: Save reads a map's colours back (through Controls values) and Apply on another map gives the same look", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  G.addPin(map, "A", 0, 0);
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const sync = context.GeoControlPanel.sync(map);
+  api.set(sync.valuesId, { [slotsOf(api, sync.valuesId)["pins:color"]]: "#123456" });
+  api.set(c, { "material.materialColor": "#654321", "stroke.width": 4 });
+  const saved = G.readMapStyle(map, "Mine");
+  assert.equal(saved.name, "Mine");
+  assert.equal(saved.colors.accent, "#123456");
+  assert.equal(saved.colors.land, "#654321");
+  assert.equal(saved.widths.borders, 4);
+  assert.equal(saved.colors.roads, "#8a948e", "a role the map lacks comes from its remembered style (Dark)");
+  const other = G.createMap("Other", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const pin = G.addPin(other, "B", 0, 0);
+  G.applyMapStyle(other, saved);
+  assert.equal(api.get(pin, "material.materialColor"), "#123456");
+  assert.equal(plain(api.getUserDataKey(other.groupId, "geoStyle")).name, "Mine");
+});
+
+test("map styles: Apply recolours data region outlines and value labels but never data colours or bubbles", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Data", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true });
+  const low = "generator.array." + context.GeoExpression.inputIndex(context.GeoExpression.REGION_INPUTS, "low");
+  const before = api.get(d.layers.regions, low);
+  context.GeoScene.applyMapStyle(map, context.GeoStyles.builtIn("Light"));
+  assert.equal(api.get(d.layers.regions, "stroke.strokeColor"), "#cfe3ec");
+  assert.equal(api.get(d.layers.labels, "material.materialColor"), "#333333");
+  assert.equal(api.get(d.layers.legend, "material.materialColor"), "#333333");
+  assert.equal(api.get(d.layers.bubbles, "material.materialColor"), "#bc4749");
+  assert.deepEqual(api.get(d.layers.regions, low), before);
 });

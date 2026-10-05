@@ -3,22 +3,27 @@ var GeoScene = (function () {
   var A = GeoAttrs;
   var ATTRIBUTION_NAME = "OpenStreetMap credit";
   var OCEAN_NAME = "Ocean";
-  var OCEAN_COLOR = "#1d2a33";
-  var CREDIT_STYLE = { fill: "#e6e6e6" };
-  // Same palette as the Map tab preview; pins and routes use the panel's button green.
-  var STYLE = {
-    countries: { fill: "#4a5a50", stroke: "#2a3530", width: 1 }, states: { stroke: "#3a4a40", width: 0.5 }, lakes: { fill: "#1d2a33" },
-    coastlines: { stroke: "#2a3530", width: 0.5 }, rivers: { stroke: "#3d6178", width: 1.5 }, cities: { fill: "#e6e6e6" },
-    buildings: { fill: "#5c6b61" }, water: { fill: "#1d2a33" }, parks: { fill: "#56705a" },
-    roads: { stroke: "#8a948e", width: 2 }, railways: { stroke: "#a0a7a3", width: 1.5 },
-    extractFill: { fill: "#e4572e" }, extractLine: { stroke: "#e4572e", width: 3 },
-    pin: { fill: "#1F8F4E" }, label: { fill: "#e6e6e6" },
-    stop: { fill: "#1F8F4E" },
-    route: { stroke: "#1F8F4E", width: 3 }
-  };
+  var STYLE_KEY = "geoStyle";
+  // Dark's layer styles (today's look), for callers that predate map styles. New layers are
+  // drawn from their map's own style: layerStyle(map, kind).
+  var STYLE = {};
+  ["countries", "states", "lakes", "coastlines", "rivers", "cities", "buildings", "water", "parks", "roads", "railways",
+    "extractFill", "extractLine", "pin", "label", "stop", "route"].forEach(function (k) { STYLE[k] = GeoStyles.layerStyle(GeoStyles.DARK, k); });
   var STOP_RADIUS = 8, ROUTE_KEY = "geoRoute";
 
   function setOne(id, attr, value) { var o = {}; o[attr] = value; api.set(id, o); }
+
+  // The map's own style (user data geoStyle on its group), or Dark for a map made before styles.
+  function styleOf(map) {
+    var d = userData(map.groupId, STYLE_KEY);
+    return d && typeof d === "object" ? GeoStyles.clean(d) : GeoStyles.DARK;
+  }
+  function setMapStyle(map, style) {
+    if (typeof api.setUserData !== "function") return;
+    var s = GeoStyles.clean(style);
+    api.setUserData(map.groupId, STYLE_KEY, { name: s.name, colors: s.colors, widths: s.widths });
+  }
+  function layerStyle(map, kind) { return GeoStyles.layerStyle(styleOf(map), kind); }
 
   // A new Cavalry script layer already has one empty slot (index 0), so only add a
   // slot when the index doesn't exist yet — otherwise a spare unnamed slot is left over.
@@ -43,13 +48,15 @@ var GeoScene = (function () {
     return { centerLat: cam.lat, centerLon: cam.lon, zoom: cam.zoom, rotation: cam.rotation, projection: cam.projection };
   }
 
-  function createMap(name, cam) {
+  function createMap(name, cam, style) {
     var groupId = api.create("group", name);
+    style = style || GeoStyles.DARK;
+    try { setMapStyle({ groupId: groupId }, style); } catch (e) { /* the map still works in Dark */ }
     var cameraId = api.create(A.CAMERA_LAYER_TYPE, name + " Camera");
     setOne(cameraId, A.CAMERA_EXPR_ATTR, GeoExpression.cameraExpression({ name: name }, A.CAMERA_BODY));
     addInputs(cameraId, A.CAMERA_ARRAY_ATTR, GeoExpression.CAMERA_INPUTS, camValues(cam));
     api.parent(cameraId, groupId);
-    try { createOcean(groupId); } catch (e) { /* the Ocean is cosmetic: never fail the map over it */ }
+    try { createOcean(groupId, GeoStyles.layerStyle(style, "ocean")); } catch (e) { /* the Ocean is cosmetic: never fail the map over it */ }
     return { name: name, cameraId: cameraId, groupId: groupId };
   }
 
@@ -57,7 +64,7 @@ var GeoScene = (function () {
   // map gets a dark rectangle at the bottom of its group, twice the comp size so it
   // still covers the frame when the map group is moved or scaled. Optional: skipped
   // when this Cavalry has no api.primitive.
-  function createOcean(groupId) {
+  function createOcean(groupId, oceanStyle) {
     // Read the selection before anything is created (Cavalry may select new layers) and
     // put it back however this returns, so the user's selection is never changed.
     var previous = null;
@@ -67,7 +74,7 @@ var GeoScene = (function () {
       var s = compSize();
       var id = api.primitive("rectangle", OCEAN_NAME);
       setOne(id, "generator.dimensions", [2 * s.width, 2 * s.height]);
-      applyStyle(id, { fill: OCEAN_COLOR });
+      applyStyle(id, oceanStyle);
       api.parent(id, groupId);
       if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
       try { sendToBack(id); } catch (e) { /* best-effort: it was just parented on top, so it may sit above the camera */ }
@@ -145,7 +152,7 @@ var GeoScene = (function () {
 
   function addPin(map, name, lon, lat, parentId) {
     var enc = GeoCodec.encodeLayer({ kind: "point", features: [{ name: name, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, STYLE.pin, { pointRadius: 8 }, parentId);
+    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId);
   }
 
   function createRouteLeg(map, parentId, name, enc, lift) {
@@ -153,7 +160,7 @@ var GeoScene = (function () {
     addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.ROUTE_INPUTS, { lift: lift });
     setOne(id, A.MAP_EXPR_ATTR, GeoExpression.routeLayerExpression(GEO_RUNTIME_SRC, enc, { camera: map.cameraId, category: "route" }, { ellipseScale: A.ELLIPSE_SCALE }));
     connectCamera(map.cameraId, id, A.MAP_ARRAY_ATTR);
-    applyStyle(id, STYLE.route);
+    applyStyle(id, layerStyle(map, "route"));
     if (A.STROKE_CAP_ATTR) { try { setOne(id, A.STROKE_CAP_ATTR, A.ROUND_CAP_VALUE); } catch (e) { /* default caps */ } }
     api.parent(id, parentId);
     return id;
@@ -211,6 +218,7 @@ var GeoScene = (function () {
   // helper utilities have no transform at all.
   function buildRoute(map, stops, pairs, opts, track) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
+    var look = styleOf(map);
     var groupId = track(api.create("group", routeTitle(stops)));
     api.parent(groupId, map.groupId);
     api.set(groupId, identityTransform());
@@ -234,14 +242,14 @@ var GeoScene = (function () {
       var holder = track(api.create("group", "Stop: " + p.name));
       var circle = track(api.primitive("ellipse", p.name));
       setOne(circle, "generator.radius", [STOP_RADIUS, STOP_RADIUS]);
-      applyStyle(circle, STYLE.stop);
+      applyStyle(circle, GeoStyles.layerStyle(look, "stop"));
       api.parent(circle, holder);
       api.set(circle, identityTransform());
       var label = null;
       if (opts.labels) {
         label = track(api.create(A.TEXT_LAYER_TYPE, p.name));
         setOne(label, A.TEXT_ATTR, p.name);
-        applyStyle(label, STYLE.label);
+        applyStyle(label, GeoStyles.layerStyle(look, "label"));
         api.parent(label, circle);
         api.set(label, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
         setOne(label, "position", [STOP_RADIUS + 6, STOP_RADIUS + 6]);
@@ -265,7 +273,7 @@ var GeoScene = (function () {
       var name = "Leg " + (idx + 1) + ": " + a.name + " → " + b.name;
       var line = track(api.create("basicLine", name));
       api.setGenerator(line, "generator", "bezierLine");
-      applyStyle(line, STYLE.route);
+      applyStyle(line, GeoStyles.layerStyle(look, "route"));
       if (A.STROKE_CAP_ATTR) { try { setOne(line, A.STROKE_CAP_ATTR, A.ROUND_CAP_VALUE); } catch (e) { /* default caps */ } }
       try { setOne(line, "stroke.trim", true); setOne(line, "stroke.trimEnd", 100); } catch (e) { /* draw-on stays off */ }
       api.connect(a.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.startPosition", true);
@@ -367,13 +375,6 @@ var GeoScene = (function () {
     return res;
   }
 
-  var DATA_STYLE = {
-    regions: { stroke: "#1d2a33", width: 0.5 },
-    bubbles: { fill: "#bc4749", stroke: "#ffffff", width: 1 },
-    labels: { fill: "#e6e6e6" },
-    legend: { fill: "#e6e6e6" }
-  };
-
   function dataPayloads(prepared, opts) {
     var fmt = { prefix: opts.prefix || "", suffix: opts.suffix || "", format: 0, decimals: 1 };
     return {
@@ -395,25 +396,26 @@ var GeoScene = (function () {
 
   function createDataLayers(map, source, prepared, opts) {
     var E = GeoExpression, src = GEO_DATA_RUNTIME_SRC, p = dataPayloads(prepared, opts), layers = {};
+    var look = styleOf(map);
     var year = prepared.years ? prepared.years[1] : 0;
     var groupId = api.create("group", "Data: " + prepared.title);
     api.parent(groupId, map.groupId);
     function meta(display) { return { camera: map.cameraId, category: "data", display: display, source: source }; }
-    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, { year: year }, E.regionsExpression(src, p.regions, meta("regions")), DATA_STYLE.regions, true);
+    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, { year: year }, E.regionsExpression(src, p.regions, meta("regions")), GeoStyles.layerStyle(look, "regions"), true);
     if (opts.bubbles) {
-      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, { year: year }, E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), DATA_STYLE.bubbles, true);
+      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, { year: year }, E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), GeoStyles.layerStyle(look, "bubbles"), true);
       if (A.FILL_ALPHA_ATTR) { try { setOne(layers.bubbles, A.FILL_ALPHA_ATTR, 70); } catch (e) { /* opacity is cosmetic */ } }
     }
-    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, { year: year }, E.valueLabelsExpression(src, p.points, meta("labels")), DATA_STYLE.labels, true);
+    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, { year: year }, E.valueLabelsExpression(src, p.points, meta("labels")), GeoStyles.layerStyle(look, "valueLabels"), true);
     if (opts.legend) {
       var s = compSize();
       if (layers.regions) {
-        layers.legend = createDataLayer(map, groupId, "Legend: " + prepared.title, E.LEGEND_INPUTS, {}, E.legendExpression(src, p.legend, meta("legend")), DATA_STYLE.legend, false);
+        layers.legend = createDataLayer(map, groupId, "Legend: " + prepared.title, E.LEGEND_INPUTS, {}, E.legendExpression(src, p.legend, meta("legend")), GeoStyles.layerStyle(look, "legend"), false);
         E.LEGEND_INPUTS.forEach(function (inp, k) {
           api.connect(layers.regions, A.MAP_ARRAY_ATTR + "." + E.inputIndex(E.REGION_INPUTS, inp[0]), layers.legend, A.MAP_ARRAY_ATTR + "." + k, true);
         });
       } else if (layers.bubbles) {
-        layers.legend = createDataLayer(map, groupId, "Legend: " + prepared.title, E.BUBBLE_LEGEND_INPUTS, {}, E.bubbleLegendExpression(src, p.legend, meta("bubbleLegend")), DATA_STYLE.legend, false);
+        layers.legend = createDataLayer(map, groupId, "Legend: " + prepared.title, E.BUBBLE_LEGEND_INPUTS, {}, E.bubbleLegendExpression(src, p.legend, meta("bubbleLegend")), GeoStyles.layerStyle(look, "legend"), false);
         api.connect(layers.bubbles, A.MAP_ARRAY_ATTR + "." + E.inputIndex(E.BUBBLE_INPUTS, "maxRadius"), layers.legend, A.MAP_ARRAY_ATTR + ".0", true);
       }
       if (layers.legend) api.set(layers.legend, { position: [s.width / 2 - 340, -s.height / 2 + 60] });
@@ -452,7 +454,7 @@ var GeoScene = (function () {
 
   function extract(map, sourceLayer, enc, group) {
     var sub = GeoCodec.subset(enc, group.indices);
-    var style = enc.kind === "line" ? STYLE.extractLine : STYLE.extractFill;
+    var style = layerStyle(map, enc.kind === "line" ? "extractLine" : "extractFill");
     var meta = { camera: map.cameraId, category: "extract", source: sourceLayer.meta.category };
     return createMapLayer(map, group.name || "Feature", sub, meta, style, { pointRadius: 6 });
   }
@@ -486,6 +488,7 @@ var GeoScene = (function () {
     if (A.LABEL_MODE === "driver") {
       var textId = api.create(A.TEXT_LAYER_TYPE, text);
       setOne(textId, A.TEXT_ATTR, text);
+      applyStyle(textId, layerStyle(map, "label"));
       var driverId = api.create(A.CAMERA_LAYER_TYPE, text + " position");
       addInputs(driverId, A.CAMERA_ARRAY_ATTR, GeoExpression.LABEL_INPUTS, { labelLon: lon, labelLat: lat });
       setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN));
@@ -506,7 +509,7 @@ var GeoScene = (function () {
       return textId;
     }
     var enc = GeoCodec.encodeLayer({ kind: "text", features: [{ name: text, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, STYLE.label, { pointRadius: 24 }, parent);
+    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent);
   }
 
   // Newly created layers land on top of the group, which can bury an existing pin,
@@ -926,7 +929,7 @@ var GeoScene = (function () {
     // ~330x30px centred text fully inside the bottom-left corner.
     if (api.hasAttribute(id, "fontSize")) setOne(id, "fontSize", 24);
     api.set(id, { position: [-s.width / 2 + 200, -s.height / 2 + 40] });
-    applyStyle(id, CREDIT_STYLE);
+    applyStyle(id, layerStyle(map, "credit"));
     api.parent(id, map.groupId);
     return id;
   }
@@ -944,7 +947,7 @@ var GeoScene = (function () {
     setOne(id, A.TEXT_ATTR, text || "© OpenStreetMap contributors");
     if (api.hasAttribute(id, "fontSize")) setOne(id, "fontSize", 24);
     api.set(id, { position: [-s.width / 2 + 200, -s.height / 2 + 80] });
-    applyStyle(id, CREDIT_STYLE);
+    applyStyle(id, layerStyle(map, "credit"));
     api.parent(id, map.groupId);
     return id;
   }
@@ -1173,14 +1176,94 @@ var GeoScene = (function () {
     }
   }
 
+  // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
+  var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
+  var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
+
+  // The ids of every part of a map a style colours (see GeoStyles.targets).
+  function styleParts(map) {
+    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], regions: [] };
+    findMapLayers(map).forEach(function (l) {
+      var c = l.meta.category;
+      if (GeoControls.BASE.indexOf(c) >= 0) parts.layers.push({ id: l.id, category: c });
+      else if (c === "extract") parts.layers.push({ id: l.id, category: c, line: LINE_SOURCES.indexOf(l.meta.source) >= 0 });
+      else if (c === "pin") parts.pins.push(l.id);
+      else if (c === "route") parts.legs.push(l.id);
+      else if (c === "label") parts.labels.push(l.id);
+      else if (c === "data" && l.meta.display === "regions") parts.regions.push(l.id);
+      else if (c === "data" && l.meta.display === "labels") parts.valueLabels.push(l.id);
+      else if (c === "data" && (l.meta.display === "legend" || l.meta.display === "bubbleLegend")) parts.legends.push(l.id);
+    });
+    findRoutes(map).forEach(function (r) {
+      r.stops.forEach(function (s) { parts.stops.push(s.circle); if (s.label && layerThere(s.label)) parts.labels.push(s.label); });
+      r.legs.forEach(function (l) { parts.legs.push(l.line); });
+    });
+    findTravellers(map).forEach(function (t) { if (!t.userSource && t.source && layerThere(t.source)) parts.markers.push(t.source); });
+    findLabels(map).forEach(function (id) { parts.labels.push(id); });
+    api.getChildren(map.groupId).forEach(function (id) { if (CREDIT_NAMES.indexOf(api.getNiceName(id)) >= 0) parts.credits.push(id); });
+    return parts;
+  }
+
+  function keyed(id, attr) { try { return (api.getKeyframeTimes(id, attr) || []).length > 0; } catch (e) { return false; } }
+
+  function hasIn(id, attr) { try { return !!api.getInConnection(id, attr); } catch (e) { return false; } }
+
+  // What drives a target's attribute: { src, attr } when it is wired from this map's Controls
+  // values utility, { other: true } when it is wired to anything else, {} when it is not wired.
+  function drivenBy(map, t) {
+    var from = "";
+    try { from = String(api.getInConnection(t.layer, t.attr) || ""); } catch (e) { from = ""; }
+    if (!from) return {};
+    var dot = from.indexOf("."), src = dot > 0 ? from.slice(0, dot) : "";
+    if (src && userData(src, "geoValues") === map.cameraId) return { src: src, attr: from.slice(dot + 1) };
+    return { other: true };
+  }
+
+  // Where a target's value is written: { layer, attr } on the layer itself or on the Controls
+  // value that drives it; { skip: key } (the real attribute, so a value shared by N layers counts
+  // once) when it is animated or wired to anything else.
+  function styleSlot(map, t) {
+    var own = t.layer + "." + t.attr, d = drivenBy(map, t);
+    if (d.other) return { skip: own };
+    if (d.src) return keyed(d.src, d.attr) || hasIn(d.src, d.attr) ? { skip: d.src + "." + d.attr } : { layer: d.src, attr: d.attr };
+    return keyed(t.layer, t.attr) ? { skip: own } : { layer: t.layer, attr: t.attr };
+  }
+
+  function applyMapStyle(map, style) {
+    style = GeoStyles.clean(style);
+    var done = {}, skipped = {};
+    GeoStyles.targets(styleParts(map)).forEach(function (t) {
+      var slot = styleSlot(map, t);
+      if (slot.skip) { skipped[slot.skip] = true; return; }
+      var k = slot.layer + "." + slot.attr;
+      if (done[k]) return;
+      done[k] = true;
+      var v = GeoStyles.valueFor(style, t);
+      setOne(slot.layer, slot.attr, t.kind === "color" ? A.COLOR_VALUE(v) : v);
+    });
+    setMapStyle(map, style);
+    return { skipped: Object.keys(skipped).length };
+  }
+
+  function readMapStyle(map, name) {
+    var readings = GeoStyles.targets(styleParts(map)).map(function (t) {
+      var d = drivenBy(map, t), value;
+      try { value = d.src ? api.get(d.src, d.attr) : api.get(t.layer, t.attr); } catch (e) { value = null; }
+      return { role: t.role, kind: t.kind, value: value };
+    });
+    return GeoStyles.fromReadings(name, readings, styleOf(map));
+  }
+
   return {
-    STYLE: STYLE, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
+    STYLE: STYLE,
+    styleOf: styleOf, setMapStyle: setMapStyle, layerStyle: layerStyle, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
     compSize: compSize, createMapLayer: createMapLayer, findMapLayers: findMapLayers, readLayerData: readLayerData, readLayerMeta: layerMeta,
     addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, pinStops: pinStops,
     isMapPart: isMapPart, routeOfSelection: routeOfSelection, addTraveller: addTraveller, removeTraveller: removeTraveller, findTravellers: findTravellers,
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean
+    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
+    applyMapStyle: applyMapStyle, readMapStyle: readMapStyle
   };
 })();

@@ -55,6 +55,16 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
   follows.
 
+### Styles
+
+The **Style** section at the bottom of the Map tab colours a whole map in one go: ocean, land, borders, coastlines, water, rivers, parks, buildings, cities, roads, railways, pins, stops, routes, travellers, labels, extracts and credits, plus line widths. Data colours (low / high / no-data, bubbles) and imagery are never changed.
+
+- **Pick a style** — Dark (the original look), Light, Blueprint, Vintage, Mono or Neon night. The preview shows its colours, and the next map you make uses it.
+- **Apply to map** — restyles the map picked at the top of the tab. Colours shared in the map's Controls change there; a colour you animated or connected to something else is left alone (the status line says how many).
+- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo_assets/settings.json` in the Scripts folder. When you update, merge the new CavalryGeo_assets folder into yours rather than replacing it, or your saved styles go with it (on a Mac, hold Option while dragging and choose Merge). **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
+
+Each map remembers its style, so pins, routes, labels and layers you add later match it.
+
 ## Map controls
 
 Every map has a **<map> Controls** layer, just above the map's group in the Scene Window (not
