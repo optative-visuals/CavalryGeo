@@ -210,7 +210,7 @@ cache come after them).
 
 ## Known limits
 
-- Tested on Windows; macOS hasn't been tried yet.
+- Tested on Windows and macOS.
 - Street downloads use Web Mercator maths for the camera's view, whatever projection the map
   shows. The download cache grows as you work in new areas (high-detail world data is 10–40 MB per
   category).
