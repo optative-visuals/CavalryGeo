@@ -783,7 +783,12 @@ test("Map tab: Start begins at the playhead and End 100 frames later; From: and 
   const jumpRow = rows.filter((n) => holds(n, context.jumpBtn))[0];
   const flyRow = rows.filter((n) => holds(n, context.flyBtn))[0];
   assert.deepEqual(jumpRow._items, [context.jumpBtn], "Jump here has a row of its own");
-  assert.deepEqual(flyRow._items, [context.flyBtn, context.fromLabel, context.flyStartField, context.toLabel, context.flyEndField]);
+  assert.deepEqual(flyRow._items, [context.flyBtn, context.fromLabel, context.flyStartBox, context.toLabel, context.flyEndBox]);
+  assert.ok(holds(context.flyStartBox, context.flyStartField) && holds(context.flyEndBox, context.flyEndField), "each box holds its field");
+  [context.flyStartBox, context.flyEndBox].forEach((box) => {
+    const texts = []; walkUi(box, (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
+    assert.deepEqual(texts, ["F"], "each box is marked with an F");
+  });
   const items = context.sectionPages.pages[0]._items;
   assert.ok(items.indexOf(jumpRow) + 1 === items.indexOf(flyRow), "the Fly row follows the Jump row");
   assert.equal(context.flyStartField._fixedWidth, 48);
@@ -795,10 +800,23 @@ test("Map tab: Start begins at the playhead and End 100 frames later; From: and 
 
 test("Map tab: the Start and End fields hide with Jump here and Fly here while New map is picked", () => {
   const { context } = buildSandbox();
-  const widgets = ["jumpBtn", "fromLabel", "flyStartField", "toLabel", "flyEndField", "flyBtn"];
+  const widgets = ["jumpBtn", "fromLabel", "flyStartBox", "flyStartField", "toLabel", "flyEndBox", "flyEndField", "flyBtn"];
   widgets.forEach((w) => assert.equal(context[w].isHidden(), true, w + " hidden with no map"));
   createWorldMap(context);
   widgets.forEach((w) => assert.equal(context[w].isHidden(), false, w + " shown with a map"));
+});
+
+test("Map tab: the frame-field boxes follow New map: hidden with no map, shown again once a map is picked", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.flyStartBox.isHidden(), true);
+  assert.equal(context.flyEndBox.isHidden(), true);
+  createWorldMap(context);
+  assert.equal(context.flyStartBox.isHidden(), false);
+  assert.equal(context.flyEndBox.isHidden(), false);
+  context.mapPicker.setValue(context.maps.length); // New map
+  context.mapPicker.onValueChanged();
+  assert.equal(context.flyStartBox.isHidden(), true, "hidden again on New map");
+  assert.equal(context.flyEndBox.isHidden(), true);
 });
 
 test("Fly here keys exactly Start to End, restores the playhead and moves the fields on for the next flight", () => {
@@ -3188,6 +3206,68 @@ test("GeoStyle.heading is a small light-grey sentence-case label followed by a t
   assert.equal(n._textColor, "#8a8a8a");
 });
 
+test("GeoStyle.heading with a hint adds a grey hint label between the heading and its line", () => {
+  const { context, ui } = buildSandbox();
+  const h = context.GeoStyle.heading("Preview", "drag to move · double-click or + / − to zoom");
+  assert.equal(h._items.length, 3);
+  const [label, hint, line] = h._items;
+  assert.equal(label.getText(), "Preview");
+  assert.equal(label._textColor, "#a6a6a6");
+  assert.ok(hint instanceof ui.Label);
+  assert.equal(hint.getText(), "drag to move · double-click or + / − to zoom");
+  assert.equal(hint._textColor, "#8a8a8a");
+  assert.equal(hint._fontSize, 11);
+  assert.ok(line instanceof ui.Container);
+  assert.ok(context.GeoStyle.isHeading(h));
+  const plainHeading = context.GeoStyle.heading("Search");
+  assert.equal(plainHeading._items.length, 2, "a heading without a hint is unchanged");
+  assert.equal(plainHeading._items[0].getText(), "Search");
+  assert.ok(plainHeading._items[1] instanceof ui.Container);
+});
+
+test("Map tab: the Preview heading carries the hint", () => {
+  const { context } = buildSandbox();
+  const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview")[0];
+  assert.ok(row, "found the Preview heading");
+  assert.equal(row._items[1].getText(), "drag to move · double-click or + / − to zoom");
+  assert.equal(row._items[1]._textColor, "#8a8a8a");
+});
+
+test("GeoStyle.frameField is a rounded dark box holding a grey F and the field", () => {
+  const { context, ui } = buildSandbox();
+  const field = new ui.NumericField(5);
+  field.setFixedWidth(48);
+  const box = context.GeoStyle.frameField(field);
+  assert.ok(box instanceof ui.Container);
+  assert.equal(box._background, "#1c1c1c");
+  assert.deepEqual(plain(box._radius), [3, 3, 3, 3]);
+  const row = box._layout;
+  assert.ok(row instanceof ui.HLayout);
+  assert.deepEqual(plain(row._margins), [4, 0, 0, 0]);
+  assert.equal(row._spacing, 2);
+  assert.equal(row._items.length, 2);
+  const [f, held] = row._items;
+  assert.ok(f instanceof ui.Label);
+  assert.equal(f.getText(), "F");
+  assert.equal(f._textColor, "#8a8a8a");
+  assert.equal(f._fontSize, 11);
+  assert.equal(held, field);
+  assert.equal(field._fixedWidth, 48, "the field keeps its width");
+});
+
+test("GeoStyle.frameField without ui.Container is a row of the F and the field", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const field = new ui.NumericField(5);
+  const row = context.GeoStyle.frameField(field);
+  assert.ok(row instanceof ui.HLayout);
+  assert.equal(row._items.length, 2);
+  assert.equal(row._items[0].getText(), "F");
+  assert.equal(row._items[1], field);
+});
+
 test("GeoStyle.heading without ui.Container is just the label", () => {
   const api = makeFakeApi(), ui = makeFakeUi();
   delete ui.Container;
@@ -3397,7 +3477,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -3985,12 +4065,15 @@ test("preview: a drag that paused before release renders full detail once, not t
 // ---- Preview in the Map tab ----------------------------------------------------------
 function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
 
-test("Map tab: the preview sits between Search and Camera", () => {
+test("Map tab: the preview sits between Search and the Jump here row, with no Camera heading", () => {
   const { context } = buildSandbox({ setup: installNe });
   const items = context.sectionPages.pages[0]._items;
   const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
-  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview"), iCamera = texts.indexOf("Camera");
-  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iCamera);
+  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview");
+  const iJump = items.findIndex((w) => holds(w, context.jumpBtn));
+  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iJump);
+  assert.equal(texts.indexOf("Camera"), -1, "no Camera heading");
+  assert.ok(items.indexOf(context.preview.layout) === iPreview + 1 && iJump === iPreview + 2, "the Jump here row follows the preview directly");
   assert.ok(mapPageHas(context, context.preview._draw));
 });
 

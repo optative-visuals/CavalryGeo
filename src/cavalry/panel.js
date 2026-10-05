@@ -85,6 +85,8 @@ if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_
 var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
 var fromLabel = new ui.Label("From:");
 var toLabel = new ui.Label("To:");
+var flyStartBox = GeoStyle.frameField(flyStartField);
+var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
@@ -134,7 +136,7 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
-  [jumpBtn, fromLabel, flyStartField, toLabel, flyEndField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
 }
@@ -280,11 +282,10 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
-    GeoStyle.heading("Preview"),
+    GeoStyle.heading("Preview", "drag to move · double-click or + / − to zoom"),
     preview.layout,
-    GeoStyle.heading("Camera"),
     row(jumpBtn),
-    row(flyBtn, fromLabel, flyStartField, toLabel, flyEndField),
+    row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
     createHereBtn
   ]));
 });
