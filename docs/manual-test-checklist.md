@@ -159,6 +159,15 @@ adding street layers.
       1. A, 2. C; **Clear** empties it.
 - [ ] 27c. Adding the same place twice in a row is refused (status: "That's already the
       last stop."), and the stop is not added again.
+- [ ] 27d. Label → Routes: Traveller = Plane, add 2 or 3 stops, Create route → a plane sits at the
+      destination. In Controls key Leg 1 draw on % 0 → 100, then Leg 2 0 → 100 → the plane rides
+      leg 1 then leg 2, facing forward.
+- [ ] 27e. Select a text layer and a route part, Traveller = Selected layer, **Add to route** →
+      the text rides the route. Traveller = None, **Add to route** → the route has no traveller
+      and the text is back, visible. With nothing usable selected, Create route with Selected
+      layer refuses ("Select the layer to send along the route first.") and makes no route.
+- [ ] 27f. In Controls, change Traveller size, Traveller hide and Traveller faces direction →
+      every copy follows; Traveller colour changes a Plane, Arrow or Dot.
 
 ## Data tab
 

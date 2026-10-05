@@ -519,7 +519,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
-    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "pinStopsBtn",
+    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
   ];
@@ -3601,7 +3601,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn"];
   const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
-    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "refreshDataBtn", "imageryAttrBtn"];
+    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
     assert.equal(context[n]._background, undefined, n + " keeps the native hover");
@@ -5610,4 +5610,69 @@ test("controls: a traveller gets its rows and one Size drives every copy", () =>
   ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller colour", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   const size = slotsOf(api, s.valuesId)["trav:" + r.groupId + ":size"];
   travData(api, r.groupId).legs.forEach((l) => ["shapeScale.x", "shapeScale.y"].forEach((a) => assert.equal(api.getInConnection(l.dup, a), s.valuesId + "." + size)));
+});
+
+test("Routes tab: Traveller picker and Add to route", () => {
+  const { context } = buildSandbox();
+  const page = context.labelPages.pages[1];
+  assert.ok(holds(page, context.travellerPicker) && holds(page, context.addTravellerBtn));
+  assert.deepEqual(plain(context.travellerPicker._entries), ["None", "Plane", "Arrow", "Dot", "Selected layer"]);
+  assert.equal(context.travellerPicker.getValue(), 0);
+});
+
+test("Create route with a Plane adds a traveller; with Selected layer and nothing usable it refuses before making the route", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  context.stops.push({ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 });
+  context.travellerPicker.setValue(1);
+  context.createRouteBtn.onClick();
+  assert.equal(plain(context.GeoScene.findTravellers(map)).length, 1);
+  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\./);
+  context.travellerPicker.setValue(4);
+  api.select([]);
+  const before = plain(context.GeoScene.findRoutes(map)).length;
+  context.createRouteBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select the layer to send along the route first.");
+  assert.equal(plain(context.GeoScene.findRoutes(map)).length, before);
+});
+
+test("Add to route: adds, replaces, removes with None, and explains what to select", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  api.select([]);
+  context.travellerPicker.setValue(2);
+  context.addTravellerBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select a route (any part of it) first.");
+  api.select([routeData(api, r.groupId).legs[0].line]);
+  context.addTravellerBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Traveller added to A → B → C\./);
+  context.travellerPicker.setValue(3);
+  context.addTravellerBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Traveller replaced on A → B → C\./);
+  const logo = api.create("textShape", "Logo");
+  context.travellerPicker.setValue(4);
+  api.select([routeData(api, r.groupId).stops[0].circle, logo]);
+  context.addTravellerBtn.onClick();
+  assert.equal(travData(api, r.groupId).source, logo);
+  context.travellerPicker.setValue(0);
+  context.addTravellerBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Traveller removed from A → B → C\./);
+  context.addTravellerBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: This route has no traveller to remove.");
+});
+
+test("Create route: if the traveller can't be added the route still stands and the status says why", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  context.stops.push({ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 });
+  context.travellerPicker.setValue(2);
+  delete api.setGenerator; // an older Cavalry: old-style route, and no duplicators for the traveller
+  context.createRouteBtn.onClick();
+  assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "route").length, 1, "the old-style leg was made");
+  assert.equal(plain(context.GeoScene.findTravellers(map)).length, 0);
+  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\).*The traveller couldn't be added: .+\.$/);
 });
