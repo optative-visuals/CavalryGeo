@@ -819,6 +819,153 @@ test("Map tab: the frame-field boxes follow New map: hidden with no map, shown a
   assert.equal(context.flyEndBox.isHidden(), true);
 });
 
+test("Map tab: a note under the Fly row says what Fly here does, and hides with the row for New map", () => {
+  const { context, ui } = buildSandbox();
+  assert.equal(context.flyNote.getText(), "Animates the camera to the map preview.");
+  assert.equal(context.flyNote._textColor, "#8a8a8a");
+  const items = context.sectionPages.pages[0]._items;
+  const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
+  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 1] === context.flyNote, "the note sits right after the Fly row");
+  assert.equal(context.flyNote.isHidden(), true, "hidden with no map");
+  createWorldMap(context);
+  assert.equal(context.flyNote.isHidden(), false, "shown with a map");
+  context.mapPicker.setValue(context.maps.length); // New map
+  context.mapPicker.onValueChanged();
+  assert.equal(context.flyNote.isHidden(), true, "hidden again on New map");
+});
+
+function countingSearch(context, found) {
+  const calls = [];
+  context.GeoNet.search = (q) => { calls.push(q); return found.slice(); };
+  return calls;
+}
+function mapCommit(context, q) { context.searchField.setText(q); context.searchField.onValueCommitted(); }
+
+test("Map search box: Enter (commit) searches once, lists the results and says how to go on", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  mapCommit(context, "  Paris ");
+  assert.deepEqual(calls, ["Paris"]);
+  assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
+  assert.equal(context.resultPicker.getValue(), 1, "the first result is picked");
+  assert.equal(context.resultPicker._entries.length, 3);
+  assert.equal(context.pinSearchField.getText(), "Paris", "the Pins tab is pre-filled too");
+  mapCommit(context, "Paris");
+  assert.equal(calls.length, 1, "the same text again does not search");
+  mapCommit(context, "Rome");
+  assert.equal(calls.length, 2, "new text searches");
+});
+
+test("Map search box: committing empty text does nothing, quietly", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS]);
+  context.statusLabel.setText("untouched");
+  mapCommit(context, "   ");
+  assert.equal(calls.length, 0);
+  assert.equal(context.statusLabel.getText(), "untouched");
+});
+
+test("Map search box: a commit with no results says so", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  countingSearch(context, []);
+  mapCommit(context, "Nowhere");
+  assert.equal(context.statusLabel.getText(), "No results for \"Nowhere\".");
+});
+
+test("Map search box: a commit never creates a map; Search then makes it from the same results without searching again", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  assert.equal(context.maps.length, 0);
+  mapCommit(context, "Paris");
+  assert.equal(context.maps.length, 0, "no map made by Enter");
+  assert.equal(context.statusLabel.getText(), "2 result(s). Press Search to make the map at the first one.");
+  assert.equal(calls.length, 1);
+  context.searchBtn.onClick();
+  assert.equal(calls.length, 1, "Search reused the results");
+  assert.equal(context.maps.length, 1);
+  assert.equal(context.currentMap().name, "Paris");
+  assert.match(context.statusLabel.getText(), /^Created map "Paris" with countries and coastlines, centred on Paris\. 2 result\(s\)/);
+  context.mapPicker.setValue(context.maps.length); // New map again
+  context.mapPicker.onValueChanged();
+  context.searchField.setText("Rome");
+  context.searchBtn.onClick();
+  assert.equal(calls.length, 2, "Search with different text searches");
+  assert.deepEqual(calls, ["Paris", "Rome"]);
+});
+
+test("Map Search button: reuses the last results for the same text, searches again for new text or no results", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  mapSearch(context, "Paris");
+  assert.equal(calls.length, 1, "second press with the same text reuses");
+  assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
+  context.resultPicker.setValue(2);
+  mapSearch(context, "Paris");
+  assert.equal(context.resultPicker.getValue(), 1, "reusing still starts at the first result");
+  const none = countingSearch(context, []);
+  mapSearch(context, "Nowhere");
+  mapSearch(context, "Nowhere");
+  assert.equal(none.length, 2, "no results to reuse, so it searches again");
+});
+
+test("Map search box: a failing search stays inside guard() on commit", () => {
+  const { context } = buildSandbox();
+  context.GeoNet.search = () => { throw new Error("offline"); };
+  context.searchField.setText("Paris");
+  assert.doesNotThrow(() => context.searchField.onValueCommitted());
+  assert.match(context.statusLabel.getText(), /offline/);
+});
+
+[["Pins", "pinSearchField", "pinSearchBtn", "pinResultPicker", "pinResults"],
+ ["Routes", "routeSearchField", "routeSearchBtn", "routeResultPicker", "routeResults"]].forEach(([name, fieldName, btnName, pickerName, resultsName]) => {
+  test(name + " search box: Enter searches once, the same text again does not, and the button reuses the results", () => {
+    const { context } = buildSandbox();
+    const calls = countingSearch(context, [PARIS, PARIS_TX]);
+    const field = context[fieldName];
+    field.setText("Paris ");
+    field.onValueCommitted();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(plain(context[pickerName]._entries), [PARIS.name, PARIS_TX.name]);
+    assert.equal(context[resultsName].length, 2);
+    field.onValueCommitted();
+    assert.equal(calls.length, 1, "same text: nothing");
+    context[btnName].onClick();
+    assert.equal(calls.length, 1, "the button after a commit with the same text reuses the results");
+    assert.equal(context[resultsName].length, 2);
+    assert.match(context.statusLabel.getText(), /^2 result\(s\)\. Pick one, then /);
+    field.setText("Rome");
+    context[btnName].onClick();
+    assert.equal(calls.length, 2, "new text searches from the button");
+    field.setText("Oslo");
+    field.onValueCommitted();
+    assert.equal(calls.length, 3, "new text searches on commit");
+  });
+  test(name + " search box: committing empty text does nothing, quietly", () => {
+    const { context } = buildSandbox();
+    const calls = countingSearch(context, [PARIS]);
+    context.statusLabel.setText("untouched");
+    context[fieldName].setText("  ");
+    context[fieldName].onValueCommitted();
+    assert.equal(calls.length, 0);
+    assert.equal(context.statusLabel.getText(), "untouched");
+  });
+});
+
+test("Pins search box: after a Map search the prefilled text is already searched, so Enter there does nothing", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.equal(context.pinSearchField.getText(), "Paris");
+  context.pinSearchField.onValueCommitted();
+  assert.equal(calls.length, 1);
+});
+
 test("Fly here keys exactly Start to End, restores the playhead and moves the fields on for the next flight", () => {
   const { context, api } = buildSandbox();
   longComp(api);
@@ -3229,7 +3376,7 @@ test("Map tab: the Preview heading carries the hint", () => {
   const { context } = buildSandbox();
   const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview")[0];
   assert.ok(row, "found the Preview heading");
-  assert.equal(row._items[1].getText(), "drag to move · double-click or + / − to zoom");
+  assert.equal(row._items[1].getText(), "drag to move");
   assert.equal(row._items[1]._textColor, "#8a8a8a");
 });
 
@@ -3239,7 +3386,7 @@ test("GeoStyle.frameField is a rounded dark box holding a grey F and the field",
   field.setFixedWidth(48);
   const box = context.GeoStyle.frameField(field);
   assert.ok(box instanceof ui.Container);
-  assert.equal(box._background, "#1c1c1c");
+  assert.equal(box._background, "#282828");
   assert.deepEqual(plain(box._radius), [3, 3, 3, 3]);
   const row = box._layout;
   assert.ok(row instanceof ui.HLayout);

@@ -29,6 +29,9 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   **Ocean** layer) already added; add more on **Layers**.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
   like any layer. The default colours match the preview.
+- **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
+  the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
+  the map at the first one (it reuses those results, so nothing is searched twice).
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.

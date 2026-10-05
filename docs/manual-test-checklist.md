@@ -28,6 +28,10 @@ fixed before release.
       named "… 2". Type a name and search again with "New map" picked → the map takes that name.
       The map name and projection fields hide once a map is picked and come back when
       "New map" is picked.
+- [ ] 3b. Type a place in the Map search box and press Enter → results appear and the first is
+      picked; with "New map" picked no map is made until you press Search (which then makes it
+      at the first result). Press Enter again with the same text → nothing happens; with an empty
+      box → nothing happens. The same goes for the Pins and Routes search boxes.
 - [ ] 4. Label → Pins → the search field and result list already show the Map tab's search →
       **Pin here** → a red dot at the centre of the frame.
 - [ ] 5. Keyframe the camera's zoom from ~16 to ~19 over 50 frames → the pin stays

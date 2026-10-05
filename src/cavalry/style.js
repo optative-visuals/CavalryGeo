@@ -68,7 +68,7 @@ var GeoStyle = (function () {
     if (!hasContainer()) return row;
     var box = new ui.Container();
     box.setLayout(row);
-    box.setBackgroundColor(color("Shadow"));
+    box.setBackgroundColor("#282828");
     maybe(box, "setRadius", 3, 3, 3, 3);
     return box;
   }

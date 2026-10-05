@@ -75,6 +75,7 @@ var flyEndField = new ui.NumericField(playhead() + 100);
   if (typeof f.setFixedWidth === "function") f.setFixedWidth(48); // number-sized, so the whole Fly row fits
 });
 var flyBtn = GeoStyle.primaryButton("Fly here");
+var flyNote = GeoStyle.note("Animates the camera to the map preview.");
 
 // Search and Fly here share one width.
 var MAP_ACTION_WIDTH = 84;
@@ -136,7 +137,7 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
-  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
 }
@@ -205,17 +206,42 @@ resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
 refreshMapsBtn.onClick = guard(function () { refreshMaps(); say(maps.length + " map(s) in this composition."); });
 
+// The query the Map box last searched: pressing Enter again, or Search after Enter, doesn't ask the network twice.
+var lastMapQuery = null;
+function mapSearchResults(q) {
+  results = GeoNet.search(q);
+  lastMapQuery = q;
+  refreshResultPicker();
+  previewFollowPicked(); // clears old dots when nothing was found
+  if (!results.length) return results;
+  resultPicker.setValue(1);
+  previewFollowPicked();
+  prefillPins(q, results);
+  return results;
+}
+
+// Return (or leaving the box) lists the results, but never makes a map: that stays with Search.
+searchField.onValueCommitted = guard(function () {
+  var q = searchField.getText().trim();
+  if (!q || q === lastMapQuery) return;
+  var creating = newMapSelected();
+  mapSearchResults(q);
+  if (!results.length) { say("No results for \"" + q + "\"."); return; }
+  say(results.length + (creating ? " result(s). Press Search to make the map at the first one." : " result(s). Pick one, then Jump here or Fly here."));
+});
+
 searchBtn.onClick = guard(function () {
   var q = searchField.getText().trim();
   if (!q) throw new Error("Type a place to search for.");
   var creating = newMapSelected();
-  results = GeoNet.search(q);
-  refreshResultPicker();
-  previewFollowPicked(); // clears old dots when nothing was found
+  if (q === lastMapQuery && results.length) {
+    // Same text as the last search (often an Enter just now): use those results, starting at the first.
+    resultPicker.setValue(1);
+    previewFollowPicked();
+  } else {
+    mapSearchResults(q);
+  }
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
-  resultPicker.setValue(1);
-  previewFollowPicked();
-  prefillPins(q, results);
   if (!creating) { say(results.length + " result(s). Pick one, then Jump here or Fly here."); return; }
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
   var made = makeMap(name, camForResult(r, projPicker.getValue()));
@@ -282,10 +308,11 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
-    GeoStyle.heading("Preview", "drag to move · double-click or + / − to zoom"),
+    GeoStyle.heading("Preview", "drag to move"),
     preview.layout,
     row(jumpBtn),
     row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
+    flyNote,
     createHereBtn
   ]));
 });
@@ -539,13 +566,24 @@ TAB_BUILDERS.push(function (tabs) {
 });
 
 // Runs a place search from a text field into a results dropdown (no "World view" entry).
-function searchInto(field, picker) {
+// memo ({ q, found }) holds the box's last search, so the same text isn't searched twice.
+function searchInto(field, picker, memo) {
   var q = field.getText().trim();
   if (!q) throw new Error("Type a place to search for.");
-  var found = GeoNet.search(q);
+  var found = memo.q === q && memo.found.length ? memo.found : GeoNet.search(q);
+  memo.q = q;
+  memo.found = found.slice();
   fillPlaces(picker, found);
   if (!found.length) say("No results for \"" + q + "\".");
   return found;
+}
+// Return (or leaving the box) runs the box's search, unless it is empty or already searched.
+function searchOnCommit(field, memo, run) {
+  field.onValueCommitted = guard(function () {
+    var q = field.getText().trim();
+    if (!q || q === memo.q) return;
+    run();
+  });
 }
 function fillPlaces(picker, found) {
   picker.clear();
@@ -556,7 +594,7 @@ function fillPlaces(picker, found) {
 // ---- Pins (Label section) ---------------------------------------------------
 // The Pins page has its own search (a Map tab search fills it in too), so a pin or label
 // always goes to the place shown right here (never to whatever is picked on the Map tab).
-var pinResults = [];
+var pinResults = [], pinMemo = { q: null, found: [] };
 var pinSearchField = new ui.LineEdit(); pinSearchField.setPlaceholder("Search a place, e.g. Eiffel Tower");
 var pinSearchBtn = GeoStyle.primaryButton("Search");
 var pinResultPicker = new ui.DropDown();
@@ -574,6 +612,8 @@ function coordName() { return latField.getValue().toFixed(4) + ", " + lonField.g
 function prefillPins(q, found) {
   pinSearchField.setText(q);
   pinResults = found.slice();
+  pinMemo.q = q;
+  pinMemo.found = found.slice();
   fillPlaces(pinResultPicker, pinResults);
 }
 function pinPlace() {
@@ -582,10 +622,12 @@ function pinPlace() {
   return pinResults[idx];
 }
 
-pinSearchBtn.onClick = guard(function () {
-  pinResults = searchInto(pinSearchField, pinResultPicker);
+function pinSearch() {
+  pinResults = searchInto(pinSearchField, pinResultPicker, pinMemo);
   if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here or Label here.");
-});
+}
+pinSearchBtn.onClick = guard(pinSearch);
+searchOnCommit(pinSearchField, pinMemo, pinSearch);
 pinHereBtn.onClick = guard(function () {
   var r = pinPlace(), name = labelOr(shortName(r)), map = currentMap();
   GeoScene.addPin(map, name, r.lon, r.lat);
@@ -609,7 +651,7 @@ labelCoordBtn.onClick = guard(function () {
 
 // ---- Routes (Label section) -------------------------------------------------
 // A route is stops joined by legs: each stop is a circle you can drag; each leg a Bézier line.
-var routeResults = [], stops = [];
+var routeResults = [], stops = [], routeMemo = { q: null, found: [] };
 var routeSearchField = new ui.LineEdit(); routeSearchField.setPlaceholder("Search a stop, e.g. London");
 var routeSearchBtn = GeoStyle.primaryButton("Search");
 var routeResultPicker = new ui.DropDown();
@@ -626,10 +668,12 @@ function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
 }
 
-routeSearchBtn.onClick = guard(function () {
-  routeResults = searchInto(routeSearchField, routeResultPicker);
+function routeSearch() {
+  routeResults = searchInto(routeSearchField, routeResultPicker, routeMemo);
   if (routeResults.length) say(routeResults.length + " result(s). Pick one, then Add stop.");
-});
+}
+routeSearchBtn.onClick = guard(routeSearch);
+searchOnCommit(routeSearchField, routeMemo, routeSearch);
 addStopBtn.onClick = guard(function () {
   var idx = routeResultPicker.getValue();
   if (!routeResults.length || idx < 0 || idx >= routeResults.length) throw new Error("Search for a stop under Label → Routes first.");
