@@ -45,13 +45,13 @@ var GeoControlPanel = (function () {
     }
   }
 
-  // A child of `parentId` of this type, tagged with user data key = value; else one with that name.
+  // A child of `parentId` of this type, tagged with user data key = value; else an untagged one with that name (never one tagged for something else).
   function findChild(parentId, type, key, value, name) {
     var kids = api.getChildren(parentId), byName = null;
     for (var i = 0; i < kids.length; i++) {
       if (layerType(kids[i]) !== type) continue;
       if (userData(kids[i], key) === value) return kids[i];
-      if (!byName && api.getNiceName(kids[i]) === name) byName = kids[i];
+      if (!byName && api.getNiceName(kids[i]) === name && userData(kids[i], key) === null) byName = kids[i];
     }
     return byName;
   }

@@ -4460,3 +4460,25 @@ test("controls: without unParent or the step calls, sync still makes the compone
   assert.equal(api.getLayerType(r.componentId), "component");
   assert.ok(promotedNames(api, r.componentId).length > 0);
 });
+
+test("controls: two maps with the same name each keep their own Controls (never claimed by name)", () => {
+  const { context, api } = buildSandbox();
+  const S = context.GeoScene, cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  const m1 = S.createMap("Twin", cam);
+  const r1 = context.GeoControlPanel.sync(m1);
+  api.connect(api.create("basicShape", "Other"), "position", r1.componentId, "promotedAttributes");
+  const promoted = plain(api._promoted(r1.componentId));
+  const m2 = S.createMap("Twin", cam); // a duplicated group: same name, new camera
+  assert.notEqual(m2.cameraId, m1.cameraId);
+  const r2 = context.GeoControlPanel.sync(m2);
+  assert.notEqual(r2.componentId, r1.componentId);
+  assert.notEqual(r2.valuesId, r1.valuesId);
+  assert.equal(api.getUserDataKey(r1.componentId, "geoControls"), m1.cameraId);
+  assert.equal(api.getUserDataKey(r2.componentId, "geoControls"), m2.cameraId);
+  assert.equal(api.getUserDataKey(r1.valuesId, "geoValues"), m1.cameraId);
+  assert.deepEqual(plain(api._promoted(r1.componentId)), promoted, "the first map's Controls is untouched");
+  assert.equal(controlsOf(api, m1), r1.componentId);
+  assert.ok(directlyAbove(api, r1.componentId, m1.groupId));
+  assert.ok(directlyAbove(api, r2.componentId, m2.groupId));
+  assert.equal(context.GeoControlPanel.sync(m1).componentId, r1.componentId, "and a later sync still finds its own");
+});
