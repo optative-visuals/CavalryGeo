@@ -471,7 +471,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -3163,7 +3163,7 @@ test("each section has grey headings in order", () => {
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
@@ -4005,4 +4005,49 @@ test("controls: without user data, sync says this Cavalry can't do it", () => {
   const map = controlsMap(context);
   delete api.setUserData;
   assert.throws(() => context.GeoControlPanel.sync(map), /This version of Cavalry can't update a map's Controls\./);
+});
+
+test("controls: a map made by Search gets its Controls component straight away", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const map = context.GeoScene.findMaps()[0];
+  const top = api.getChildren(map.groupId)[0];
+  assert.equal(api.getLayerType(top), "component");
+  assert.equal(api.getNiceName(top), map.name + " Controls");
+  assert.ok(promotedNames(api, top).indexOf("Countries · Fill colour") >= 0, "starter layers are in it");
+});
+
+test("controls: adding a pin updates the Controls", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.lonField.setValue(2.35); context.latField.setValue(48.85);
+  context.pinCoordBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  const comp = api.getChildren(map.groupId)[0];
+  assert.ok(promotedNames(api, comp).indexOf("Pins · Colour") >= 0);
+  assert.ok(!/couldn't/.test(context.statusLabel.getText()), context.statusLabel.getText());
+});
+
+test("controls: a failed update keeps the action and says how to retry", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.pinCoordBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 1);
+  assert.match(context.statusLabel.getText(), /^Pin added at .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+});
+
+test("controls: Refresh controls lives on the Layers tab and (re)builds the Controls", () => {
+  const { context, api } = buildSandbox();
+  assert.ok(holds(context.sectionPages.pages[1], context.refreshControlsBtn));
+  context.refreshControlsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  context.refreshControlsBtn.onClick();
+  const comp = api.getChildren(map.groupId)[0];
+  assert.equal(api.getLayerType(comp), "component");
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + api._promoted(comp).length + " setting(s) in \"Map Controls\". Select it to see them.");
 });

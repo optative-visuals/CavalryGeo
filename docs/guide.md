@@ -40,8 +40,27 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 - **Flying the camera:** pick a place, set **Frames** and press **Fly here** — the camera zooms
   out, travels and zooms in smoothly from the current frame (with World view picked it flies back
   out). Build imagery afterwards for sharp imagery along the way.
-- **Animating by hand:** keyframe the Camera layer's `zoom`, `centerLat` / `centerLon` or
-  `rotation` inputs. Everything in the map follows.
+- **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
+  **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
+  follows.
+
+## Map controls
+
+Every map has a **<map> Controls** layer at the top of its group. Select it and open the
+**Controls** tab in the Attribute Editor to find the map's settings in one place:
+
+- **Camera:** zoom, centre, rotation and projection (0 flat, 1 Equal Earth, 2 globe).
+- **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
+  (for cities) dot size.
+- **Pins** and **Labels:** one hide, colour and size for all of them.
+- **Routes:** colour, width and arc height for each route, and each leg's **draw on %** to animate.
+- **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
+- **Imagery:** opacity and hide.
+
+The list updates whenever the plugin adds something to the map. If you change the map yourself,
+press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
+kept, after the plugin's. To give one pin (or label, or leg) its own colour, right-click its
+setting on that layer and choose **Disconnect**; it then stays separate.
 
 ## Layers
 
@@ -51,8 +70,8 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
   the camera's current view — zoom in before adding them.
-- Each map layer has a **Detail** slider: lower it to thin out small or minor features, and
-  keyframe it for a "map filling in" effect.
+- Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
+  minor features, and keyframe it for a "map filling in" effect.
 - Keep the **© OpenStreetMap contributors** credit (added for you) in any scene that uses street
   data.
 

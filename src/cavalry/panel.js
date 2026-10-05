@@ -16,6 +16,16 @@ function guard(fn) {
     try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); }
   };
 }
+// Brings the map's Controls component up to date after an action changed the map. Never
+// throws (the action already happened): returns "" or a note to add to the status line.
+function syncControls(map) {
+  try {
+    GeoControlPanel.sync(map);
+    return "";
+  } catch (e) {
+    return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Layers tab) to try again.";
+  }
+}
 function column(items) {
   var v = new ui.VLayout();
   v.setMargins(0, 6, 0, 0); // flush left and right: everything shares one left edge
@@ -194,7 +204,8 @@ searchBtn.onClick = guard(function () {
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
   var made = makeMap(name, camForResult(r, projPicker.getValue()));
   var starter = addStarterLayers(made);
-  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines, " : "") + "centred on " + shortName(r) + ". " + results.length + " result(s): pick one, then Jump here or Fly here." + starterNote(starter));
+  var note = syncControls(made);
+  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines, " : "") + "centred on " + shortName(r) + ". " + results.length + " result(s): pick one, then Jump here or Fly here." + starterNote(starter) + note);
 });
 
 jumpBtn.onClick = guard(function () {
@@ -225,7 +236,8 @@ createHereBtn.onClick = guard(function () {
   var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
   var made = makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
   var starter = addStarterLayers(made);
-  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines " : "") + "at the preview frame." + starterNote(starter));
+  var note = syncControls(made);
+  say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines " : "") + "at the preview frame." + starterNote(starter) + note);
 });
 
 TAB_BUILDERS.push(function (tabs) {
@@ -333,7 +345,7 @@ addLayersBtn.onClick = guard(function () {
   });
   if (selected.some(isOsm) && creditCheck.getValue() && !GeoScene.hasAttribution(map)) GeoScene.createAttribution(map);
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
-  say("Added " + added + " layer(s), " + GeoUtil.formatBytes(bytes) + "." + (empty.length ? " Nothing found for: " + empty.join(", ") + "." : ""));
+  say("Added " + added + " layer(s), " + GeoUtil.formatBytes(bytes) + "." + (empty.length ? " Nothing found for: " + empty.join(", ") + "." : "") + syncControls(map));
 });
 
 clearCacheBtn.onClick = guard(function () {
@@ -355,6 +367,7 @@ var featureList = new ui.List();
 featureList.setSelectionMode("extended");
 var extractBtn = GeoStyle.button("Extract selected");
 var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
+var refreshControlsBtn = GeoStyle.button("Refresh controls");
 
 // Extract state (groups/groupsEnc/groupsLayer, and the feature list) is only ever
 // valid for the layer it was built from. Any refresh of the source-layer list -
@@ -411,7 +424,7 @@ extractBtn.onClick = guard(function () {
   if (!sel || !sel.length) throw new Error("Select features in the list first.");
   var map = currentMap();
   sel.forEach(function (uuid) { GeoScene.extract(map, groupsLayer, groupsEnc, groups[parseInt(String(uuid).slice(1), 10)]); });
-  say("Extracted " + sel.length + " feature layer(s). They follow the camera; style and animate them freely.");
+  say("Extracted " + sel.length + " feature layer(s). They follow the camera; style and animate them freely." + syncControls(map));
 });
 
 bakeBtn.onClick = guard(function () {
@@ -440,6 +453,11 @@ bakeBtn.onClick = guard(function () {
   say(msg);
 });
 
+refreshControlsBtn.onClick = guard(function () {
+  var map = currentMap(), r = GeoControlPanel.sync(map);
+  say("Controls updated: " + r.controls + " setting(s) in \"" + map.name + " Controls\". Select it to see them.");
+});
+
 // Layers holds the layer categories, then Extract and Bake.
 TAB_BUILDERS.push(function (tabs) {
   var toggles = function (cats) { return cats.map(function (c) { return checks[c[0]]; }); };
@@ -460,6 +478,9 @@ TAB_BUILDERS.push(function (tabs) {
     extractBtn,
     GeoStyle.heading("Bake"),
     bakeBtn,
+    GeoStyle.heading("Controls"),
+    GeoStyle.note("Each map's settings in one place: select \"<map> Controls\" in the Scene Window."),
+    refreshControlsBtn,
     clearCacheBtn
   ]));
 });
@@ -513,23 +534,24 @@ pinSearchBtn.onClick = guard(function () {
   if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here or Label here.");
 });
 pinHereBtn.onClick = guard(function () {
-  var r = pinPlace(), name = labelOr(shortName(r));
-  GeoScene.addPin(currentMap(), name, r.lon, r.lat);
-  say("Pin added at " + shortName(r) + ".");
+  var r = pinPlace(), name = labelOr(shortName(r)), map = currentMap();
+  GeoScene.addPin(map, name, r.lon, r.lat);
+  say("Pin added at " + shortName(r) + "." + syncControls(map));
 });
 labelHereBtn.onClick = guard(function () {
-  var r = pinPlace(), text = labelOr(shortName(r));
-  GeoScene.createLabel(currentMap(), text, r.lon, r.lat);
-  say("Label \"" + text + "\" added at " + shortName(r) + ".");
+  var r = pinPlace(), text = labelOr(shortName(r)), map = currentMap();
+  GeoScene.createLabel(map, text, r.lon, r.lat);
+  say("Label \"" + text + "\" added at " + shortName(r) + "." + syncControls(map));
 });
 pinCoordBtn.onClick = guard(function () {
-  GeoScene.addPin(currentMap(), labelOr(coordName()), lonField.getValue(), latField.getValue());
-  say("Pin added at " + coordName() + ".");
+  var map = currentMap();
+  GeoScene.addPin(map, labelOr(coordName()), lonField.getValue(), latField.getValue());
+  say("Pin added at " + coordName() + "." + syncControls(map));
 });
 labelCoordBtn.onClick = guard(function () {
-  var text = labelOr(coordName());
-  GeoScene.createLabel(currentMap(), text, lonField.getValue(), latField.getValue());
-  say("Label \"" + text + "\" added at " + coordName() + ".");
+  var text = labelOr(coordName()), map = currentMap();
+  GeoScene.createLabel(map, text, lonField.getValue(), latField.getValue());
+  say("Label \"" + text + "\" added at " + coordName() + "." + syncControls(map));
 });
 
 // ---- Routes (Label section) -------------------------------------------------
@@ -582,7 +604,7 @@ createRouteBtn.onClick = guard(function () {
   var map = currentMap();
   if (stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
   var r = GeoScene.createRoute(map, stops, { lift: liftField.getValue(), pins: pinsAtStops.getValue(), labels: labelsAtStops.getValue() });
-  say("Route created: " + r.legs.length + " leg(s). Animate each leg's Trim to draw it on.");
+  say("Route created: " + r.legs.length + " leg(s). Animate each leg's draw on % in the map's Controls to draw it on." + syncControls(map));
 });
 
 // ---- Label section: Pins and Routes, switched by a small tab bar -----------------
@@ -708,7 +730,7 @@ addDataBtn.onClick = guard(function () {
   if (usedLookup) source.lookup = true;
   var r = GeoScene.createDataLayers(map, source, prepared, opts);
   showUnmatched(prepared.unmatched);
-  say("Added " + Object.keys(r.layers).length + " data layer(s) for " + prepared.matched + " place(s)." + (prepared.years ? " Animate Year " + prepared.years[0] + "–" + prepared.years[1] + "." : ""));
+  say("Added " + Object.keys(r.layers).length + " data layer(s) for " + prepared.matched + " place(s)." + (prepared.years ? " Animate Data · Year (" + prepared.years[0] + "–" + prepared.years[1] + ") in the map's Controls." : "") + syncControls(map));
 });
 
 refreshDataBtn.onClick = guard(function () {
@@ -864,11 +886,12 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     resetImageryPlan();
     if (r.cancelled) { say("Cancelled — no imagery was built."); return; }
     var b = r.result;
+    var note = syncControls(map);
     say("Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
-      " Credit: " + GeoSources.attribution(src, opts));
+      " Credit: " + GeoSources.attribution(src, opts) + note);
   });
 }
 

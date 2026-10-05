@@ -191,6 +191,19 @@ adding street layers.
       built imagery still shows; Clear imagery tiles → asks for a second press (and refuses while
       downloading or building); confirm → tiles and downloaded images are removed and re-download on the next Build.
 
+## Map controls
+
+- [ ] C1. Make a new map → "<map> Controls" sits at the top of the map group; its Controls tab
+      lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names.
+- [ ] C2. Change Countries · Fill colour and Countries · Detail there → the map updates.
+- [ ] C3. Add two pins → one Pins · Colour changes both; disconnect one pin's colour on the pin,
+      press Refresh controls → that pin stays separate.
+- [ ] C4. Make a route → Leg 1 draw on % animates the first leg drawing on.
+- [ ] C5. Add a data set → Data · Year changes regions, bubbles and labels together.
+- [ ] C6. Promote any other setting onto the Controls layer yourself, then add a layer → your
+      setting is still there, at the end.
+- [ ] C7. Save, reopen the scene, add a pin → no duplicate controls; the pin links to Pins · Colour.
+
 ## Scene persistence and install
 
 - [ ] 20. Save the scene, close Cavalry, reopen the `.cv` → maps still render and
