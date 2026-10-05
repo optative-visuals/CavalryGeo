@@ -511,6 +511,11 @@ bakeBtn.onClick = guard(function () {
         r.stops.forEach(function (s) { [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint].forEach(function (p) { if (p) routeParts[p] = true; }); });
         r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade].forEach(function (p) { if (p) routeParts[p] = true; }); });
       });
+      // A traveller's copies, helpers and plugin marker are route parts too (your own layer is not).
+      GeoScene.findTravellers(m).forEach(function (t) {
+        t.legs.forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        if (!t.userSource && t.source) routeParts[t.source] = true;
+      });
     });
   } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
@@ -743,7 +748,14 @@ addTravellerBtn.onClick = guard(function () {
     say("Traveller removed from " + name + "." + syncControls(map));
     return;
   }
-  var r = GeoScene.addTraveller(map, groupId, kind, kind === "layer" ? travellerLayer(map) : null);
+  var had = GeoScene.findTravellers(map).some(function (t) { return t.groupId === groupId; });
+  var r;
+  try { r = GeoScene.addTraveller(map, groupId, kind, kind === "layer" ? travellerLayer(map) : null); }
+  catch (e) {
+    // The old traveller is gone before the new one is built, so bring the Controls up to date first.
+    if (had) syncControls(map);
+    throw e;
+  }
   say("Traveller " + (r.replaced ? "replaced on " : "added to ") + r.routeName + "." + syncControls(map));
 });
 pinStopsBtn.onClick = guard(function () {

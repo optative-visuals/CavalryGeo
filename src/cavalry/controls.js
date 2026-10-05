@@ -204,10 +204,8 @@ var GeoControlPanel = (function () {
     });
     GeoScene.findTravellers(map).forEach(function (t) {
       var marker = null;
-      if (!t.userSource) {
-        if (typeof api.layerExists === "function" && !api.layerExists(t.source)) return; // the plugin's marker is gone
-        marker = { id: t.source, state: linkState(t.source, S.marker) };
-      }
+      // A deleted plugin marker only loses the colour row; the copies keep their other rows.
+      if (!t.userSource && !(typeof api.layerExists === "function" && !api.layerExists(t.source))) marker = { id: t.source, state: linkState(t.source, S.marker) };
       model.travellers.push({ routeId: t.groupId, marker: marker, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });

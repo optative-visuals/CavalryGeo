@@ -5750,3 +5750,50 @@ test("travellers: a route with no usable legs is refused", () => {
   assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "dot"), /Select a route \(any part of it\) first\./);
   assert.equal(travData(api, r.groupId), null);
 });
+
+test("Add to route: a replace that fails part-way leaves the Controls without the old traveller's rows", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  api.select([routeData(api, r.groupId).legs[0].line]);
+  context.travellerPicker.setValue(1);
+  context.addTravellerBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Traveller added to/);
+  const comp = controlsOf(api, map);
+  assert.ok(plain(promotedNames(api, comp)).some((n) => / · Traveller size$/.test(n)), "the Plane's rows are there");
+  const real = api.setGenerator;
+  api.setGenerator = function () { throw new Error("boom"); };
+  context.travellerPicker.setValue(2);
+  context.addTravellerBtn.onClick();
+  api.setGenerator = real;
+  assert.equal(context.statusLabel.getText(), "Error: boom");
+  assert.equal(travData(api, r.groupId), null, "the old traveller was replaced away");
+  assert.ok(!plain(promotedNames(api, controlsOf(api, map))).some((n) => / · Traveller /.test(n)), "no rows left pointing at deleted layers");
+});
+
+test("Bake: a traveller's copies, helpers and plugin marker are skipped as route parts", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "plane");
+  const t = travData(api, r.groupId);
+  [t.legs[0].dup, t.legs[0].tip, t.legs[0].show, t.source].forEach((id) => {
+    api.select([id]);
+    context.bakeBtn.onClick();
+    assert.equal(context.statusLabel.getText(), "Error: Route legs and stops are already Cavalry shapes, so there's nothing to bake.", id);
+  });
+});
+
+test("controls: a deleted plugin marker keeps the traveller's other rows", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "plane");
+  api.deleteLayer(travData(api, r.groupId).source);
+  const s = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, s.componentId));
+  ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
+  assert.ok(names.indexOf("A → B → C · Traveller colour") < 0, "nothing left to recolour");
+});
