@@ -5676,3 +5676,77 @@ test("Create route: if the traveller can't be added the route still stands and t
   assert.equal(plain(context.GeoScene.findTravellers(map)).length, 0);
   assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\).*The traveller couldn't be added: .+\.$/);
 });
+
+// ---- Route travellers: final-review fixes ---------------------------------------------
+test("travellers: a layer shared by two routes stays hidden until the last route lets it go", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r1 = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const r2 = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const logo = api.create("textShape", "Logo");
+  context.GeoScene.addTraveller(map, r1.groupId, "layer", logo);
+  context.GeoScene.addTraveller(map, r2.groupId, "layer", logo);
+  assert.equal(context.GeoScene.removeTraveller(map, r1.groupId), true);
+  assert.equal(api.get(logo, "hidden"), true, "route 2 still sends it");
+  assert.equal(context.GeoScene.removeTraveller(map, r2.groupId), true);
+  assert.equal(api.get(logo, "hidden"), false);
+});
+
+test("travellers: replacing your layer with the same one, or a failed build, never un-hides it for another route", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r1 = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const r2 = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const logo = api.create("textShape", "Logo");
+  context.GeoScene.addTraveller(map, r1.groupId, "layer", logo);
+  const real = api.setGenerator; let n = 0;
+  api.setGenerator = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  assert.throws(() => context.GeoScene.addTraveller(map, r2.groupId, "layer", logo), /boom/);
+  assert.equal(api.get(logo, "hidden"), true, "route 1 still sends it");
+  api.setGenerator = real;
+  context.GeoScene.addTraveller(map, r1.groupId, "dot");
+  assert.equal(api.get(logo, "hidden"), false, "nothing sends it now");
+});
+
+test("travellers: a group that contains the map or its Controls isn't a selectable traveller layer", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const wrap = api.create("group", "Wrapper");
+  api.parent(map.groupId, wrap);
+  assert.equal(context.GeoScene.isMapPart(map, wrap), true);
+  assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "layer", wrap), /Select the layer to send along the route first\./);
+  const { context: c2, api: a2 } = buildSandbox();
+  const map2 = routeMap(c2);
+  const s = c2.GeoControlPanel.sync(map2);
+  const wrap2 = a2.create("group", "Controls wrapper");
+  a2.parent(s.componentId, wrap2);
+  assert.equal(c2.GeoScene.isMapPart(map2, wrap2), true);
+  assert.equal(c2.GeoScene.isMapPart(map2, a2.create("group", "Unrelated")), false);
+});
+
+test("travellers: an older Cavalry gets a plain message, not a raw error", () => {
+  ["setGenerator", "createEditable", "primitive", "setUserData"].forEach((name) => {
+    const { context, api } = buildSandbox();
+    const map = routeMap(context);
+    const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+    delete api[name];
+    assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "dot"), /^Error: This version of Cavalry can't add travellers\.$/, name);
+  });
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  delete context.cavalry.Path;
+  assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "plane"), /^Error: This version of Cavalry can't add travellers\.$/);
+  assert.equal(plain(context.GeoScene.findTravellers(map)).length, 0);
+});
+
+test("travellers: a route with no usable legs is refused", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const d = routeData(api, r.groupId); d.legs = [];
+  api.setUserData(r.groupId, "geoRoute", d);
+  assert.throws(() => context.GeoScene.addTraveller(map, r.groupId, "dot"), /Select a route \(any part of it\) first\./);
+  assert.equal(travData(api, r.groupId), null);
+});

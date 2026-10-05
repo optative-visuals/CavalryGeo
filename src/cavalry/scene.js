@@ -960,14 +960,23 @@ var GeoScene = (function () {
     try { return typeof api.hasUserDataKey === "function" && api.hasUserDataKey(id, key) ? api.getUserDataKey(id, key) : null; } catch (e) { return null; }
   }
 
-  // True for the map group and anything in it, and for the map's Controls (and what's inside it).
+  // True for the map group and anything in it, for the map's Controls (and what's inside it),
+  // and for a group that holds either of them.
   function isMapPart(map, id) {
+    var controls = null;
     for (var cur = id, guard = 0; cur && guard < 64; guard++) {
       if (cur === map.groupId) return true;
       if (userData(cur, "geoControls") === map.cameraId) return true;
       cur = api.getParent(cur);
     }
-    return false;
+    api.getCompLayers(false).forEach(function (l) { if (!controls && userData(l, "geoControls") === map.cameraId) controls = l; });
+    return [map.groupId, controls].some(function (start) {
+      for (var up = start ? api.getParent(start) : "", guard = 0; up && guard < 64; guard++) {
+        if (up === id) return true;
+        up = api.getParent(up);
+      }
+      return false;
+    });
   }
 
   // The legs of a route group in route order: new-style from its geoRoute data, old-style from
@@ -1034,13 +1043,22 @@ var GeoScene = (function () {
     return null;
   }
 
-  // Deletes the plugin's copies, helpers and marker; the user's own layer is only un-hidden.
+  // Whether a route other than groupId (on any map) still sends this user layer along.
+  function carriedElsewhere(groupId, layerId) {
+    return api.getCompLayers(false).some(function (id) {
+      var d = id === groupId ? null : userData(id, TRAVELLER_KEY);
+      return !!d && d.userSource === true && d.source === layerId;
+    });
+  }
+
+  // Deletes the plugin's copies, helpers and marker; the user's own layer is only un-hidden,
+  // and only when no other route is still sending it.
   function removeTraveller(map, groupId) {
     var d = userData(groupId, TRAVELLER_KEY);
     if (!d) return false;
     (d.legs || []).forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (x) { if (x && layerThere(x)) api.deleteLayer(x); }); });
     if (d.source && layerThere(d.source)) {
-      if (d.userSource) api.set(d.source, { hidden: false });
+      if (d.userSource) { if (!carriedElsewhere(groupId, d.source)) api.set(d.source, { hidden: false }); }
       else api.deleteLayer(d.source);
     }
     api.setUserData(groupId, TRAVELLER_KEY, null);
@@ -1084,8 +1102,13 @@ var GeoScene = (function () {
   // kind: "plane" | "arrow" | "dot" | "layer" (userLayerId then names the layer to send).
   // Replaces any traveller the route already had. Returns { routeName, replaced }.
   function addTraveller(map, groupId, kind, userLayerId) {
+    // Older Cavalry versions lack the calls a traveller is built from: say so plainly.
+    if (["setGenerator", "createEditable", "primitive", "setUserData"].some(function (n) { return typeof api[n] !== "function"; }) ||
+        typeof cavalry === "undefined" || !cavalry || typeof cavalry.Path !== "function") {
+      throw new Error("This version of Cavalry can't add travellers.");
+    }
     var info = routeLegs(map, groupId);
-    if (!info) throw new Error("Select a route (any part of it) first.");
+    if (!info || !info.legs.length) throw new Error("Select a route (any part of it) first.");
     if (kind === "layer" && (!userLayerId || !layerThere(userLayerId) || isMapPart(map, userLayerId))) throw new Error("Select the layer to send along the route first.");
     if (kind !== "layer" && !TRAVELLER_NAMES[kind]) throw new Error("Unknown traveller: " + kind);
     var replaced = removeTraveller(map, groupId);
@@ -1130,7 +1153,7 @@ var GeoScene = (function () {
       return { routeName: stripRoute(info.name), replaced: replaced };
     } catch (e) {
       for (var i = made.length - 1; i >= 0; i--) { try { if (layerThere(made[i])) api.deleteLayer(made[i]); } catch (e2) { /* already gone */ } }
-      if (kind === "layer" && userLayerId && layerThere(userLayerId)) { try { api.set(userLayerId, { hidden: false }); } catch (e3) { /* cosmetic */ } }
+      if (kind === "layer" && userLayerId && layerThere(userLayerId) && !carriedElsewhere(groupId, userLayerId)) { try { api.set(userLayerId, { hidden: false }); } catch (e3) { /* cosmetic */ } }
       throw e;
     } finally {
       if (previous && typeof api.select === "function") { try { api.select(previous); } catch (e4) { /* cosmetic */ } }
