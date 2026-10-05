@@ -25,7 +25,8 @@ var GeoControls = (function () {
   var STATE_ATTRS = {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
-    stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y]
+    stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
+    dup: ["hidden", "shapeScale.x", "shapeScale.y", "generator.calculateRotations"], marker: [FILL]
   };
   var SEP = " · ";
 
@@ -61,6 +62,17 @@ var GeoControls = (function () {
     // A second use of a name gets " 2", " 3"...; layers, routes and data sets are counted apart.
     function numberer() { var used = {}; return function (name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }; }
     var layerName = numberer(), routeName = numberer(), setName = numberer();
+    // A route's travellers (copies riding its legs): shared hide, size, colour (a plugin marker only) and facing.
+    function travellerRows(routeId, n) {
+      (model.travellers || []).filter(function (t) { return t.routeId === routeId; }).forEach(function (t) {
+        var k = "trav:" + routeId + ":", size = [];
+        t.dups.forEach(function (d) { size.push({ m: d, attr: "shapeScale.x" }, { m: d, attr: "shapeScale.y" }); });
+        value(k + "hide", "bool", n + "Traveller hide", t.dups, "hidden");
+        valueTargets(k + "size", "double", n + "Traveller size", size);
+        if (t.marker) value(k + "color", "color", n + "Traveller colour", [t.marker], FILL);
+        value(k + "face", "bool", n + "Traveller faces direction", t.dups, "generator.calculateRotations");
+      });
+    }
 
     var c = model.camera;
     if (c) {
@@ -112,6 +124,7 @@ var GeoControls = (function () {
         direct(leg.id, "stroke.trimEnd", n + "Leg " + (leg.number || i + 1) + " draw on %");
         out.trim.push(leg.id);
       });
+      travellerRows(r.id, n);
     });
     (model.newRoutes || []).forEach(function (r) {
       var n = routeName(r.name) + SEP, k = "route:" + r.id + ":", handles = [];
@@ -131,6 +144,7 @@ var GeoControls = (function () {
         value(lk + "endX", "double", ln + "end handle X", [leg.end], H_X);
         value(lk + "endY", "double", ln + "end handle Y", [leg.end], H_Y);
       });
+      travellerRows(r.id, n);
     });
     var data = model.data || {};
     if (data.year && data.year.length) value("data:year", "double", "Data" + SEP + "Year", data.year, YEAR);
@@ -163,6 +177,7 @@ var GeoControls = (function () {
     (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); });
     (model.stops || []).forEach(add);
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); });
+    (model.travellers || []).forEach(function (t) { add(t.marker); (t.dups || []).forEach(add); });
     var data = model.data || {};
     (data.year || []).forEach(add);
     (data.sets || []).forEach(function (s) { add(s.regions); add(s.bubbles); add(s.labels); });

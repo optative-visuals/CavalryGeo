@@ -165,7 +165,7 @@ var GeoControlPanel = (function () {
     var S = G.STATE_ATTRS, imagery = GeoScene.findImagery(map), skip = {}, routes = {}, sets = {};
     imagery.forEach(function (im) { skip[im.groupId] = true; });
     var order = sceneOrder(map.groupId, skip);
-    var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], data: { year: [], sets: [] }, imagery: [] };
+    var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], travellers: [], data: { year: [], sets: [] }, imagery: [] };
     GeoScene.findMapLayers(map).sort(order).forEach(function (l, i) {
       var c = l.meta.category;
       if (G.BASE.indexOf(c) >= 0 || c === "extract") {
@@ -201,6 +201,14 @@ var GeoControlPanel = (function () {
         model.stops.push({ id: s.circle, state: linkState(s.circle, S.stop) });
         if (s.label && (typeof api.layerExists !== "function" || api.layerExists(s.label))) routeLabels.push(s.label);
       });
+    });
+    GeoScene.findTravellers(map).forEach(function (t) {
+      var marker = null;
+      if (!t.userSource) {
+        if (typeof api.layerExists === "function" && !api.layerExists(t.source)) return; // the plugin's marker is gone
+        marker = { id: t.source, state: linkState(t.source, S.marker) };
+      }
+      model.travellers.push({ routeId: t.groupId, marker: marker, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);

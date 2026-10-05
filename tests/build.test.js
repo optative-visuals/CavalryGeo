@@ -5599,3 +5599,15 @@ test("travellers: stacking the copies is best-effort — without moveBackward th
     assert.equal(api.getParent(l.dup), r.groupId);
   });
 });
+
+test("controls: a traveller gets its rows and one Size drives every copy", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  context.GeoScene.addTraveller(map, r.groupId, "plane");
+  const s = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, s.componentId));
+  ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller colour", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
+  const size = slotsOf(api, s.valuesId)["trav:" + r.groupId + ":size"];
+  travData(api, r.groupId).legs.forEach((l) => ["shapeScale.x", "shapeScale.y"].forEach((a) => assert.equal(api.getInConnection(l.dup, a), s.valuesId + "." + size)));
+});
