@@ -228,3 +228,29 @@ test("new routes: an old-style route and a new one share the route name numberin
   assert.deepEqual(G.STATE_ATTRS.newLeg, ["stroke.strokeColor", "stroke.width"]);
   assert.deepEqual(G.STATE_ATTRS.handle, ["array.8", "array.9", "array.10", "array.11", "array.12", "array.13"]);
 });
+
+test("travellers: hide, size, colour (plugin markers) and faces direction after the route's rows", () => {
+  const leg = { id: "n1", number: 1, state: {}, start: { id: "n1s", state: {} }, end: { id: "n1e", state: {} } };
+  const p = G.plan(model({
+    newRoutes: [{ id: "rg", name: "A → B", legs: [leg] }],
+    travellers: [{ routeId: "rg", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }, { id: "d2", state: {} }] }]
+  }));
+  const L = labels(p);
+  const i = L.indexOf("A → B · Traveller hide");
+  assert.ok(i > L.indexOf("A → B · Leg 1 end handle Y"));
+  assert.deepEqual(L.slice(i, i + 4), ["A → B · Traveller hide", "A → B · Traveller size", "A → B · Traveller colour", "A → B · Traveller faces direction"]);
+  assert.deepEqual(row(p, "A → B · Traveller size").link.map((t) => t.layer + "." + t.attr), ["sc.array.0"], "one target: the scale helper's size input");
+  assert.equal(row(p, "A → B · Traveller size").key, "trav:rg:size");
+  assert.deepEqual(G.STATE_ATTRS.travellerScale, ["array.0"]);
+  assert.deepEqual(G.STATE_ATTRS.dup, ["hidden", "generator.calculateRotations"]);
+  assert.equal(row(p, "A → B · Traveller hide").key, "trav:rg:hide");
+  assert.deepEqual(row(p, "A → B · Traveller colour").link, [{ layer: "mk", attr: "material.materialColor" }]);
+  assert.equal(row(p, "A → B · Traveller faces direction").type, "bool");
+  assert.deepEqual(row(p, "A → B · Traveller faces direction").link.map((t) => t.attr), ["generator.calculateRotations", "generator.calculateRotations"]);
+  const own = G.plan(model({ routes: [{ id: "old", name: "C → D", legs: [{ id: "o1", number: 1, state: {} }] }], travellers: [{ routeId: "old", marker: null, scale: null, dups: [{ id: "d9", state: {} }] }] }));
+  assert.ok(labels(own).indexOf("C → D · Traveller size") < 0, "no scale helper, no size row");
+  assert.ok(labels(own).indexOf("C → D · Traveller colour") < 0, "no colour row for your own layer");
+  assert.ok(labels(own).indexOf("C → D · Traveller hide") > labels(own).indexOf("C → D · Leg 1 draw on %"));
+  const tids = Object.keys(G.ids(model({ travellers: [{ routeId: "x", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }] }] })));
+  assert.ok(tids.indexOf("d1") >= 0 && tids.indexOf("sc") >= 0);
+});

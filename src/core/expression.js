@@ -145,15 +145,39 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
   }
 
+  // Route travellers: a leg's copy sits at the tip of its draw-on (Cavalry wraps 100 % back
+  // to the start, so stop just short) and only shows on the leg currently drawing.
+  var TRAVELLER_TIP_INPUTS = [["drawOn", 100]];
+  function travellerTipExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(TRAVELLER_TIP_INPUTS) + "Math.max(0, Math.min(_i0, 99.9));\n";
+  }
+  // The copy's own size: the user's Traveller size times the source layer's scale (a Duplicator
+  // copies geometry but ignores the source layer's own scale), as the [x, y] the copies take.
+  var TRAVELLER_SCALE_INPUTS = [["size", 1], ["sourceScaleX", 1], ["sourceScaleY", 1]];
+  function travellerScaleExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(TRAVELLER_SCALE_INPUTS) + "[_i0 * _i1, _i0 * _i2];\n";
+  }
+  function travellerShowInputs(laterCount) {
+    var inputs = [["drawOn", 100], ["legOpacity", 100]];
+    for (var k = 1; k <= laterCount; k++) inputs.push(["later" + k, 0]);
+    return inputs;
+  }
+  function travellerShowExpression(meta, laterCount) {
+    var cond = "_i0 > 0";
+    for (var k = 0; k < laterCount; k++) cond += " && _i" + (k + 2) + " <= 0";
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(travellerShowInputs(laterCount)) + "((" + cond + ") ? _i1 : 0);\n";
+  }
+
   return {
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
     REGION_INPUTS: REGION_INPUTS, BUBBLE_INPUTS: BUBBLE_INPUTS, VALUE_LABEL_INPUTS: VALUE_LABEL_INPUTS,
     LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS,
-    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, inputIndex: inputIndex,
+    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
     routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression,
+    travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,
     legendExpression: legendExpression, bubbleLegendExpression: bubbleLegendExpression, replaceData: replaceData
   };

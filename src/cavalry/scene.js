@@ -949,10 +949,235 @@ var GeoScene = (function () {
     return id;
   }
 
+  // ---- Route travellers ---------------------------------------------------------------
+  // A traveller is one marker (a plugin shape or the user's own layer) shown by a one-copy
+  // path-distribution duplicator per leg. Per leg, a "tip" utility turns the leg's draw-on
+  // into the copy's travel and a "show" utility fades the copy in while its leg is drawing
+  // and keeps it visible until a later leg takes over. The marker itself is hidden by Cavalry.
+  // A Duplicator ignores its source layer's own scale and rotation, so one "scale" helper
+  // (Traveller size x the source's scale) and the source's rotation are wired into every copy.
+  var TRAVELLER_KEY = "geoTraveller", TRAVELLER_NAMES = { plane: "Traveller: Plane", arrow: "Traveller: Arrow", dot: "Traveller: Dot" };
+
+  function userData(id, key) {
+    try { return typeof api.hasUserDataKey === "function" && api.hasUserDataKey(id, key) ? api.getUserDataKey(id, key) : null; } catch (e) { return null; }
+  }
+
+  // True for the map group and anything in it, for the map's Controls (and what's inside it),
+  // and for a group that holds either of them.
+  function isMapPart(map, id) {
+    var controls = null;
+    for (var cur = id, guard = 0; cur && guard < 64; guard++) {
+      if (cur === map.groupId) return true;
+      if (userData(cur, "geoControls") === map.cameraId) return true;
+      cur = api.getParent(cur);
+    }
+    api.getCompLayers(false).forEach(function (l) { if (!controls && userData(l, "geoControls") === map.cameraId) controls = l; });
+    return [map.groupId, controls].some(function (start) {
+      for (var up = start ? api.getParent(start) : "", guard = 0; up && guard < 64; guard++) {
+        if (up === id) return true;
+        up = api.getParent(up);
+      }
+      return false;
+    });
+  }
+
+  // The legs of a route group in route order: new-style from its geoRoute data, old-style from
+  // the script legs inside the group. helpers is where traveller helpers go.
+  function routeLegs(map, groupId) {
+    var rec = findRoutes(map).filter(function (r) { return r.groupId === groupId; })[0];
+    if (rec) {
+      return {
+        name: rec.name, helpers: rec.helpers && layerThere(rec.helpers) ? rec.helpers : groupId,
+        legs: rec.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) { return { number: l.number, line: l.line }; })
+      };
+    }
+    var legs = findMapLayers(map).filter(function (l) { return l.meta.category === "route" && api.getParent(l.id) === groupId; });
+    if (!legs.length) return null;
+    legs = legs.map(function (l, i) { var m = /^Leg (\d+)/.exec(String(l.name)); return { number: m ? Number(m[1]) : 1000 + i, line: l.id }; })
+      .sort(function (a, b) { return a.number - b.number; });
+    legs.forEach(function (l, i) { if (l.number >= 1000) l.number = i + 1; });
+    return { name: String(api.getNiceName(groupId)), helpers: groupId, legs: legs };
+  }
+
+  function stripRoute(name) { name = String(name); return name.indexOf("Route: ") === 0 ? name.slice(7) : name; }
+
+  function findTravellers(map) {
+    var out = [];
+    if (typeof api.hasUserDataKey !== "function") return out;
+    api.getCompLayers(false).forEach(function (id) {
+      var d = userData(id, TRAVELLER_KEY);
+      if (!d || d.camera !== map.cameraId) return;
+      out.push({
+        groupId: id, kind: d.kind, source: d.source, userSource: !!d.userSource,
+        scale: d.scale && layerThere(d.scale) ? d.scale : null,
+        legs: (d.legs || []).filter(function (l) { return l.dup && layerThere(l.dup); })
+      });
+    });
+    return out;
+  }
+
+  // The route group that the first of ids belongs to, or null. A new-style route owns its group,
+  // helpers group, stops and legs and their helpers; a traveller's copies, helpers and plugin
+  // marker belong to their route; an old-style route is a group holding script legs, and owns
+  // whatever sits inside it. The map group and its own parts never count.
+  function routeOfSelection(map, ids) {
+    var owner = {}, oldGroups = {};
+    function claim(group, parts) { parts.forEach(function (p) { if (p && !owner[p]) owner[p] = group; }); }
+    findRoutes(map).forEach(function (r) {
+      claim(r.groupId, [r.groupId, r.helpers]);
+      r.stops.forEach(function (s) { claim(r.groupId, [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint]); });
+      r.legs.forEach(function (l) { claim(r.groupId, [l.line, l.startHandle, l.endHandle, l.fade]); });
+    });
+    findTravellers(map).forEach(function (t) {
+      t.legs.forEach(function (l) { claim(t.groupId, [l.dup, l.tip, l.show]); });
+      claim(t.groupId, [t.scale]);
+      if (!t.userSource) claim(t.groupId, [t.source]);
+    });
+    findMapLayers(map).forEach(function (l) {
+      var g = l.meta.category === "route" ? api.getParent(l.id) : "";
+      if (g && g !== map.groupId) oldGroups[g] = true;
+    });
+    for (var i = 0; i < (ids || []).length; i++) {
+      if (owner[ids[i]]) return owner[ids[i]];
+      for (var cur = ids[i], guard = 0; cur && cur !== map.groupId && guard < 64; guard++) {
+        if (oldGroups[cur]) return cur;
+        cur = api.getParent(cur);
+      }
+    }
+    return null;
+  }
+
+  // Whether a route other than groupId (on any map) still sends this user layer along.
+  function carriedElsewhere(groupId, layerId) {
+    return api.getCompLayers(false).some(function (id) {
+      var d = id === groupId ? null : userData(id, TRAVELLER_KEY);
+      return !!d && d.userSource === true && d.source === layerId;
+    });
+  }
+
+  // Deletes the plugin's copies, helpers and marker; the user's own layer is only un-hidden,
+  // and only when no other route is still sending it.
+  function removeTraveller(map, groupId) {
+    var d = userData(groupId, TRAVELLER_KEY);
+    if (!d) return false;
+    (d.legs || []).forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (x) { if (x && layerThere(x)) api.deleteLayer(x); }); });
+    if (d.scale && layerThere(d.scale)) api.deleteLayer(d.scale);
+    if (d.source && layerThere(d.source)) {
+      if (d.userSource) { if (!carriedElsewhere(groupId, d.source)) api.set(d.source, { hidden: false }); }
+      else api.deleteLayer(d.source);
+    }
+    api.setUserData(groupId, TRAVELLER_KEY, null);
+    return true;
+  }
+
+  // The route's own line colour as "#rrggbb" (the default route green when it can't be read).
+  function routeColour(legs) {
+    var v = null;
+    try { v = api.get(legs[0].line, A.STROKE_COLOR_ATTR); } catch (e) { v = null; }
+    if (v && typeof v === "object" && v.r !== undefined) {
+      v = "#" + [v.r, v.g, v.b].map(function (n) { var s = Math.round(Number(n) || 0).toString(16); return s.length < 2 ? "0" + s : s; }).join("");
+    }
+    return typeof v === "string" && v ? v : STYLE.route.stroke;
+  }
+
+  function makeMarker(kind, colour, track) {
+    var id;
+    if (kind === "dot") {
+      id = track(api.primitive("ellipse", TRAVELLER_NAMES.dot));
+      setOne(id, "generator.radius", [6, 6]);
+    } else {
+      var path = new cavalry.Path(), pts = GeoMarkers.outline(kind);
+      pts.forEach(function (p, i) { if (i === 0) path.moveTo(p[0], p[1]); else path.lineTo(p[0], p[1]); });
+      path.close();
+      id = track(api.createEditable(path, TRAVELLER_NAMES[kind]));
+    }
+    applyStyle(id, { fill: colour });
+    return id;
+  }
+
+  // Steps a layer down its group until it sits directly above `below`.
+  function placeAbove(id, below) {
+    if (typeof api.select !== "function" || typeof api.moveBackward !== "function") return;
+    var parent = api.getParent(id);
+    var at = function (x) { return api.getChildren(parent).indexOf(x); };
+    api.select([id]);
+    for (var guard = api.getChildren(parent).length; guard > 0 && at(id) < at(below) - 1; guard--) api.moveBackward();
+  }
+
+  // kind: "plane" | "arrow" | "dot" | "layer" (userLayerId then names the layer to send).
+  // Replaces any traveller the route already had. Returns { routeName, replaced }.
+  function addTraveller(map, groupId, kind, userLayerId) {
+    // Older Cavalry versions lack the calls a traveller is built from: say so plainly.
+    if (["setGenerator", "createEditable", "primitive", "setUserData"].some(function (n) { return typeof api[n] !== "function"; }) ||
+        typeof cavalry === "undefined" || !cavalry || typeof cavalry.Path !== "function") {
+      throw new Error("This version of Cavalry can't add travellers.");
+    }
+    var info = routeLegs(map, groupId);
+    if (!info || !info.legs.length) throw new Error("Select a route (any part of it) first.");
+    if (kind === "layer" && (!userLayerId || !layerThere(userLayerId) || isMapPart(map, userLayerId))) throw new Error("Select the layer to send along the route first.");
+    if (kind !== "layer" && !TRAVELLER_NAMES[kind]) throw new Error("Unknown traveller: " + kind);
+    var replaced = removeTraveller(map, groupId);
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, made = [], previous = null;
+    function track(id) { made.push(id); return id; }
+    try { previous = api.getSelection(); } catch (e) { previous = null; }
+    try {
+      var source = kind === "layer" ? userLayerId : makeMarker(kind, routeColour(info.legs), track);
+      if (kind !== "layer") { api.parent(source, info.helpers); api.set(source, identityTransform()); }
+      var meta = function (c) { return { camera: map.cameraId, category: c }; };
+      var scale = track(api.create(A.CAMERA_LAYER_TYPE, "Traveller scale"));
+      addInputs(scale, CA, E.TRAVELLER_SCALE_INPUTS);
+      setOne(scale, A.CAMERA_EXPR_ATTR, E.travellerScaleExpression(meta("travellerScale")));
+      api.connect(source, "scale.x", scale, CA + ".1", true);
+      api.connect(source, "scale.y", scale, CA + ".2", true);
+      api.parent(scale, info.helpers);
+      var legs = info.legs.map(function (leg, i) {
+        var dup = track(api.create("duplicator", "Leg " + leg.number + " traveller"));
+        api.setGenerator(dup, "generator", "pathDistribution");
+        api.set(dup, { "generator.count": 1, "generator.calculateRotations": true });
+        api.connect(leg.line, "id", dup, "generator.inputShape", true);
+        api.connect(source, "id", dup, "shapes", true);
+        api.connect(scale, A.DRIVER_OUTPUT_ATTR, dup, "shapeScale", true);
+        api.connect(source, "rotation.z", dup, "shapeRotation", true);
+        var tip = track(api.create(A.CAMERA_LAYER_TYPE, "Leg " + leg.number + " traveller tip"));
+        addInputs(tip, CA, E.TRAVELLER_TIP_INPUTS);
+        setOne(tip, A.CAMERA_EXPR_ATTR, E.travellerTipExpression(meta("travellerTip")));
+        api.connect(leg.line, "stroke.trimEnd", tip, CA + ".0", true);
+        api.connect(tip, A.DRIVER_OUTPUT_ATTR, dup, "generator.travel", true);
+        var later = info.legs.slice(i + 1);
+        var show = track(api.create(A.CAMERA_LAYER_TYPE, "Leg " + leg.number + " traveller show"));
+        addInputs(show, CA, E.travellerShowInputs(later.length));
+        setOne(show, A.CAMERA_EXPR_ATTR, E.travellerShowExpression(meta("travellerShow"), later.length));
+        api.connect(leg.line, "stroke.trimEnd", show, CA + ".0", true);
+        api.connect(leg.line, "opacity", show, CA + ".1", true);
+        later.forEach(function (m, k) { api.connect(m.line, "stroke.trimEnd", show, CA + "." + (k + 2), true); });
+        api.connect(show, A.DRIVER_OUTPUT_ATTR, dup, "opacity", true);
+        // Helpers are utilities (no transform to reset); the duplicator is reset after parenting.
+        api.parent(tip, info.helpers); api.parent(show, info.helpers);
+        api.parent(dup, groupId); api.set(dup, identityTransform());
+        return { number: leg.number, line: leg.line, dup: dup, tip: tip, show: show };
+      });
+      // Copies sit directly above the topmost leg, so the stops and pins stay above them.
+      var order = api.getChildren(groupId);
+      var top = info.legs.map(function (l) { return l.line; }).filter(function (id) { return order.indexOf(id) >= 0; })
+        .sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); })[0];
+      // Stacking is cosmetic (like restackBaseLayers): a failure here never undoes the traveller.
+      if (top) { try { legs.forEach(function (l) { placeAbove(l.dup, top); }); } catch (e5) { /* left on top of the group */ } }
+      api.setUserData(groupId, TRAVELLER_KEY, { camera: map.cameraId, kind: kind, source: source, userSource: kind === "layer", scale: scale, legs: legs });
+      return { routeName: stripRoute(info.name), replaced: replaced };
+    } catch (e) {
+      for (var i = made.length - 1; i >= 0; i--) { try { if (layerThere(made[i])) api.deleteLayer(made[i]); } catch (e2) { /* already gone */ } }
+      if (kind === "layer" && userLayerId && layerThere(userLayerId) && !carriedElsewhere(groupId, userLayerId)) { try { api.set(userLayerId, { hidden: false }); } catch (e3) { /* cosmetic */ } }
+      throw e;
+    } finally {
+      if (previous && typeof api.select === "function") { try { api.select(previous); } catch (e4) { /* cosmetic */ } }
+    }
+  }
+
   return {
     STYLE: STYLE, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
     compSize: compSize, createMapLayer: createMapLayer, findMapLayers: findMapLayers, readLayerData: readLayerData, readLayerMeta: layerMeta,
     addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, pinStops: pinStops,
+    isMapPart: isMapPart, routeOfSelection: routeOfSelection, addTraveller: addTraveller, removeTraveller: removeTraveller, findTravellers: findTravellers,
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,

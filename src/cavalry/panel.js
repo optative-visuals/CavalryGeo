@@ -511,6 +511,12 @@ bakeBtn.onClick = guard(function () {
         r.stops.forEach(function (s) { [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint].forEach(function (p) { if (p) routeParts[p] = true; }); });
         r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade].forEach(function (p) { if (p) routeParts[p] = true; }); });
       });
+      // A traveller's copies, helpers and plugin marker are route parts too (your own layer is not).
+      GeoScene.findTravellers(m).forEach(function (t) {
+        t.legs.forEach(function (l) { [l.dup, l.tip, l.show].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        if (t.scale) routeParts[t.scale] = true;
+        if (!t.userSource && t.source) routeParts[t.source] = true;
+      });
     });
   } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
@@ -669,8 +675,20 @@ var removeStopBtn = GeoStyle.button("Remove selected");
 var clearStopsBtn = GeoStyle.button("Clear");
 var arcField = new ui.NumericField(30); arcField.setType(1); arcField.setMin(0); arcField.setMax(100);
 var labelsAtStops = new ui.Checkbox(false);
+var TRAVELLER_KINDS = [null, "plane", "arrow", "dot", "layer"];
+var travellerPicker = new ui.DropDown();
+["None", "Plane", "Arrow", "Dot", "Selected layer"].forEach(function (s) { travellerPicker.addEntry(s); });
+var addTravellerBtn = GeoStyle.button("Add to route");
 var createRouteBtn = GeoStyle.primaryButton("Create route");
 var pinStopsBtn = GeoStyle.button("Pin here");
+
+// The selected layer to send along a route: the first selected layer that isn't part of the map.
+function travellerLayer(map) {
+  var sel = [];
+  try { sel = api.getSelection() || []; } catch (e) { sel = []; }
+  for (var i = 0; i < sel.length; i++) if (!GeoScene.isMapPart(map, sel[i])) return sel[i];
+  throw new Error("Select the layer to send along the route first.");
+}
 
 function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
@@ -708,10 +726,38 @@ clearStopsBtn.onClick = guard(function () { stops = []; refreshStops(); say("Sto
 createRouteBtn.onClick = guard(function () {
   var map = currentMap();
   if (stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
+  // Decide the traveller first, so a bad selection refuses before anything is built.
+  var kind = TRAVELLER_KINDS[travellerPicker.getValue()], layer = kind === "layer" ? travellerLayer(map) : null;
   var r = GeoScene.createRoute(map, stops, { arc: arcField.getValue(), labels: labelsAtStops.getValue() });
+  var travNote = "";
+  if (kind) {
+    try { GeoScene.addTraveller(map, r.groupId, kind, layer); }
+    catch (e) { travNote = " The traveller couldn't be added: " + (e && e.message ? e.message : e) + "."; }
+  }
   var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls."
     : " This Cavalry can't make Bézier lines, so it uses the older route style; animate each leg's draw on % in the map's Controls.";
-  say("Route created: " + r.legs.length + " leg(s)." + how + syncControls(map));
+  say("Route created: " + r.legs.length + " leg(s)." + how + travNote + syncControls(map));
+});
+addTravellerBtn.onClick = guard(function () {
+  var map = currentMap(), sel = [];
+  try { sel = api.getSelection() || []; } catch (e) { sel = []; }
+  var groupId = GeoScene.routeOfSelection(map, sel);
+  if (!groupId) throw new Error("Select a route (any part of it) first.");
+  var kind = TRAVELLER_KINDS[travellerPicker.getValue()], name = String(api.getNiceName(groupId)).replace(/^Route: /, "");
+  if (!kind) {
+    if (!GeoScene.removeTraveller(map, groupId)) throw new Error("This route has no traveller to remove.");
+    say("Traveller removed from " + name + "." + syncControls(map));
+    return;
+  }
+  var had = GeoScene.findTravellers(map).some(function (t) { return t.groupId === groupId; });
+  var r;
+  try { r = GeoScene.addTraveller(map, groupId, kind, kind === "layer" ? travellerLayer(map) : null); }
+  catch (e) {
+    // The old traveller is gone before the new one is built, so bring the Controls up to date first.
+    if (had) syncControls(map);
+    throw e;
+  }
+  say("Traveller " + (r.replaced ? "replaced on " : "added to ") + r.routeName + "." + syncControls(map));
 });
 pinStopsBtn.onClick = guard(function () {
   var map = currentMap(), sel = [];
@@ -754,6 +800,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Style"),
     row(new ui.Label("Arc height %"), arcField),
     row(labelsAtStops, new ui.Label("Labels at stops")),
+    row(new ui.Label("Traveller"), travellerPicker, addTravellerBtn),
     createRouteBtn,
     GeoStyle.note("Drag stops in the viewer, then Pin here to keep them there."),
     pinStopsBtn

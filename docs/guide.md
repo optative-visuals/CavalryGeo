@@ -175,6 +175,19 @@ cache come after them).
 - To draw a leg on, animate its `<route> · Leg N draw on %` row (0 → 100) in the map's Controls.
   For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
   route leg by leg. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
+- **Travellers.** Pick a **Traveller** (Plane, Arrow, Dot or Selected layer) before **Create route**
+  and it rides the route, leg by leg, sitting at the tip of each leg as it draws on and facing the
+  way the leg is heading. To add one to a route you already have, pick a Traveller, select any
+  part of the route in the viewer and press **Add to route**; adding again replaces it, and
+  **None** + **Add to route** removes it. **Selected layer** sends your own layer along the
+  route: select it (as well as the route part, when adding to an existing route). Your layer is
+  kept, and Cavalry hides it while the copies ride; choose None to bring it back, visible. If you
+  delete a route that carried your own layer, Cavalry leaves that layer hidden: un-hide it
+  yourself (or pick None and press **Add to route** before deleting the route). Your layer
+  keeps its own scale and rotation; Traveller size multiplies it. With Faces direction on,
+  your layer's rotation is added to the direction of travel: rotate an icon drawn pointing up
+  by −90° so it points along the route. In the map's Controls the route gets four rows: `Traveller hide`, `Traveller size`,
+  `Traveller colour` (for the Plane, Arrow and Dot only) and `Traveller faces direction`.
 - On a globe, a stop on the far side of the Earth fades out with its legs, and a long leg is a
   simple curve rather than a bow. Routes made by earlier versions keep working as before.
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
