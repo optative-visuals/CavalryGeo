@@ -132,7 +132,7 @@ function makeFakeApi() {
       var o = ensure(id);
       Object.keys(obj).forEach(function (k) {
         // Like Cavalry: a JavaScript Utility has no transform attributes.
-        if (/^javaScript#/.test(id) && /^(position|rotation|scale)/.test(k)) throw new Error("Attribute not found: " + k);
+        if (/^javaScript#/.test(id) && /^(position|rotation|scale)\b/.test(k)) throw new Error("Attribute not found: " + k);
         var m = PROMOTED_SLOT.exec(k);
         if (m && promoted[id] && promoted[id][Number(m[1])]) { promoted[id][Number(m[1])][m[2]] = obj[k]; return; }
         o[k] = obj[k];
@@ -4704,6 +4704,19 @@ test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores ot
   assert.deepEqual(plain(context.GeoScene.pinStops(map, [map.cameraId])), { pinned: 0, offGlobe: [] });
 });
 
+test("routes: Pin here treats a stop whose camera inputs aren't numbers as off the map's edge, and writes no NaN", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[0];
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.set(s.position, { "array.0": 0, "array.1": 0, "array.2": undefined, "array.3": 0, "array.4": 0 });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [s.circle])), { pinned: 0, offGlobe: ["A"] });
+  assert.equal(api.get(s.position, "array.5"), 0, "the stop keeps its place");
+  assert.deepEqual(plain(api.get(s.circle, "position")), { x: 10, y: 10, z: 0 }, "and its drag");
+});
+
 test("controls: a new route gets stop, curve and hand rows; values drive every handle", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
@@ -4748,6 +4761,26 @@ test("Create route passes Arc height % and makes a new-style route", () => {
   assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\. Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls\./);
 });
 
+test("Bake selected layers: a new route's legs and stops are skipped, with a message of their own", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  api.select([d.legs[0].line]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
+  api.select([d.stops[0].circle, d.stops[0].holder, d.stops[0].label, d.legs[0].startHandle, d.helpers]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Error: Route legs and stops are already Cavalry shapes/);
+  const countries = context.GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, d.legs[0].line, d.stops[1].circle]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Skipped 2 route part\(s\) — they're already Cavalry shapes\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
+});
+
 test("Pin here: needs a selected stop, then pins it", () => {
   const { context, api } = buildSandbox();
   context.pinStopsBtn.onClick();
@@ -4767,5 +4800,5 @@ test("Pin here: needs a selected stop, then pins it", () => {
   api.set(st.position, { "array.4": 2, "array.2": 2 });
   api.set(st.circle, { position: { x: 100000, y: 0, z: 0 } });
   context.pinStopsBtn.onClick();
-  assert.match(context.statusLabel.getText(), /^Pinned 0 stop\(s\)\. A is past the globe's edge, so it kept its place\./);
+  assert.match(context.statusLabel.getText(), /^Pinned 0 stop\(s\)\. A is past the map's edge, so it kept its place\./);
 });

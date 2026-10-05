@@ -340,6 +340,10 @@ var GeoScene = (function () {
   function xy(v) { return v && v.x !== undefined ? [Number(v.x) || 0, Number(v.y) || 0] : [Number(v && v[0]) || 0, Number(v && v[1]) || 0]; }
 
   // ids: the user's selection. A stop counts when its circle, holder or label is selected.
+  // Its dropped spot becomes its new place (the longitude and latitude on its position
+  // driver) and the drag is zeroed. A stop whose spot is past the map's edge (the far side
+  // of a globe, outside the Equal Earth outline), or whose camera inputs can't be read as
+  // numbers, keeps its place and is listed in offGlobe.
   function pinStops(map, ids) {
     var want = {}, res = { pinned: 0, offGlobe: [] };
     (ids || []).forEach(function (id) { want[id] = true; });
@@ -349,8 +353,9 @@ var GeoScene = (function () {
         var h = xy(api.get(s.holder, "position")), c = xy(api.get(s.circle, "position"));
         function v(i) { return Number(api.get(s.position, A.CAMERA_ARRAY_ATTR + "." + i)); }
         var cam = { lat: v(0), lon: v(1), zoom: v(2), rotation: v(3), projection: Math.round(v(4)) };
-        var ll = GeoProjection.unproject(cam, h[0] + c[0], h[1] + c[1]);
-        if (!ll) { res.offGlobe.push(s.name); return; }
+        var ll = [cam.lat, cam.lon, cam.zoom, cam.rotation, cam.projection].every(isFinite)
+          ? GeoProjection.unproject(cam, h[0] + c[0], h[1] + c[1]) : null;
+        if (!ll || !isFinite(ll.lon) || !isFinite(ll.lat)) { res.offGlobe.push(s.name); return; }
         var o = {};
         o[A.CAMERA_ARRAY_ATTR + ".5"] = ll.lon;
         o[A.CAMERA_ARRAY_ATTR + ".6"] = ll.lat;

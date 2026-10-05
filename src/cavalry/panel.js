@@ -435,8 +435,21 @@ extractBtn.onClick = guard(function () {
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, other = 0;
+  var baked = 0, skippedData = 0, skippedRoute = 0, other = 0;
+  // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
+  // so its parts are skipped with a message of their own rather than counted as "other".
+  var routeParts = {};
+  try {
+    GeoScene.findMaps().forEach(function (m) {
+      GeoScene.findRoutes(m).forEach(function (r) {
+        if (r.helpers) routeParts[r.helpers] = true;
+        r.stops.forEach(function (s) { [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade].forEach(function (p) { if (p) routeParts[p] = true; }); });
+      });
+    });
+  } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
+    if (routeParts[id]) { skippedRoute++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "data") { skippedData++; return; }
@@ -445,7 +458,9 @@ bakeBtn.onClick = guard(function () {
   });
 
   if (baked === 0) {
-    if (skippedData && !other) {
+    if (skippedRoute) {
+      throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
+    } else if (skippedData && !other) {
       throw new Error("Data layers can't be baked yet. Select map layers such as \"world: Countries\" instead.");
     } else {
       throw new Error("Select Cavalry Geo map layers to bake (groups and the camera can't be baked).");
@@ -454,6 +469,7 @@ bakeBtn.onClick = guard(function () {
 
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
+  if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
   if (!newMapSelected()) msg += syncControls(currentMap());
@@ -622,7 +638,7 @@ pinStopsBtn.onClick = guard(function () {
   var r = GeoScene.pinStops(map, sel);
   if (!r.pinned && !r.offGlobe.length) throw new Error("Select one or more route stops (the circles) first.");
   var msg = "Pinned " + r.pinned + " stop(s).";
-  if (r.offGlobe.length) msg += " " + r.offGlobe.join(", ") + (r.offGlobe.length > 1 ? " are" : " is") + " past the globe's edge, so " + (r.offGlobe.length > 1 ? "they" : "it") + " kept " + (r.offGlobe.length > 1 ? "their places." : "its place.");
+  if (r.offGlobe.length) msg += " " + r.offGlobe.join(", ") + (r.offGlobe.length > 1 ? " are" : " is") + " past the map's edge, so " + (r.offGlobe.length > 1 ? "they" : "it") + " kept " + (r.offGlobe.length > 1 ? "their places." : "its place.");
   say(msg + syncControls(map));
 });
 
