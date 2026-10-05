@@ -255,15 +255,28 @@ var GeoNet = (function () {
   }
 
   function settingsFile() { return assetsDir() + "/settings.json"; }
-  function loadSettings() {
+  function plainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+  function readSettingsRaw() {
     var f = settingsFile();
-    if (!api.filePathExists(f)) return {};
-    try { return JSON.parse(api.readFromFile(f)) || {}; } catch (e) { return {}; }
+    if (!api.filePathExists(f)) return null;
+    try { return String(api.readFromFile(f)); } catch (e) { return null; }
+  }
+  function parseSettings(raw) {
+    try { var v = JSON.parse(raw); return plainObject(v) ? v : null; } catch (e) { return null; }
+  }
+  function loadSettings() {
+    var raw = readSettingsRaw();
+    return (raw === null ? null : parseSettings(raw)) || {};
   }
   function saveSettings(obj) { ensureDir(assetsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
   // Merges patch's keys into settings.json, keeping every other key.
   function updateSettings(patch) {
-    var s = loadSettings();
+    var raw = readSettingsRaw(), s = raw === null ? {} : parseSettings(raw);
+    if (!s) {
+      // The file is there but unreadable: keep a copy before it is replaced.
+      s = {};
+      if (raw !== null && raw !== "") { try { ensureDir(assetsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
+    }
     Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
     saveSettings(s);
     return s;

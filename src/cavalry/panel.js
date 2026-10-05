@@ -91,7 +91,7 @@ var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 // Map styles: picked here for the next new map, applied to the picked map, saved from it.
 // settings.json keeps the picked name ("mapStyle") and the saved styles ("mapStyles"); the
-// imagery settings already own "style".
+// imagery settings already own "style". (GeoStyle = the panel's widget kit; GeoStyles = map colour styles.)
 var mapStylePicker = new ui.DropDown();
 var applyStyleBtn = GeoStyle.button("Apply to map");
 var styleNameField = new ui.LineEdit(); styleNameField.setPlaceholder("Name for a new style");
@@ -101,14 +101,20 @@ var savedStyles = [];
 function styleList() { return GeoStyles.BUILT_IN.concat(savedStyles); }
 function pickedStyle() { return styleList()[mapStylePicker.getValue()] || GeoStyles.DARK; }
 // Lists the built-ins then the saved styles and picks `name` (Dark when it isn't listed).
+// Programmatic changes to the picker must not count as the user picking: refreshingStyles
+// makes onValueChanged ignore them.
+var refreshingStyles = false;
 function refreshStylePicker(name) {
   var list = styleList(), sel = 0;
-  mapStylePicker.clear();
-  list.forEach(function (s, i) {
-    mapStylePicker.addEntry(s.name);
-    if (typeof name === "string" && s.name.toLowerCase() === name.trim().toLowerCase()) sel = i;
-  });
-  mapStylePicker.setValue(sel);
+  refreshingStyles = true;
+  try {
+    mapStylePicker.clear();
+    list.forEach(function (s, i) {
+      mapStylePicker.addEntry(s.name);
+      if (typeof name === "string" && s.name.toLowerCase() === name.trim().toLowerCase()) sel = i;
+    });
+    mapStylePicker.setValue(sel);
+  } finally { refreshingStyles = false; }
 }
 function previewStyle() { if (preview.available()) preview.setColors(GeoStyles.previewColors(pickedStyle())); }
 (function () {
@@ -331,6 +337,7 @@ createHereBtn.onClick = guard(function () {
 });
 
 mapStylePicker.onValueChanged = guard(function () {
+  if (refreshingStyles) return;
   GeoNet.updateSettings({ mapStyle: pickedStyle().name });
   previewStyle();
 });

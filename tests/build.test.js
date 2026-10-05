@@ -6163,7 +6163,111 @@ test("map styles: Apply sets a Controls-shared colour through its control value,
   assert.equal(api.get(c, "material.materialColor"), "#000000", "animated colour left alone");
   assert.equal(api.get(c, "stroke.strokeColor"), "#8b6b4a", "the rest of the layer restyled");
   assert.equal(r.skipped, 2);
-  assert.ok(b);
+  assert.equal(api.getInConnection(b, "material.materialColor"), sync.valuesId + "." + slot, "the second pin is driven by the same slot");
+});
+
+test("map styles: an animated Controls value shared by two pins is skipped once, and neither pin is written", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const a = G.addPin(map, "A", 0, 0), b = G.addPin(map, "B", 1, 1);
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  api.keyframe(sync.valuesId, 0, { [slot]: "#000000" });
+  const before = [api.get(a, "material.materialColor"), api.get(b, "material.materialColor")];
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(r.skipped, 1, "one animated value, counted once");
+  assert.equal(api.get(a, "material.materialColor"), before[0], "pin A not written");
+  assert.equal(api.get(b, "material.materialColor"), before[1], "pin B not written");
+  assert.equal(api.get(sync.valuesId, slot), "#000000", "the animated value not written");
+});
+
+test("map styles: a Controls value wired from another layer is skipped and not written", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  G.addPin(map, "A", 0, 0);
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  const other = api.create("javaScript", "elsewhere");
+  api.connect(other, "array.0", sync.valuesId, slot);
+  const before = api.get(sync.valuesId, slot);
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(r.skipped, 1);
+  assert.equal(api.get(sync.valuesId, slot), before, "the connected value not written");
+});
+
+test("map styles: Apply recolours a plugin traveller marker through the Controls Traveller colour value", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const route = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30 });
+  G.addTraveller(map, route.groupId, "dot");
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["trav:" + route.groupId + ":color"];
+  assert.ok(slot, "the traveller colour is a Controls value");
+  const marker = plain(api.getUserDataKey(route.groupId, "geoTraveller")).source;
+  assert.equal(api.getInConnection(marker, "material.materialColor"), sync.valuesId + "." + slot);
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(r.skipped, 0);
+  assert.equal(api.get(sync.valuesId, slot), "#ffffff");
+});
+
+test("map styles: Extract on a Vintage map draws in Vintage's extract colour", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Vintage");
+  const enc = context.GeoCodec.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} }] });
+  const id = G.extract(map, { meta: { category: "countries" } }, enc, { name: "France", indices: [0] });
+  assert.equal(api.get(id, "material.materialColor"), "#c76b29");
+});
+
+test("map styles: the preview opens in the style remembered in settings.json", () => {
+  const { context } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  assert.equal(context.preview._draw._background, "#111111");
+});
+
+test("settings: a settings.json that won't parse is copied to settings.json.bak before it is replaced", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = "{not json"; } });
+  pickStyle(context, "Vintage");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], "{not json");
+  assert.equal(settingsOf(api).mapStyle, "Vintage");
+});
+
+test("settings: a settings.json holding an array or a number is treated as empty, and backed up when replaced", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = "[1,2]"; } });
+  assert.deepEqual(plain(context.GeoNet.loadSettings()), {});
+  pickStyle(context, "Light");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], "[1,2]");
+  assert.equal(settingsOf(api).mapStyle, "Light");
+});
+
+test("settings: a good settings.json is never backed up", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ apiKey: "k" }); } });
+  pickStyle(context, "Light");
+  assert.equal(api._files[SETTINGS_FILE + ".bak"], undefined);
+  assert.equal(settingsOf(api).apiKey, "k");
+});
+
+test("Map tab Style: refilling the picker never counts as picking, even if the dropdown fires on programmatic changes", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const picker = context.mapStylePicker;
+  ["clear", "addEntry", "setValue"].forEach((m) => {
+    const orig = picker[m];
+    picker[m] = function () { const r = orig.apply(this, arguments); if (picker.onValueChanged) picker.onValueChanged(); return r; };
+  });
+  const written = [], paintedAs = [], realUpdate = context.GeoNet.updateSettings, realColors = context.preview.setColors;
+  context.GeoNet.updateSettings = function (patch) { if (patch && patch.mapStyle) written.push(patch.mapStyle); return realUpdate.apply(this, arguments); };
+  context.preview.setColors = function (c) { paintedAs.push(c.water); return realColors.apply(this, arguments); };
+  api.set(oceanOf(api, context.currentMap()), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(written, ["Mine"], "only the saved name was written, never a half-filled picker's value");
+  assert.deepEqual(paintedAs, ["#010203"], "the preview was painted once, in the saved style");
+  assert.equal(settingsOf(api).mapStyle, "Mine");
+  assert.equal(context.preview._draw._background, "#010203");
+  assert.equal(picker._entries[picker.getValue()], "Mine");
 });
 
 test("map styles: Save reads a map's colours back (through Controls values) and Apply on another map gives the same look", () => {

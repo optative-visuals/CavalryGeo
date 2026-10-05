@@ -1206,15 +1206,27 @@ var GeoScene = (function () {
 
   function keyed(id, attr) { try { return (api.getKeyframeTimes(id, attr) || []).length > 0; } catch (e) { return false; } }
 
-  // Where a target's value lives: { layer, attr } on the layer itself, or on the Controls values
-  // input that drives it; null when it is animated or wired to anything else.
-  function styleSlot(map, t) {
+  function hasIn(id, attr) { try { return !!api.getInConnection(id, attr); } catch (e) { return false; } }
+
+  // What drives a target's attribute: { src, attr } when it is wired from this map's Controls
+  // values utility, { other: true } when it is wired to anything else, {} when it is not wired.
+  function drivenBy(map, t) {
     var from = "";
     try { from = String(api.getInConnection(t.layer, t.attr) || ""); } catch (e) { from = ""; }
-    if (!from) return keyed(t.layer, t.attr) ? null : { layer: t.layer, attr: t.attr };
-    var dot = from.indexOf("."), src = from.slice(0, dot), attr = from.slice(dot + 1);
-    if (dot <= 0 || userData(src, "geoValues") !== map.cameraId || keyed(src, attr)) return null;
-    return { layer: src, attr: attr };
+    if (!from) return {};
+    var dot = from.indexOf("."), src = dot > 0 ? from.slice(0, dot) : "";
+    if (src && userData(src, "geoValues") === map.cameraId) return { src: src, attr: from.slice(dot + 1) };
+    return { other: true };
+  }
+
+  // Where a target's value is written: { layer, attr } on the layer itself or on the Controls
+  // value that drives it; { skip: key } (the real attribute, so a value shared by N layers counts
+  // once) when it is animated or wired to anything else.
+  function styleSlot(map, t) {
+    var own = t.layer + "." + t.attr, d = drivenBy(map, t);
+    if (d.other) return { skip: own };
+    if (d.src) return keyed(d.src, d.attr) || hasIn(d.src, d.attr) ? { skip: d.src + "." + d.attr } : { layer: d.src, attr: d.attr };
+    return keyed(t.layer, t.attr) ? { skip: own } : { layer: t.layer, attr: t.attr };
   }
 
   function applyMapStyle(map, style) {
@@ -1222,7 +1234,7 @@ var GeoScene = (function () {
     var done = {}, skipped = {};
     GeoStyles.targets(styleParts(map)).forEach(function (t) {
       var slot = styleSlot(map, t);
-      if (!slot) { skipped[t.layer + "." + t.attr] = true; return; }
+      if (slot.skip) { skipped[slot.skip] = true; return; }
       var k = slot.layer + "." + slot.attr;
       if (done[k]) return;
       done[k] = true;
@@ -1235,10 +1247,8 @@ var GeoScene = (function () {
 
   function readMapStyle(map, name) {
     var readings = GeoStyles.targets(styleParts(map)).map(function (t) {
-      var from = "", value;
-      try { from = String(api.getInConnection(t.layer, t.attr) || ""); } catch (e) { from = ""; }
-      var dot = from.indexOf("."), src = dot > 0 ? from.slice(0, dot) : "";
-      try { value = src && userData(src, "geoValues") === map.cameraId ? api.get(src, from.slice(dot + 1)) : api.get(t.layer, t.attr); } catch (e) { value = null; }
+      var d = drivenBy(map, t), value;
+      try { value = d.src ? api.get(d.src, d.attr) : api.get(t.layer, t.attr); } catch (e) { value = null; }
       return { role: t.role, kind: t.kind, value: value };
     });
     return GeoStyles.fromReadings(name, readings, styleOf(map));

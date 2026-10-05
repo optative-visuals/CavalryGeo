@@ -54,7 +54,7 @@ version is out.
    **CavalryGeo_assets** folder straight into it.
 3. Open **Scripts → CavalryGeo**. No restart needed.
 
-To update, drag in the files from a newer release and replace the old ones.
+Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one. On a Mac, hold Option while dragging and choose Merge: Replace would delete your settings (keys, saved styles) and downloads.
 Tested with Cavalry on Windows and macOS.
 
 ## Quick start
