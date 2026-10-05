@@ -570,7 +570,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "−", "+", "Jump here", "Fly here", "Create map here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -773,14 +773,21 @@ function flyWorld(context) {
 function camTimes(api, map) { return [0, 1, 2].map((i) => plain(api.getKeyframeTimes(map.cameraId, "array." + i))); }
 const range = (a, b) => { const r = []; for (let f = a; f <= b; f++) r.push(f); return r; };
 
-test("Map tab: Start begins at the playhead and End 100 frames later; From and to label them", () => {
+test("Map tab: Start begins at the playhead and End 100 frames later; From: and To: label them", () => {
   const { context, ui } = buildSandbox({ setup: (api) => api.setFrame(12) });
   assert.equal(context.flyStartField.getValue(), 12);
   assert.equal(context.flyEndField.getValue(), 112);
-  assert.equal(context.fromLabel.getText(), "From");
-  assert.equal(context.toLabel.getText(), "to");
-  const row = context.sectionPages.pages[0]._items.filter((n) => holds(n, context.flyBtn) && n instanceof ui.HLayout)[0];
-  assert.deepEqual(row._items, [context.jumpBtn, context.fromLabel, context.flyStartField, context.toLabel, context.flyEndField, context.flyBtn]);
+  assert.equal(context.fromLabel.getText(), "From:");
+  assert.equal(context.toLabel.getText(), "To:");
+  const rows = context.sectionPages.pages[0]._items.filter((n) => n instanceof ui.HLayout);
+  const jumpRow = rows.filter((n) => holds(n, context.jumpBtn))[0];
+  const flyRow = rows.filter((n) => holds(n, context.flyBtn))[0];
+  assert.deepEqual(jumpRow._items, [context.jumpBtn], "Jump here has a row of its own");
+  assert.deepEqual(flyRow._items, [context.flyBtn, context.fromLabel, context.flyStartField, context.toLabel, context.flyEndField]);
+  const items = context.sectionPages.pages[0]._items;
+  assert.ok(items.indexOf(jumpRow) + 1 === items.indexOf(flyRow), "the Fly row follows the Jump row");
+  assert.equal(context.flyStartField._fixedWidth, 48);
+  assert.equal(context.flyEndField._fixedWidth, 48);
   const quiet = buildSandbox().context;
   assert.equal(quiet.flyStartField.getValue(), 0);
   assert.equal(quiet.flyEndField.getValue(), 100);
@@ -3709,6 +3716,160 @@ test("preview: the current camera shows as a dashed frame", () => {
   p.setCurrentCamera({ lat: 45, lon: 2, zoom: 4 });
   p._render();
   assert.equal(strokes(p._draw, "#e6e6e6").length, 1);
+});
+
+// ---- Preview overlay: the zoom readout and − / + are drawn inside the map -----------------
+const PILL = "#000000a6", GLYPH = "#e6e6e6";
+const centreOf = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+// View coordinates (y down) to the Draw's: flipped when it is y-up, like the preview does.
+const drawPos = (p, r, yUp) => { const c = centreOf(r); return { x: c.x, y: yUp ? p._draw._size[1] - c.y : c.y }; };
+
+test("preview overlay: three dark pills and the light glyphs and readout text are drawn last", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setCurrentCamera({ lat: 45, lon: 2, zoom: 4 });
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], 0);
+  p._render();
+  const pills = fills(p._draw, PILL);
+  assert.equal(pills.length, 3, "readout, minus, plus");
+  const glyphs = fills(p._draw, GLYPH);
+  assert.equal(textCmds(glyphs).length, 1, "the readout text");
+  assert.equal(glyphs.reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "moveTo").length, 0), 3, "a bar for minus and two for plus");
+  assert.equal(strokes(p._draw, GLYPH).length, 1, "only the camera's dashed frame is stroked in that colour");
+  assert.equal(strokes(p._draw, "#33CE70").length >= 1, true);
+  const last = p._draw._paths.slice(-5);
+  assert.ok(last.every((x) => (x.paint.color === PILL || x.paint.color === GLYPH) && !x.paint.stroke), "the overlay is the last thing drawn");
+});
+
+test("preview overlay: rectangles sit 8 px in from the bottom corners, 20 px high, 4 px apart", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  const o = p._overlay();
+  assert.equal(o.plus.w, 20); assert.equal(o.plus.h, 20);
+  assert.equal(o.minus.w, 20); assert.equal(o.minus.h, 20);
+  assert.equal(o.plus.x + o.plus.w, 320 - 8);
+  assert.equal(o.plus.y + o.plus.h, 180 - 8);
+  assert.equal(o.minus.y, o.plus.y);
+  assert.equal(o.plus.x - (o.minus.x + o.minus.w), 4, "minus is left of plus");
+  assert.equal(o.readout.x, 8);
+  assert.equal(o.readout.y + o.readout.h, 180 - 8);
+  assert.equal(o.readout.h, 20);
+  assert.ok(o.readout.w > 30 && o.readout.x + o.readout.w < o.minus.x, "wide enough for its text, clear of the buttons");
+});
+
+test("preview overlay: the readout says the frame's zoom and follows it", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  const text = () => textCmds(fills(p._draw, GLYPH));
+  assert.equal(text()[0][1], "Zoom 5.0");
+  assert.equal(text()[0][2], 10, "10 px text");
+  p.zoomBy(1);
+  p._render();
+  assert.equal(text()[0][1], "Zoom 6.0");
+});
+
+test("preview overlay: glyphs are bars centred in their squares (10 by 2, plus 2 by 10)", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p._render();
+  const o = p._overlay(), m = centreOf(o.minus), q = centreOf(o.plus);
+  const bars = fills(p._draw, GLYPH).filter((x) => !textCmds([x]).length).reduce((a, x) => a.concat(x.path.cmds), []);
+  const rects = [];
+  for (let i = 0; i < bars.length; i += 5) {
+    const pts = bars.slice(i, i + 4).map((c) => [c[1], c[2]]);
+    const xs = pts.map((t) => t[0]), ys = pts.map((t) => t[1]);
+    rects.push({ x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) });
+  }
+  assert.equal(rects.length, 3);
+  const has = (cx, cy, w, h) => rects.some((r) => Math.abs((r.x0 + r.x1) / 2 - cx) < 1e-9 && Math.abs((r.y0 + r.y1) / 2 - cy) < 1e-9 && Math.abs(r.x1 - r.x0 - w) < 1e-9 && Math.abs(r.y1 - r.y0 - h) < 1e-9);
+  assert.ok(has(m.x, m.y, 10, 2), "minus bar");
+  assert.ok(has(q.x, q.y, 10, 2), "plus horizontal bar");
+  assert.ok(has(q.x, q.y, 2, 10), "plus vertical bar");
+});
+
+test("preview overlay: with a y-up Draw the pills are flipped like everything else", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { yUp: true });
+  p.setWidth(320);
+  p._render();
+  const o = p._overlay();
+  const plusPill = fills(p._draw, PILL)[2].path.cmds;
+  const ys = plusPill.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").map((c) => c[2]);
+  assert.equal(Math.min(...ys), 180 - (o.plus.y + o.plus.h), "the plus pill's bottom edge is at the bottom in y-up coordinates");
+  assert.equal(Math.max(...ys), 180 - o.plus.y);
+});
+
+[false, true].forEach((yUp) => {
+  test("preview overlay: pressing + or - zooms by one and starts no drag (y-up " + yUp + ")", () => {
+    const { context } = buildSandbox({ setup: installNe });
+    const { p, picks } = makePreview(context, { yUp: yUp });
+    p.setWidth(320);
+    p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+    p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+    const o = p._overlay();
+    p._draw.onMousePress(drawPos(p, o.plus, yUp), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "+ zooms in");
+    const at = p.frameCamera();
+    p._draw.onMouseMove({ x: 10, y: 10 });
+    assert.deepEqual(plain(p.frameCamera()), plain(at), "no drag started");
+    p._draw.onMouseRelease({ x: 10, y: 10 }, "left");
+    p._draw.onMousePress(drawPos(p, o.minus, yUp), "left");
+    p._draw.onMousePress(drawPos(p, o.minus, yUp), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 4) < 1e-9, "- zooms out, once per press");
+    assert.deepEqual(picks, [], "and picks nothing");
+  });
+});
+
+test("preview overlay: a press on the readout does nothing, and a press elsewhere still drags", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress(drawPos(p, p._overlay().readout, false), "left");
+  p._draw.onMouseMove({ x: 200, y: 120 });
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "the readout is no drag handle");
+  p._draw.onMouseRelease({ x: 200, y: 120 }, "left");
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  assert.ok(p.frameCamera().lon < before.lon, "elsewhere it drags");
+});
+
+test("preview overlay: a double-click on a button or the readout is ignored", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const o = p._overlay();
+  ["plus", "minus", "readout"].forEach((k) => {
+    p._draw.onMouseDoubleClick(drawPos(p, o[k], false), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 5) < 1e-9, k + " double-click leaves the zoom");
+  });
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "elsewhere it still zooms in");
+});
+
+test("preview overlay: the Draw says how to use it, and the old note row and native buttons are gone", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p._draw._toolTip, "Drag to move · double-click or + / − to zoom");
+  assert.deepEqual(p.layout._items.filter((n) => n instanceof ui.HLayout), [], "nothing but the map under the heading");
+  assert.equal(p.layout._items[0], p._draw);
+  const texts = [];
+  walkUi(p.layout, (n) => { if (n.getText) texts.push(n.getText()); });
+  assert.ok(!texts.some((t) => /Zoom|drag/i.test(t)), "no note text");
+  const noTip = makeFakeUi();
+  delete noTip.Draw.prototype.setToolTip;
+  const ctx2 = vm.createContext({ api: makeFakeApi(), ui: noTip, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), ctx2, { filename: "CavalryGeo.js" });
+  assert.equal(ctx2.preview.available(), true, "a Draw without setToolTip is fine");
 });
 
 test("preview: without ui.Draw, or with the data missing, it says so and is unavailable", () => {

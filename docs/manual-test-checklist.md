@@ -36,8 +36,9 @@ fixed before release.
       status says "Pick one, then Jump here or Fly here". Pick the result → **Jump here** →
       the camera moves there. Open the result dropdown → index 0 is "World view"; pick it →
       Jump here → the camera jumps to the world view. A search with no results makes no map.
-- [ ] 5c. Preview: drag at world, country and city zoom (smooth), double-click and + / −
-      zoom, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
+- [ ] 5c. Preview: drag at world, country and city zoom (smooth), double-click and the + / −
+      squares inside the map (bottom right) zoom, the "Zoom N.N" readout (bottom left) follows,
+      hovering the map shows its tooltip, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
       Create map here land where the green frame showed.
 
 ## Layers tab
@@ -185,19 +186,19 @@ adding street layers.
       **Yes** → progress bar runs through the download, then "Building imagery: n / N images…";
       Cavalry stays usable throughout (no "Not responding") → satellite imagery under the
       countries, coastlines lining up; no half-built imagery shows while it builds.
-- [ ] 41. Search Paris → pick it → From 0, to 149 → Fly here → play: smooth zoom-out, travel, zoom-in. Build
+- [ ] 41. Search Paris → pick it → From: 0, To: 149 → Fly here → play: smooth zoom-out, travel, zoom-in. Build
       imagery from a world view with EOX → about 40–60 images, no "Sharpest detail is limited"
       note → Paris is sharp at the end of the flight; the build takes well under a minute. A
       flight needing more than 150 images (or 2000 tiles' worth) shows "Sharpest detail is
       limited to zoom Z to stay under 150 images — imagery gets softer as the flight zooms in
       further."
-- [ ] 41b. Fly here with **to** past the composition's end → a dialog "Extend the timeline" asks; **Yes**
+- [ ] 41b. Fly here with **To:** past the composition's end → a dialog "Extend the timeline" asks; **Yes**
       extends the composition, the layers reaching its end and the play range, and the flight plays
       to the end (nothing cut off); **No** changes nothing (no keys, composition unchanged). A
-      **to** not after **From**, or a **From** before the composition's first frame, is refused
+      **To:** not after **From:**, or a **From:** before the composition's first frame, is refused
       with a message.
 - [ ] 41c. Fly to a place, then search another place and press Fly here again → the second flight
-      starts where the first ended (the fields moved on: From = the old **to**).
+      starts where the first ended (the fields moved on: From: = the old **To:**).
 - [ ] 42. Build imagery again → the question counts only the new images → Yes → only those download → the old imagery stays until the new
       one is built, then swaps at once and "Removing the old imagery…" shows → play: sharper levels
       fade in, no flashes or see-through frames; past zoom Z the top level just gets softer.

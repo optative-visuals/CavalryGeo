@@ -32,12 +32,13 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.
-- **Preview:** a flat map under the search results. Drag it to move and use **+** / **−** (or
-  double-click) to zoom; the green frame in the middle is exactly where the camera will go, and
-  the dashed outline is where it is now. Search results show as green dots — click one to pick
+- **Preview:** a flat map under the search results. Drag it to move and use the **+** / **−**
+  squares in its bottom right corner (or double-click) to zoom; the zoom level reads out in its
+  bottom left corner, and hovering the map shows a reminder. The green frame in the middle is
+  exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
   green frame. With **New map** picked, **Create map here** makes a map at the frame.
-- **Flying the camera:** pick a place, set **From** and **to** (the first and last frame of the
+- **Flying the camera:** pick a place, set **From:** and **To:** (the first and last frame of the
   flight; they open on the playhead and 100 frames later) and press **Fly here** — the camera zooms
   out, travels and zooms in smoothly, leaving from where the camera is at the From frame (with
   World view picked it flies back out). The two fields then move on, so pick another place and

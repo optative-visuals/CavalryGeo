@@ -70,18 +70,21 @@ function playhead() {
 }
 var flyStartField = new ui.NumericField(playhead());
 var flyEndField = new ui.NumericField(playhead() + 100);
-[flyStartField, flyEndField].forEach(function (f) { f.setType(0); f.setMin(0); });
+[flyStartField, flyEndField].forEach(function (f) {
+  f.setType(0); f.setMin(0);
+  if (typeof f.setFixedWidth === "function") f.setFixedWidth(48); // number-sized, so the whole Fly row fits
+});
 var flyBtn = GeoStyle.primaryButton("Fly here");
 
-// Search and Fly here share one width so they line up above each other on the right.
+// Search and Fly here share one width.
 var MAP_ACTION_WIDTH = 84;
 if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_ACTION_WIDTH);
 if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
 
 // The preview: settled by probing Cavalry (2026-10).
 var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
-var fromLabel = new ui.Label("From");
-var toLabel = new ui.Label("to");
+var fromLabel = new ui.Label("From:");
+var toLabel = new ui.Label("To:");
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
@@ -280,7 +283,8 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Preview"),
     preview.layout,
     GeoStyle.heading("Camera"),
-    row(jumpBtn, fromLabel, flyStartField, toLabel, flyEndField, flyBtn),
+    row(jumpBtn),
+    row(flyBtn, fromLabel, flyStartField, toLabel, flyEndField),
     createHereBtn
   ]));
 });
