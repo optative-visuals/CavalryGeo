@@ -5381,3 +5381,81 @@ test("Pin here: needs a selected stop, then pins it", () => {
   context.pinStopsBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Pinned 0 stop\(s\)\. A is past the map's edge, so it kept its place\./);
 });
+
+function stubFind(context) {
+  const calls = [];
+  context.GeoScene.findMapLayers = () => [{ id: 1, name: "Streets", meta: { category: "streets" } }];
+  context.GeoScene.readLayerData = () => "enc";
+  context.GeoCodec.findByName = (enc, q) => { calls.push(q); return [{ name: "Rue de Rivoli", indices: [0] }]; };
+  return calls;
+}
+
+test("Extract Find box: Enter (commit) with new text runs Find once, the same text again does nothing, blank runs it", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli ");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli"]);
+  assert.equal(context.statusLabel.getText(), "1 match(es). Select some, then Extract.");
+  assert.deepEqual(plain(context.featureList._model), [{ uuid: "g0", label: "Rue de Rivoli" }]);
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1, "same text: nothing");
+  context.featureQuery.setText("");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli", ""], "a change to blank runs Find (blank = all named)");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2);
+});
+
+test("Extract Find box: the Find button always runs, and the text it ran counts as already found", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli");
+  context.findBtn.onClick();
+  context.findBtn.onClick();
+  assert.equal(calls.length, 2, "the button always runs");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2, "Enter after the button with the same text does nothing");
+  context.featureQuery.setText("Louvre");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
+});
+
+function stubLoad(context) {
+  const fetched = [];
+  context.GeoNet.fetchCsv = (url) => { fetched.push(url); return "Location,Visitors\nParis,30\n"; };
+  context.GeoNet.neLayer = () => context.GeoCodec.encodeLayer({ kind: "polygon", features: [] });
+  return fetched;
+}
+
+test("Data link box: Enter (commit) with a new link loads once, the same link again does nothing, empty does nothing", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  context.dataLinkField.setText(" https://example.com/a.csv ");
+  context.dataLinkField.onValueCommitted();
+  assert.deepEqual(fetched, ["https://example.com/a.csv"]);
+  assert.match(context.statusLabel.getText(), /^1 rows, /);
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 1, "same link: nothing");
+  context.dataLinkField.setText("   ");
+  context.statusLabel.setText("untouched");
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 1, "empty: nothing");
+  assert.equal(context.statusLabel.getText(), "untouched");
+  context.dataLinkField.setText("https://example.com/b.csv");
+  context.dataLinkField.onValueCommitted();
+  assert.deepEqual(fetched, ["https://example.com/a.csv", "https://example.com/b.csv"]);
+});
+
+test("Data link box: the Load button with the same link still loads again", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  context.dataLinkField.setText("https://example.com/a.csv");
+  context.dataLinkField.onValueCommitted();
+  context.dataLoadBtn.onClick();
+  assert.equal(fetched.length, 2, "the button reloads");
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 2, "Enter after the button with the same link does nothing");
+});

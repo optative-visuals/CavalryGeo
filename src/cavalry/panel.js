@@ -462,7 +462,11 @@ mapPicker.onValueChanged = guard(function () {
   previewShowMap(); // last, so a preview problem can't skip the layer refresh
 });
 
-findBtn.onClick = guard(function () {
+// Find runs from the button (always) or from Return / leaving the box (only when the text changed;
+// blank is a valid Find, meaning all named features).
+var lastFindText = "";
+function runFind() {
+  lastFindText = featureQuery.getText().trim();
   // Refresh always (the map may have changed layers since the last refresh), but
   // keep the user's picked layer selected if it still exists.
   var pickedId = (sourceLayers[layerPicker.getValue()] || {}).id;
@@ -473,11 +477,15 @@ findBtn.onClick = guard(function () {
   layerPicker.setValue(idx);
   groupsLayer = sourceLayers[idx];
   groupsEnc = GeoScene.readLayerData(groupsLayer.id);
-  groups = GeoCodec.findByName(groupsEnc, featureQuery.getText().trim()).slice(0, 500);
+  groups = GeoCodec.findByName(groupsEnc, lastFindText).slice(0, 500);
   featureList.setModel(groups.map(function (g, i) {
     return { uuid: "g" + i, label: g.name + (g.indices.length > 1 ? " (" + g.indices.length + " parts)" : "") };
   }));
   say(groups.length ? groups.length + " match(es). Select some, then Extract." : "No named features match.");
+}
+findBtn.onClick = guard(runFind);
+featureQuery.onValueCommitted = guard(function () {
+  if (featureQuery.getText().trim() !== lastFindText) runFind();
 });
 
 extractBtn.onClick = guard(function () {
@@ -808,8 +816,12 @@ function showUnmatched(list) {
   dataUnmatchedList.setModel(list.slice(0, 300).map(function (label, i) { return { uuid: "u" + i, label: label || "(blank)" }; }));
 }
 
-dataLoadBtn.onClick = guard(function () {
+// Load runs from the button (always, so a link can be reloaded) or from Return / leaving the box
+// (only for a non-empty link that differs from the last one loaded).
+var lastLoadedLink = "";
+function runLoad() {
   var url = dataLinkField.getText().trim();
+  lastLoadedLink = url;
   sayNow("Downloading data…");
   var table = GeoCsv.parse(GeoNet.fetchCsv(url));
   if (!table.rows.length) throw new Error("That link has no data rows.");
@@ -822,6 +834,11 @@ dataLoadBtn.onClick = guard(function () {
   var prepared = GeoDataset.prepare(table, currentChoice(), GeoNet.neLayer("countries", "50m"));
   showUnmatched(prepared.unmatched);
   say(table.rows.length + " rows, " + prepared.matched + " place(s) matched, " + prepared.unmatched.length + " unmatched" + (prepared.unmatched.length ? " (see list)." : "."));
+}
+dataLoadBtn.onClick = guard(runLoad);
+dataLinkField.onValueCommitted = guard(function () {
+  var url = dataLinkField.getText().trim();
+  if (url && url !== lastLoadedLink) runLoad();
 });
 
 addDataBtn.onClick = guard(function () {

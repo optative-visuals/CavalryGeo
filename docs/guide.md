@@ -32,6 +32,8 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 - **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
   the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
   the map at the first one (it reuses those results, so nothing is searched twice).
+  Enter also runs **Find** in the Extract box (Layers tab) and **Load** in the Data link box, when
+  the text changed since the last time.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.

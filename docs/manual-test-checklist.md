@@ -251,3 +251,5 @@ adding street layers.
 - [ ] 21. Uninstall check: rename `CavalryGeo.js` in the Cavalry Scripts folder (or
       delete it), reopen the saved scene → the maps in the scene still render, even
       though the script is gone.
+- [ ] 22. Type a name in Extract's Find box and press Enter → matches appear; paste a sheet link
+      and press Enter → it loads.
