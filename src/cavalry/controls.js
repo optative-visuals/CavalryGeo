@@ -147,7 +147,9 @@ var GeoControlPanel = (function () {
   // target's current value).
   function ensureSlot(valuesId, slots, row) {
     var path = slots[row.key];
-    if (path && api.hasAttribute(valuesId, path)) return path;
+    var there = false;
+    if (path) { try { there = !!api.hasAttribute(valuesId, path); } catch (e) { there = false; } }
+    if (there) return path;
     path = api.addDynamic(valuesId, A.CAMERA_ARRAY_ATTR, INPUT_TYPES[row.type]);
     if (!path) throw new Error("Couldn't add a control value.");
     slots[row.key] = path;
@@ -209,25 +211,31 @@ var GeoControlPanel = (function () {
     var made = findOrCreate(map), V = made.valuesId;
     var model = readModel(map, V), p = G.plan(model);
     var slots = userData(V, SLOTS_KEY) || {}, wanted = [];
-    p.rows.forEach(function (row) {
-      if (row.kind === "direct") {
-        attempt(function () { api.renameAttribute(row.layer, row.attr, row.label); });
-        if (row.overrides && has("setAttributeDefinitionOverride")) {
-          Object.keys(row.overrides).forEach(function (k) {
-            attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
-          });
+    // A failing row only drops its own promotion; the inputs added so far are always recorded.
+    try {
+      p.rows.forEach(function (row) {
+        if (row.kind === "direct") {
+          attempt(function () { api.renameAttribute(row.layer, row.attr, row.label); });
+          if (row.overrides && has("setAttributeDefinitionOverride")) {
+            Object.keys(row.overrides).forEach(function (k) {
+              attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
+            });
+          }
+          wanted.push({ layer: row.layer, attr: row.attr });
+          return;
         }
-        wanted.push({ layer: row.layer, attr: row.attr });
-        return;
-      }
-      var path = ensureSlot(V, slots, row);
-      attempt(function () { api.renameAttribute(V, path, row.label); });
-      row.link.forEach(function (t) {
-        if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, G.recordFor(V, row.key));
+        attempt(function () {
+          var path = ensureSlot(V, slots, row);
+          attempt(function () { api.renameAttribute(V, path, row.label); });
+          row.link.forEach(function (t) {
+            if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, G.recordFor(V, row.key));
+          });
+          wanted.push({ layer: V, attr: path });
+        });
       });
-      wanted.push({ layer: V, attr: path });
-    });
-    setUserData(V, SLOTS_KEY, slots);
+    } finally {
+      attempt(function () { setUserData(V, SLOTS_KEY, slots); });
+    }
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
     rebuild(made.id, wanted, G.ids(model));
     return { componentId: made.id, valuesId: V, controls: wanted.length };

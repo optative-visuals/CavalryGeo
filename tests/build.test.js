@@ -3975,6 +3975,31 @@ test("controls: a route gets shared colour, width and arc height, then each leg'
   assert.equal(api.get(r.valuesId, lift), 30);
 });
 
+test("controls: one failing control row no longer stops the rest", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene;
+  S.addPin(map, "A", 0, 0); S.addPin(map, "B", 10, 10);
+  const realAdd = api.addDynamic.bind(api);
+  let calls = 0;
+  api.addDynamic = function () { calls++; if (calls === 2) throw new Error("boom"); return realAdd.apply(null, arguments); };
+  let r;
+  assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
+  const slots1 = slotsOf(api, r.valuesId);
+  assert.ok(slots1["pins:hidden"] && slots1["pins:size"], "the inputs made before and after the failure are recorded");
+  assert.equal(slots1["pins:color"], undefined, "the failed row has no input yet");
+  const pinRows = () => plain(promotedNames(api, r.componentId)).filter((n) => /^Pins · /.test(n));
+  assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Size"]);
+  api.addDynamic = realAdd;
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.valuesId, r.valuesId);
+  const slots2 = slotsOf(api, r.valuesId);
+  assert.equal(slots2["pins:hidden"], slots1["pins:hidden"], "the same input is reused");
+  assert.equal(slots2["pins:size"], slots1["pins:size"], "the same input is reused");
+  assert.ok(slots2["pins:color"]);
+  assert.equal(new Set(Object.keys(slots2).map((k) => slots2[k])).size, Object.keys(slots2).length, "no input is added twice");
+  assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
+});
+
 test("controls: without user data, sync says this Cavalry can't do it", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);
