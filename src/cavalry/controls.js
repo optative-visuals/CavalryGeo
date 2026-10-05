@@ -143,23 +143,37 @@ var GeoControlPanel = (function () {
     return v;
   }
 
+  function read(t) { try { return api.get(t.layer, t.attr); } catch (e) { return undefined; } }
+
+  // Whether a target already shows the value a new input starts with. Nothing to compare
+  // (either side unreadable) counts as the same.
+  function same(type, a, b) {
+    if (a === undefined || a === null || b === undefined || b === null) return true;
+    if (type === "color") {
+      var norm = function (v) { v = String(hex(v)).toLowerCase(); return v.charAt(0) === "#" && v.length === 9 ? v.slice(0, 7) : v; };
+      return norm(a) === norm(b);
+    }
+    if (type === "bool") return !!a === !!b;
+    return Math.abs(Number(a) - Number(b)) < 1e-6;
+  }
+
   // The values input for a row: found again by its key, or added (starting with the first
-  // target's current value).
+  // target's current value). Returns its path, and whether it was added just now (with the
+  // value it started from).
   function ensureSlot(valuesId, slots, row) {
     var path = slots[row.key];
     var there = false;
     if (path) { try { there = !!api.hasAttribute(valuesId, path); } catch (e) { there = false; } }
-    if (there) return path;
+    if (there) return { path: path, created: false };
     path = api.addDynamic(valuesId, A.CAMERA_ARRAY_ATTR, INPUT_TYPES[row.type]);
     if (!path) throw new Error("Couldn't add a control value.");
     slots[row.key] = path;
-    var first = row.linked[0] || row.link[0];
+    var seed = read(row.linked[0] || row.link[0]);
     attempt(function () {
-      var v = api.get(first.layer, first.attr);
-      if (v === undefined || v === null) return;
-      api.set(valuesId, one(path, row.type === "color" ? A.COLOR_VALUE(hex(v)) : row.type === "bool" ? !!v : Number(v)));
+      if (seed === undefined || seed === null) return;
+      api.set(valuesId, one(path, row.type === "color" ? A.COLOR_VALUE(hex(seed)) : row.type === "bool" ? !!seed : Number(seed)));
     });
-    return path;
+    return { path: path, created: true, seed: seed };
   }
 
   function record(layer, attr, value) {
@@ -242,10 +256,13 @@ var GeoControlPanel = (function () {
           return;
         }
         attempt(function () {
-          var path = ensureSlot(V, slots, row);
+          var slot = ensureSlot(V, slots, row), path = slot.path, rec = G.recordFor(V, row.key);
           attempt(function () { api.renameAttribute(V, path, row.label); });
           row.link.forEach(function (t) {
-            if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, G.recordFor(V, row.key));
+            // A new input links only the targets already showing its value; any other target
+            // was set apart on purpose, so it is marked as if the user had pressed Disconnect.
+            if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
+            if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
           wanted.push({ layer: V, attr: path });
         });

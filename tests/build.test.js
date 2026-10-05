@@ -3907,6 +3907,39 @@ test("controls: a pin the user disconnected stays unlinked", () => {
   assert.equal(api.getInConnection(a, "material.materialColor"), r.valuesId + "." + color);
 });
 
+test("controls: on the first sync a pin coloured differently keeps its colour and stays unlinked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene, C = "material.materialColor";
+  const a = S.addPin(map, "A", 0, 0), b = S.addPin(map, "B", 10, 10), c = S.addPin(map, "C", 20, 20); // c is on top: the first target
+  api.set(a, { [C]: "#FF0000" });
+  api.set(b, { [C]: { r: 31, g: 143, b: 78, a: 255 } }); // the same green as c, read as an object
+  let r = context.GeoControlPanel.sync(map);
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  assert.equal(api.get(r.valuesId, color), "#1F8F4E", "seeded from the first target");
+  assert.equal(api.getInConnection(c, C), r.valuesId + "." + color);
+  assert.equal(api.getInConnection(b, C), r.valuesId + "." + color);
+  assert.equal(api.getInConnection(a, C), "", "the red pin is left alone");
+  assert.equal(api.get(a, C), "#FF0000");
+  assert.equal(plain(api.getUserDataKey(a, "geoLinks"))[C], context.GeoControls.recordFor(r.valuesId, "pins:color"));
+  assert.equal(api.getInConnection(a, "hidden"), r.valuesId + "." + slotsOf(api, r.valuesId)["pins:hidden"], "its other settings still link");
+  r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(a, C), "", "a later sync still leaves it alone");
+});
+
+test("controls: pins added one at a time, with a sync after each, all end up linked", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), S = context.GeoScene, C = "material.materialColor";
+  const pins = [];
+  let r;
+  ["A", "B", "C"].forEach((name, i) => {
+    pins.push(S.addPin(map, name, i * 10, i * 10));
+    if (i === 2) api.set(pins[2], { [C]: "#0000FF" }); // the input already exists: it links as usual
+    r = context.GeoControlPanel.sync(map);
+  });
+  const color = slotsOf(api, r.valuesId)["pins:color"];
+  pins.forEach((id) => assert.equal(api.getInConnection(id, C), r.valuesId + "." + color));
+});
+
 test("controls: the user's own promotions stay, after the plugin's, with their names", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context), S = context.GeoScene;
