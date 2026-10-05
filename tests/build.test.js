@@ -6306,3 +6306,63 @@ test("map styles: Apply recolours data region outlines and value labels but neve
   assert.equal(api.get(d.layers.bubbles, "material.materialColor"), "#bc4749");
   assert.deepEqual(api.get(d.layers.regions, low), before);
 });
+
+// ---- Previews: what the panel previews draw for a map ----
+test("previewModel: pins, labels and a new-style route with its curve settings, in the map's style colours", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("P", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Vintage"));
+  G.addPin(map, "Here", 2.35, 48.85);
+  G.createLabel(map, "Lisbon", -9.14, 38.72);
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 10 }, { name: "B", lon: 20, lat: 10 }, { name: "C", lon: 20, lat: 30 }], { arc: 40 });
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  const lean = "array." + context.GeoExpression.inputIndex(context.GeoExpression.HANDLE_INPUTS, "lean");
+  const flip = "array." + context.GeoExpression.inputIndex(context.GeoExpression.HANDLE_INPUTS, "flip");
+  api.set(rec.legs[1].startHandle, { [lean]: 25, [flip]: 1 });
+  const m = plain(G.previewModel(map));
+  assert.deepEqual(m.colors, { accent: "#a63d2f", text: "#4a3423" });
+  assert.deepEqual(m.pins, [{ lon: 2.35, lat: 48.85 }]);
+  assert.deepEqual(m.labels, [{ lon: -9.14, lat: 38.72, text: "Lisbon" }]);
+  assert.equal(m.routes.length, 1);
+  assert.deepEqual(m.routes[0].stops, [{ lon: 0, lat: 10 }, { lon: 20, lat: 10 }, { lon: 20, lat: 30 }]);
+  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 10 }, to: { lon: 20, lat: 10 }, arc: 40, lean: 0, flip: false });
+  assert.deepEqual(m.routes[0].legs[1], { from: { lon: 20, lat: 10 }, to: { lon: 20, lat: 30 }, arc: 40, lean: 25, flip: true });
+});
+
+test("previewModel: a stop's place follows Pin here (its position helper), and a curve setting driven by the Controls is read through", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 0 }], { arc: 30 });
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  api.set(rec.stops[1].position, { "array.5": 12, "array.6": 3 });
+  const sync = context.GeoControlPanel.sync(map);
+  const arcSlot = slotsOf(api, sync.valuesId)["route:" + r.groupId + ":arc"];
+  api.set(sync.valuesId, { [arcSlot]: 70 });
+  const m = plain(G.previewModel(map));
+  assert.deepEqual(m.routes[0].stops[1], { lon: 12, lat: 3 });
+  assert.equal(m.routes[0].legs[0].arc, 70);
+});
+
+test("previewModel: an old-style route gives its legs (arc from Arc height) and stops; nothing breaks on a deleted part", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const G = context.GeoScene;
+  const map = G.createMap("Old", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 5 }], { lift: 45, pins: true, labels: false });
+  const m = plain(G.previewModel(map));
+  assert.equal(m.routes.length, 1);
+  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 0 }, to: { lon: 10, lat: 5 }, arc: 45, lean: 0, flip: false });
+  assert.deepEqual(m.routes[0].stops, [{ lon: 0, lat: 0 }, { lon: 10, lat: 5 }]);
+  assert.equal(m.pins.length, 2, "an old route's stop pins are pins");
+  api.deleteLayer(r.legs[0]);
+  assert.equal(plain(G.previewModel(map)).routes.length, 0);
+});
+
+test("findLabels still finds driver labels (now through labelDrivers)", () => {
+  const { context } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("L", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const id = G.createLabel(map, "Here", 1, 2);
+  assert.deepEqual(plain(G.findLabels(map)), [id]);
+});
