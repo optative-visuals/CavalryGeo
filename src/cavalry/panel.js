@@ -75,7 +75,7 @@ var flyEndField = new ui.NumericField(playhead() + 100);
   if (typeof f.setFixedWidth === "function") f.setFixedWidth(48); // number-sized, so the whole Fly row fits
 });
 var flyBtn = GeoStyle.primaryButton("Fly here");
-var flyNote = GeoStyle.note("Animates the camera to the map preview.");
+var flyNote = GeoStyle.note("(animates the camera to the map preview)");
 
 // Search and Fly here share one width.
 var MAP_ACTION_WIDTH = 84;

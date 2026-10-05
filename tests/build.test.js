@@ -821,7 +821,7 @@ test("Map tab: the frame-field boxes follow New map: hidden with no map, shown a
 
 test("Map tab: a note under the Fly row says what Fly here does, and hides with the row for New map", () => {
   const { context, ui } = buildSandbox();
-  assert.equal(context.flyNote.getText(), "Animates the camera to the map preview.");
+  assert.equal(context.flyNote.getText(), "(animates the camera to the map preview)");
   assert.equal(context.flyNote._textColor, "#8a8a8a");
   const items = context.sectionPages.pages[0]._items;
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
