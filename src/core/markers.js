@@ -11,6 +11,6 @@ var GeoMarkers = (function () {
     if (!pts) throw new Error("Unknown marker: " + kind);
     return pts.map(function (p) { return [p[0], p[1]]; });
   }
-  return { outline: outline, KINDS: ["plane", "arrow", "dot"] };
+  return { outline: outline };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoMarkers;

@@ -176,12 +176,14 @@ cache come after them).
   For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
   route leg by leg. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
 - **Travellers.** Pick a **Traveller** (Plane, Arrow, Dot or Selected layer) before **Create route**
-  and a copy of it rides each leg, sitting at the tip of the leg as it draws on and facing the
+  and it rides the route, leg by leg, sitting at the tip of each leg as it draws on and facing the
   way the leg is heading. To add one to a route you already have, pick a Traveller, select any
   part of the route in the viewer and press **Add to route**; adding again replaces it, and
   **None** + **Add to route** removes it. **Selected layer** sends your own layer along the
   route: select it (as well as the route part, when adding to an existing route). Your layer is
-  kept, and Cavalry hides it while the copies ride; choose None to bring it back, visible. In
+  kept, and Cavalry hides it while the copies ride; choose None to bring it back, visible. If you
+  delete a route that carried your own layer, Cavalry leaves that layer hidden: un-hide it
+  yourself (or pick None and press **Add to route** before deleting the route). In
   the map's Controls the route gets four rows: `Traveller hide`, `Traveller size`,
   `Traveller colour` (for the Plane, Arrow and Dot only) and `Traveller faces direction`.
 - On a globe, a stop on the far side of the Earth fades out with its legs, and a long leg is a
