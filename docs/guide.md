@@ -29,17 +29,28 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   **Ocean** layer) already added; add more on **Layers**.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
   like any layer. The default colours match the preview.
+- **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
+  the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
+  the map at the first one (it reuses those results, so nothing is searched twice).
+  Enter also runs **Find** in the Extract box (Layers tab) and **Load** in the Data link box, when
+  the text changed since the last time.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.
-- **Preview:** a flat map under the search results. Drag it to move and use **+** / **−** (or
-  double-click) to zoom; the green frame in the middle is exactly where the camera will go, and
-  the dashed outline is where it is now. Search results show as green dots — click one to pick
+- **Preview:** a flat map under the search results. Drag it to move and use the **+** / **−**
+  squares in its bottom right corner (or double-click) to zoom; the zoom level reads out in its
+  bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
+  exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
   green frame. With **New map** picked, **Create map here** makes a map at the frame.
-- **Flying the camera:** pick a place, set **Frames** and press **Fly here** — the camera zooms
-  out, travels and zooms in smoothly from the current frame (with World view picked it flies back
-  out). Build imagery afterwards for sharp imagery along the way.
+- **Flying the camera:** pick a place, set **From:** and **To:** (the first and last frame of the
+  flight; they open on the playhead and 100 frames later) and press **Fly here** — the camera zooms
+  out, travels and zooms in smoothly, leaving from where the camera is at the From frame (with
+  World view picked it flies back out). The two fields then move on, so pick another place and
+  press **Fly here** again to chain a second flight that starts where the first ended. If the
+  flight ends after your composition's last frame, Fly here asks first; on Yes it lengthens the
+  composition, the layers that reach its end and the play range to the end of the flight, and on
+  No it changes nothing. Build imagery afterwards for sharp imagery along the way.
 - **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
   **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
   follows.
@@ -54,7 +65,9 @@ the **Controls** tab there to find the map's settings in one place:
 - **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
   (for cities) dot size.
 - **Pins** and **Labels:** one hide, colour and size for all of them.
-- **Routes:** colour, width and arc height for each route, and each leg's **draw on %** to animate.
+- **Routes:** colour, width, arc height, lean and flip side for each route, and for each leg its
+  **draw on %** to animate and **shape by hand** for exact control of its curve.
+- **Stops:** one **Hide**, **Colour** and **Size** for every route stop.
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
 - **Imagery:** opacity and hide.
 
@@ -132,7 +145,9 @@ cache come after them).
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
 - **Bake:** select a map layer in the Scene Window and press **Bake** to turn it into a plain
-  editable shape at the current frame. Baked shapes stop following the camera.
+  editable shape at the current frame. Baked shapes stop following the camera. The legs and stops
+  of a new-style route are already ordinary Cavalry shapes, so Bake skips them (it still bakes the
+  legs of routes made by earlier versions).
 
 ## Label: pins and labels
 
@@ -143,15 +158,25 @@ cache come after them).
 ## Label: routes
 
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
-  stops make a flight arc, more make a journey. Set **Lift %** (how high the arcs bow), tick
-  **Pins at stops** and **Labels at stops** if you want them, and press **Create route**.
-- Each leg is its own layer. To draw a leg on, animate its `<route> · Leg N draw on %` row
-  (0 → 100) in the map's Controls; `<route> · Arc height` raises or flattens every arc of the
-  route. On a globe, arcs rise off the surface and hide behind it.
-- For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
-  route leg by leg.
-- Route legs show **Detail** and **Point Radius** from ordinary map layers — you can ignore both
-  (Detail 0 hides the leg).
+  stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
+  with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
+  the stop), and press **Create route**.
+- Each stop is a green circle you can drag in the viewer, and the circles ride along with the
+  camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
+  with it. Until you press **Pin here**, a dragged stop is a fixed offset on screen, so it slides
+  against the map when the camera zooms or flies. When a dragged stop is where you want it,
+  select it and press **Pin here**: the spot you dropped it on becomes its new place, so from then
+  on it stays on that spot of the map as the camera moves. If a stop's place is animated
+  (keyframed), Pin here sets a key at the current frame.
+- The curve is shaped from the map's Controls: per route, **Arc height**, **Lean** and
+  **Flip side** change every leg at once. For one leg, tick `<route> · Leg N shape by hand` and
+  set its start and end handle X / Y numbers (in pixels, relative to each stop) — handy for still
+  shots. Untick it to go back to the plugin's shape.
+- To draw a leg on, animate its `<route> · Leg N draw on %` row (0 → 100) in the map's Controls.
+  For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
+  route leg by leg. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
+- On a globe, a stop on the far side of the Earth fades out with its legs, and a long leg is a
+  simple curve rather than a bow. Routes made by earlier versions keep working as before.
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
   Mercator itself does. On flat maps, a leg crossing the date line runs off the side of the frame
   rather than wrapping round.

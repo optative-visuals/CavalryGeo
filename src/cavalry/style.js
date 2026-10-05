@@ -29,7 +29,8 @@ var GeoStyle = (function () {
 
   var headings = []; // the rows heading() made; Cavalry's objects get no extra properties
   function isHeading(item) { return headings.indexOf(item) >= 0; }
-  function heading(text) {
+  // An optional hint sits right after the label, in the grey note style, before the line.
+  function heading(text, hint) {
     var label = new ui.Label(String(text));
     maybe(label, "setFontSize", 11);
     maybe(label, "setTextColor", HEADING_COLOR);
@@ -39,6 +40,7 @@ var GeoStyle = (function () {
     maybe(h, "setSpaceBetween", 6);
     headings.push(h);
     h.add(label);
+    if (hint) h.add(note(hint));
     if (hasContainer()) {
       var line = new ui.Container();
       line.setLayout(new ui.HLayout());
@@ -53,6 +55,24 @@ var GeoStyle = (function () {
     maybe(label, "setFontSize", 11);
     maybe(label, "setTextColor", HEADING_GREY);
     return label;
+  }
+
+  // A frame number box like Cavalry's own: a small grey F inside a dark rounded box, then the field.
+  // Without ui.Container it is just the F and the field in a row.
+  function frameField(field) {
+    var row = new ui.HLayout();
+    maybe(row, "setMargins", 4, 0, 0, 0);
+    maybe(row, "setSpaceBetween", 2);
+    var label = new ui.Label("F");
+    maybe(label, "setTextColor", HEADING_GREY);
+    row.add(label);
+    row.add(field);
+    if (!hasContainer()) return row;
+    var box = new ui.Container();
+    box.setLayout(row);
+    box.setBackgroundColor("#282828");
+    maybe(box, "setRadius", 3, 3, 3, 3);
+    return box;
   }
 
   // A plain native button, a little taller (it keeps Cavalry's hover highlight).
@@ -168,6 +188,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, heading: heading, isHeading: isHeading, note: note,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, heading: heading, isHeading: isHeading, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

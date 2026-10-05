@@ -12,6 +12,7 @@ test("the panel bundle compiles and embeds the runtime source", () => {
   const src = buildPanel();
   assert.doesNotThrow(() => new vm.Script(src, { filename: "CavalryGeo.js" }));
   assert.ok(src.includes("var GEO_RUNTIME_SRC = "));
+  assert.ok(src.includes("var GEO_CURVE_SRC = "));
   assert.ok(src.includes("var GeoScene"));
   assert.ok(src.includes("ui.show()"));
 });
@@ -30,6 +31,8 @@ function makeFakeApi() {
   var connections = [];
   var files = Object.create(null);
   var COMP_ID = "comp#1";
+  var comp = { startFrame: 0, endFrame: 9, playbackStart: 0, playbackEnd: 9 };   // like Cavalry: frameRange follows start / end, the play range does not
+  var outFrames = {};  // layerId -> out frame (a layer made in a comp ending at 9 has out frame 10)
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
   var timers = [];
   var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
@@ -43,7 +46,7 @@ function makeFakeApi() {
   // Like Cavalry: a layer with no parent sits at the composition's top level.
   function siblingsOf(id) { var key = parents[id] || COMP_ID; return childOrder[key] || (childOrder[key] = []); }
   function leave(id) { var sib = siblingsOf(id), i = sib.indexOf(id); if (i >= 0) sib.splice(i, 1); }
-  function addToComp(id) { delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
+  function addToComp(id) { outFrames[id] = comp.endFrame + 1; delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
   // One step up (toward the top of the Scene Window) or down within the layer's container.
   function step(id, by) {
     var sib = siblingsOf(id), i = sib.indexOf(id), j = i + by;
@@ -62,6 +65,17 @@ function makeFakeApi() {
     },
     // Like Cavalry: a primitive shape is a basicShape layer.
     primitive: function (kind, name) { return this.create("basicShape", name); },
+    // Like Cavalry: a Basic Line's generator is swapped with setGenerator; a Bézier line has
+    // start / end positions and offsets (offsets are relative to their end).
+    setGenerator: function (id, attr, type) {
+      if (arguments.length !== 3) throw new Error("Argument count does not match function definition. Expected 3 but got " + arguments.length);
+      var o = ensure(id);
+      o[attr] = type;
+      if (type === "bezierLine") {
+        o["generator.startPosition"] = { x: -200, y: 200 }; o["generator.endPosition"] = { x: 200, y: -200 };
+        o["generator.startOffset"] = { x: 100, y: 0 }; o["generator.endOffset"] = { x: -100, y: 0 };
+      }
+    },
     createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return addToComp(id); },
     parent: function (id, parentId) {
       leave(id);
@@ -77,6 +91,9 @@ function makeFakeApi() {
       if (at >= 0) top.splice(at + 1, 0, id); else top.unshift(id);
     },
     getParent: function (id) { return parents[id] || ""; },
+    getInFrame: function () { return 0; },
+    getOutFrame: function (id) { return outFrames[id]; },
+    setOutFrame: function (id, f) { outFrames[id] = f; },
     getChildren: function (parentId) { return (childOrder[parentId] || []).slice(); },
     getNiceName: function (id) { return niceNames[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
@@ -117,8 +134,11 @@ function makeFakeApi() {
     getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
     set: function (id, obj) {
+      if (id === COMP_ID) { Object.keys(obj).forEach(function (k) { if (k in comp) comp[k] = obj[k]; }); }
       var o = ensure(id);
       Object.keys(obj).forEach(function (k) {
+        // Like Cavalry: a JavaScript Utility has no transform attributes.
+        if (/^javaScript#/.test(id) && /^(position|rotation|scale)\b/.test(k)) throw new Error("Attribute not found: " + k);
         var m = PROMOTED_SLOT.exec(k);
         if (m && promoted[id] && promoted[id][Number(m[1])]) { promoted[id][Number(m[1])][m[2]] = obj[k]; return; }
         o[k] = obj[k];
@@ -126,7 +146,8 @@ function makeFakeApi() {
     },
     get: function (id, attr) {
       if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
-      if (id === COMP_ID && attr === "frameRange") return { x: 0, y: 9 };
+      if (id === COMP_ID && attr === "frameRange") return { x: comp.startFrame, y: comp.endFrame };
+      if (id === COMP_ID && attr in comp) return comp[attr];
       var pm = PROMOTED_SLOT.exec(attr);
       if (pm && promoted[id] && promoted[id][Number(pm[1])]) return promoted[id][Number(pm[1])][pm[2]];
       var k = keyframes[id] && keyframes[id][attr];
@@ -449,7 +470,7 @@ test("each section page holds its controls: Extract and Bake in Layers, Pins and
   assert.ok(holds(pages[0], context.searchBtn), "Map");
   assert.ok(holds(pages[1], context.addLayersBtn) && holds(pages[1], context.findBtn) && holds(pages[1], context.bakeBtn), "Layers");
   assert.ok(holds(pages[2], context.buildImageryBtn), "Imagery");
-  assert.ok(holds(pages[3], context.pinHereBtn) && holds(pages[3], context.createRouteBtn), "Label");
+  assert.ok(holds(pages[3], context.pinHereBtn) && holds(pages[3], context.createRouteBtn) && holds(pages[3], context.pinStopsBtn), "Label");
   assert.ok(holds(pages[4], context.addDataBtn), "Data");
 });
 
@@ -494,7 +515,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
-    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn",
+    "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
   ];
@@ -549,7 +570,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "−", "+", "Jump here", "Fly here", "Create map here"]);
+  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -677,16 +698,20 @@ test("Map tab: a successful Search pre-fills the Pins tab, so Pin here works str
   assert.ok(api.getCompLayers().some((id) => api.getNiceName(id) === "Pin: Paris"));
 });
 
-test("Fly to keys the camera from the current frame to the selected place", () => {
+// Fly here's Start / End frames: a comp long enough that a flight doesn't need the extend dialog.
+function longComp(api) { api.set(api.getActiveComp(), { endFrame: 500, playbackEnd: 500 }); }
+function flyRange(context, start, end) { context.flyStartField.setValue(start); context.flyEndField.setValue(end); }
+
+test("Fly to keys the camera from Start to End on the selected place", () => {
   const { context, api } = buildSandbox();
+  longComp(api);
   createWorldMap(context);
   const map = context.currentMap();
   context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
   context.refreshResultPicker();
   context.resultPicker.setValue(1);
   context.resultPicker.onValueChanged(); // the preview follows the pick, so Fly here goes there
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
   assert.doesNotMatch(context.statusLabel.getText(), /world view/, "the world-view note only when World view is picked");
@@ -694,9 +719,9 @@ test("Fly to keys the camera from the current frame to the selected place", () =
   api.setFrame(29);
   assert.ok(Math.abs(api.get(map.cameraId, "array.0") - 48.8566) < 1e-9);
   assert.equal(api.getFrame(), 29);
-  context.flyFramesField.setValue(1);
+  flyRange(context, 20, 20);
   context.flyBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Use at least 2 frames/);
+  assert.match(context.statusLabel.getText(), /Set End at least 1 frame after Start/);
 });
 
 test("Fly to the world view", () => {
@@ -704,33 +729,382 @@ test("Fly to the world view", () => {
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(5);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view: frames 0–4\./);
   // In Cavalry this was mistaken twice for a flight to the searched place: say why.
   assert.match(context.statusLabel.getText(), /Flying to the world view — to fly somewhere else, search for a place and pick it first\./);
 });
 
-// F9: the comp's default fake frame range is 0..9; a flight of 15 frames from frame 0
-// runs past it, and the status should say so.
-test("Fly to notes when the flight ends after the composition's last frame (F9)", () => {
-  const { context, api } = buildSandbox();
+// F9: the comp's default fake frame range is 0..9; a flight from frame 0 to 14 runs past it, so
+// Fly here asks before it extends the composition (the full set is in the tests below).
+test("Fly to asks before a flight that ends after the composition's last frame (F9)", () => {
+  const { context, api, ui } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(15);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
   context.flyBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Note: the flight ends after the composition's last frame \(9\)\./);
+  assert.equal(asked.length, 1);
+  assert.match(context.statusLabel.getText(), /The composition was extended to frame 14 so the flight isn't cut off\./);
 });
 
 test("Fly to says nothing extra when the flight stays inside the composition (F9)", () => {
-  const { context, api } = buildSandbox();
+  const { context, api, ui } = buildSandbox();
   createWorldMap(context);
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
-  context.flyFramesField.setValue(5);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
-  assert.doesNotMatch(context.statusLabel.getText(), /Note: the flight ends/);
+  assert.equal(asked.length, 0, "no dialog inside the composition");
+  assert.doesNotMatch(context.statusLabel.getText(), /extended/);
+  assert.equal(api.get(api.getActiveComp(), "endFrame"), 9);
+});
+
+// Fly here's Start / End frames, chaining and extending the composition.
+function flyWorld(context) {
+  createWorldMap(context);
+  context.resultPicker.setValue(0);
+  context.resultPicker.onValueChanged();
+  return context.currentMap();
+}
+function camTimes(api, map) { return [0, 1, 2].map((i) => plain(api.getKeyframeTimes(map.cameraId, "array." + i))); }
+const range = (a, b) => { const r = []; for (let f = a; f <= b; f++) r.push(f); return r; };
+
+test("Map tab: Start begins at the playhead and End 100 frames later; From: and To: label them", () => {
+  const { context, ui } = buildSandbox({ setup: (api) => api.setFrame(12) });
+  assert.equal(context.flyStartField.getValue(), 12);
+  assert.equal(context.flyEndField.getValue(), 112);
+  assert.equal(context.fromLabel.getText(), "From:");
+  assert.equal(context.toLabel.getText(), "To:");
+  const rows = context.sectionPages.pages[0]._items.filter((n) => n instanceof ui.HLayout);
+  const jumpRow = rows.filter((n) => holds(n, context.jumpBtn))[0];
+  const flyRow = rows.filter((n) => holds(n, context.flyBtn))[0];
+  assert.deepEqual(jumpRow._items, [context.jumpBtn], "Jump here has a row of its own");
+  assert.deepEqual(flyRow._items, [context.flyBtn, context.fromLabel, context.flyStartBox, context.toLabel, context.flyEndBox]);
+  assert.ok(holds(context.flyStartBox, context.flyStartField) && holds(context.flyEndBox, context.flyEndField), "each box holds its field");
+  [context.flyStartBox, context.flyEndBox].forEach((box) => {
+    const texts = []; walkUi(box, (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
+    assert.deepEqual(texts, ["F"], "each box is marked with an F");
+  });
+  const items = context.sectionPages.pages[0]._items;
+  assert.ok(items.indexOf(jumpRow) + 1 === items.indexOf(flyRow), "the Fly row follows the Jump row");
+  assert.equal(context.flyStartField._fixedWidth, 48);
+  assert.equal(context.flyEndField._fixedWidth, 48);
+  const quiet = buildSandbox().context;
+  assert.equal(quiet.flyStartField.getValue(), 0);
+  assert.equal(quiet.flyEndField.getValue(), 100);
+});
+
+test("Map tab: the Start and End fields hide with Jump here and Fly here while New map is picked", () => {
+  const { context } = buildSandbox();
+  const widgets = ["jumpBtn", "fromLabel", "flyStartBox", "flyStartField", "toLabel", "flyEndBox", "flyEndField", "flyBtn"];
+  widgets.forEach((w) => assert.equal(context[w].isHidden(), true, w + " hidden with no map"));
+  createWorldMap(context);
+  widgets.forEach((w) => assert.equal(context[w].isHidden(), false, w + " shown with a map"));
+});
+
+test("Map tab: the frame-field boxes follow New map: hidden with no map, shown again once a map is picked", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.flyStartBox.isHidden(), true);
+  assert.equal(context.flyEndBox.isHidden(), true);
+  createWorldMap(context);
+  assert.equal(context.flyStartBox.isHidden(), false);
+  assert.equal(context.flyEndBox.isHidden(), false);
+  context.mapPicker.setValue(context.maps.length); // New map
+  context.mapPicker.onValueChanged();
+  assert.equal(context.flyStartBox.isHidden(), true, "hidden again on New map");
+  assert.equal(context.flyEndBox.isHidden(), true);
+});
+
+test("Map tab: a note under the Fly row says what Fly here does, and hides with the row for New map", () => {
+  const { context, ui } = buildSandbox();
+  assert.equal(context.flyNote.getText(), "(animates the camera to the map preview)");
+  assert.equal(context.flyNote._textColor, "#8a8a8a");
+  const items = context.sectionPages.pages[0]._items;
+  const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
+  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 1] === context.flyNote, "the note sits right after the Fly row");
+  assert.equal(context.flyNote.isHidden(), true, "hidden with no map");
+  createWorldMap(context);
+  assert.equal(context.flyNote.isHidden(), false, "shown with a map");
+  context.mapPicker.setValue(context.maps.length); // New map
+  context.mapPicker.onValueChanged();
+  assert.equal(context.flyNote.isHidden(), true, "hidden again on New map");
+});
+
+function countingSearch(context, found) {
+  const calls = [];
+  context.GeoNet.search = (q) => { calls.push(q); return found.slice(); };
+  return calls;
+}
+function mapCommit(context, q) { context.searchField.setText(q); context.searchField.onValueCommitted(); }
+
+test("Map search box: Enter (commit) searches once, lists the results and says how to go on", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  mapCommit(context, "  Paris ");
+  assert.deepEqual(calls, ["Paris"]);
+  assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
+  assert.equal(context.resultPicker.getValue(), 1, "the first result is picked");
+  assert.equal(context.resultPicker._entries.length, 3);
+  assert.equal(context.pinSearchField.getText(), "Paris", "the Pins tab is pre-filled too");
+  mapCommit(context, "Paris");
+  assert.equal(calls.length, 1, "the same text again does not search");
+  mapCommit(context, "Rome");
+  assert.equal(calls.length, 2, "new text searches");
+});
+
+test("Map search box: committing empty text does nothing, quietly", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS]);
+  context.statusLabel.setText("untouched");
+  mapCommit(context, "   ");
+  assert.equal(calls.length, 0);
+  assert.equal(context.statusLabel.getText(), "untouched");
+});
+
+test("Map search box: a commit with no results says so", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  countingSearch(context, []);
+  mapCommit(context, "Nowhere");
+  assert.equal(context.statusLabel.getText(), "No results for \"Nowhere\".");
+});
+
+test("Map search box: a commit never creates a map; Search then makes it from the same results without searching again", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  assert.equal(context.maps.length, 0);
+  mapCommit(context, "Paris");
+  assert.equal(context.maps.length, 0, "no map made by Enter");
+  assert.equal(context.statusLabel.getText(), "2 result(s). Press Search to make the map at the first one.");
+  assert.equal(calls.length, 1);
+  context.searchBtn.onClick();
+  assert.equal(calls.length, 1, "Search reused the results");
+  assert.equal(context.maps.length, 1);
+  assert.equal(context.currentMap().name, "Paris");
+  assert.match(context.statusLabel.getText(), /^Created map "Paris" with countries and coastlines, centred on Paris\. 2 result\(s\)/);
+  context.mapPicker.setValue(context.maps.length); // New map again
+  context.mapPicker.onValueChanged();
+  context.searchField.setText("Rome");
+  context.searchBtn.onClick();
+  assert.equal(calls.length, 2, "Search with different text searches");
+  assert.deepEqual(calls, ["Paris", "Rome"]);
+});
+
+test("Map Search button: reuses the last results for the same text, searches again for new text or no results", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS, PARIS_TX]);
+  mapSearch(context, "Paris");
+  mapSearch(context, "Paris");
+  assert.equal(calls.length, 1, "second press with the same text reuses");
+  assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
+  context.resultPicker.setValue(2);
+  mapSearch(context, "Paris");
+  assert.equal(context.resultPicker.getValue(), 1, "reusing still starts at the first result");
+  const none = countingSearch(context, []);
+  mapSearch(context, "Nowhere");
+  mapSearch(context, "Nowhere");
+  assert.equal(none.length, 2, "no results to reuse, so it searches again");
+});
+
+test("Map search box: a failing search stays inside guard() on commit", () => {
+  const { context } = buildSandbox();
+  context.GeoNet.search = () => { throw new Error("offline"); };
+  context.searchField.setText("Paris");
+  assert.doesNotThrow(() => context.searchField.onValueCommitted());
+  assert.match(context.statusLabel.getText(), /offline/);
+});
+
+[["Pins", "pinSearchField", "pinSearchBtn", "pinResultPicker", "pinResults"],
+ ["Routes", "routeSearchField", "routeSearchBtn", "routeResultPicker", "routeResults"]].forEach(([name, fieldName, btnName, pickerName, resultsName]) => {
+  test(name + " search box: Enter searches once, the same text again does not, and the button reuses the results", () => {
+    const { context } = buildSandbox();
+    const calls = countingSearch(context, [PARIS, PARIS_TX]);
+    const field = context[fieldName];
+    field.setText("Paris ");
+    field.onValueCommitted();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(plain(context[pickerName]._entries), [PARIS.name, PARIS_TX.name]);
+    assert.equal(context[resultsName].length, 2);
+    field.onValueCommitted();
+    assert.equal(calls.length, 1, "same text: nothing");
+    context[btnName].onClick();
+    assert.equal(calls.length, 1, "the button after a commit with the same text reuses the results");
+    assert.equal(context[resultsName].length, 2);
+    assert.match(context.statusLabel.getText(), /^2 result\(s\)\. Pick one, then /);
+    field.setText("Rome");
+    context[btnName].onClick();
+    assert.equal(calls.length, 2, "new text searches from the button");
+    field.setText("Oslo");
+    field.onValueCommitted();
+    assert.equal(calls.length, 3, "new text searches on commit");
+  });
+  test(name + " search box: committing empty text does nothing, quietly", () => {
+    const { context } = buildSandbox();
+    const calls = countingSearch(context, [PARIS]);
+    context.statusLabel.setText("untouched");
+    context[fieldName].setText("  ");
+    context[fieldName].onValueCommitted();
+    assert.equal(calls.length, 0);
+    assert.equal(context.statusLabel.getText(), "untouched");
+  });
+});
+
+test("Pins search box: after a Map search the prefilled text is already searched, so Enter there does nothing", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = countingSearch(context, [PARIS]);
+  mapSearch(context, "Paris");
+  assert.equal(context.pinSearchField.getText(), "Paris");
+  context.pinSearchField.onValueCommitted();
+  assert.equal(calls.length, 1);
+});
+
+test("Fly here keys exactly Start to End, restores the playhead and moves the fields on for the next flight", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  flyRange(context, 30, 49);
+  api.setFrame(7);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 30–49."), 0);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, range(30, 49)));
+  assert.equal(api.getFrame(), 7, "the playhead goes back where it was");
+  assert.equal(context.flyStartField.getValue(), 49, "Start moves to the old End");
+  assert.equal(context.flyEndField.getValue(), 68, "End moves on by the same length");
+});
+
+test("Fly here starts from the camera as it is at the Start frame, not at the playhead", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 50, "array.1": 60, "array.2": 8 });
+  api.keyframe(map.cameraId, 40, { "array.0": 10, "array.1": 20, "array.2": 3 });
+  api.setFrame(0);
+  flyRange(context, 40, 49);
+  context.flyBtn.onClick();
+  api.setFrame(40);
+  assert.equal(api.get(map.cameraId, "array.0"), 10);
+  assert.equal(api.get(map.cameraId, "array.1"), 20);
+  assert.equal(api.get(map.cameraId, "array.2"), 3);
+  assert.equal(plain(api.getKeyframeTimes(map.cameraId, "array.0"))[0], 0, "the earlier key stays");
+});
+
+test("Fly here refuses an End less than 1 frame after Start and changes nothing", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  [[20, 20], [20, 15]].forEach(([s, e]) => {
+    flyRange(context, s, e);
+    context.flyBtn.onClick();
+    assert.equal(context.statusLabel.getText(), "Error: Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+    assert.deepEqual(camTimes(api, map), [[], [], []]);
+    assert.equal(context.flyStartField.getValue(), s, "the fields stay as they were");
+  });
+});
+
+test("Fly here refuses a Start before the composition's first frame", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  api.set(api.getActiveComp(), { startFrame: 5 });
+  const map = flyWorld(context);
+  flyRange(context, 3, 20);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Start is before the composition's first frame (5).");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+});
+
+test("Fly here past the composition's end asks, and Yes extends the composition, the layers that reached its end and the play range", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp();
+  const atEnd = api.create("group", "Reaches the end"), atEndMinusOne = api.create("group", "Out frame 9"), trimmed = api.create("group", "Trimmed");
+  api.setOutFrame(atEndMinusOne, 9);
+  api.setOutFrame(trimmed, 4);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Extend the timeline");
+  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 14. Continue?");
+  assert.equal(api.get(comp, "endFrame"), 14);
+  assert.equal(api.get(comp, "frameRange").y, 14);
+  assert.equal(api.get(comp, "playbackEnd"), 14);
+  assert.equal(api.getOutFrame(atEnd), 15);
+  assert.equal(api.getOutFrame(atEndMinusOne), 15);
+  assert.equal(api.getOutFrame(trimmed), 4, "a layer trimmed to end earlier is left alone");
+  assert.equal(api.getOutFrame(map.cameraId), 15);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, range(0, 14)));
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 14 so the flight isn't cut off."), 0);
+  assert.ok(context.statusLabel.getText().indexOf("Press Build imagery") > 0);
+  assert.equal(context.flyStartField.getValue(), 14);
+  assert.equal(context.flyEndField.getValue(), 28);
+});
+
+test("Fly here past the composition's end: No cancels and changes nothing", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp(), layer = api.create("group", "Reaches the end");
+  const asked = withModal(ui, false);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(context.statusLabel.getText(), "Cancelled. Set End to 9 or earlier to stay within your composition.");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  assert.equal(api.get(comp, "playbackEnd"), 9);
+  assert.equal(api.getOutFrame(layer), 10);
+  assert.equal(context.flyStartField.getValue(), 0);
+  assert.equal(context.flyEndField.getValue(), 14);
+});
+
+test("Fly here past the composition's end with no dialog available refuses and never extends silently", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const comp = api.getActiveComp(), layer = api.create("group", "Reaches the end");
+  assert.equal(context.questionDialog(), null);
+  flyRange(context, 0, 14);
+  context.flyBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: End is after your composition's last frame (9). Set End to 9 or earlier, or lengthen the composition first.");
+  assert.deepEqual(camTimes(api, map), [[], [], []]);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  assert.equal(api.getOutFrame(layer), 10);
+});
+
+test("GeoScene.extendComp: null when the comp already reaches the frame; keeps a shorter play range", () => {
+  const { context, api } = buildSandbox();
+  const comp = api.getActiveComp(), layer = api.create("group", "Layer");
+  assert.equal(context.GeoScene.extendComp(9), null);
+  assert.equal(context.GeoScene.extendComp(3), null);
+  assert.equal(api.get(comp, "endFrame"), 9);
+  api.set(comp, { playbackEnd: 5 });
+  const r = context.GeoScene.extendComp(20);
+  assert.deepEqual(plain(r), { oldEnd: 9, newEnd: 20, layers: 1 });
+  assert.equal(api.get(comp, "endFrame"), 20);
+  assert.equal(api.get(comp, "playbackEnd"), 5, "a play range that stopped earlier stays");
+  assert.equal(api.getOutFrame(layer), 21);
+});
+
+test("GeoScene.extendComp: one layer failing never stops the rest, and a Cavalry without out frames still extends the comp", () => {
+  const { context, api } = buildSandbox();
+  const comp = api.getActiveComp(), a = api.create("group", "A"), b = api.create("group", "B"), c = api.create("group", "C");
+  const real = api.setOutFrame;
+  api.setOutFrame = (id, f) => { if (id === b) throw new Error("locked"); real(id, f); };
+  const r = context.GeoScene.extendComp(12);
+  assert.equal(r.layers, 2);
+  assert.equal(api.getOutFrame(a), 13);
+  assert.equal(api.getOutFrame(b), 10);
+  assert.equal(api.getOutFrame(c), 13);
+  assert.equal(api.get(comp, "endFrame"), 12);
+  delete api.setOutFrame;
+  assert.equal(context.GeoScene.extendComp(15).layers, 0);
+  assert.equal(api.get(comp, "endFrame"), 15);
 });
 
 // F13: newly added base layers must not bury an existing pin/label/extract - restack
@@ -934,6 +1308,7 @@ test("credit texts are light so they read on the dark map", () => {
 
 test("pins, route legs and route stop pins are drawn in the panel's green", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const pin = GeoScene.addPin(map, "Paris", 2.35, 48.85);
@@ -980,6 +1355,7 @@ test("restackBaseLayers falls back to stepping backward when moveToBack does not
 
 test("createRoute builds a named group with one camera-linked leg per pair of stops", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const stops = [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "Lyon", lon: 4.84, lat: 45.76 }, { name: "Marseille", lon: 5.37, lat: 43.3 }];
@@ -1099,6 +1475,7 @@ test("Bake selected layers: selecting only a data layer gives the data layer err
 // F3: identical consecutive stops must not create an empty leg.
 test("createRoute skips a leg between identical consecutive stops, no gap in numbering (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const stops = [
@@ -1124,6 +1501,7 @@ test("createRoute throws when every consecutive pair of stops is identical (F3)"
 
 test("createRoute creates at most one pin per distinct place on a round trip A -> B -> A (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const A_ = { name: "A", lon: 0, lat: 0 }, B_ = { name: "B", lon: 10, lat: 10 };
@@ -1135,6 +1513,7 @@ test("createRoute creates at most one pin per distinct place on a round trip A -
 
 test("createRoute creates at most one label per distinct place on a round trip A -> B -> A (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   // Force the simple (non-driver) label path so labels are plain map layers named "Label: ...".
   context.GeoAttrs.LABEL_MODE = "simple";
@@ -2607,7 +2986,7 @@ test("Build imagery re-plans (does not start downloading a stale plan) after Fly
   useCustomTiles(context);
   context.buildImageryBtn.onClick(); // plans
   assert.match(context.buildImageryBtn.getText(), /tiles$/);
-  context.flyFramesField.setValue(5);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   context.buildImageryBtn.onClick(); // must re-plan, not start downloading the stale plan
   assert.match(context.statusLabel.getText(), /tiles needed/);
@@ -2974,6 +3353,69 @@ test("GeoStyle.heading is a small light-grey sentence-case label followed by a t
   assert.equal(n._textColor, "#8a8a8a");
 });
 
+test("GeoStyle.heading with a hint adds a grey hint label between the heading and its line", () => {
+  const { context, ui } = buildSandbox();
+  const h = context.GeoStyle.heading("Preview", "drag to move · double-click or + / − to zoom");
+  assert.equal(h._items.length, 3);
+  const [label, hint, line] = h._items;
+  assert.equal(label.getText(), "Preview");
+  assert.equal(label._textColor, "#a6a6a6");
+  assert.ok(hint instanceof ui.Label);
+  assert.equal(hint.getText(), "drag to move · double-click or + / − to zoom");
+  assert.equal(hint._textColor, "#8a8a8a");
+  assert.equal(hint._fontSize, 11);
+  assert.ok(line instanceof ui.Container);
+  assert.ok(context.GeoStyle.isHeading(h));
+  const plainHeading = context.GeoStyle.heading("Search");
+  assert.equal(plainHeading._items.length, 2, "a heading without a hint is unchanged");
+  assert.equal(plainHeading._items[0].getText(), "Search");
+  assert.ok(plainHeading._items[1] instanceof ui.Container);
+});
+
+test("Map tab: the Preview heading reads Preview (drag to move)", () => {
+  const { context } = buildSandbox();
+  const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview (drag to move)")[0];
+  assert.ok(row, "found the Preview heading");
+  assert.equal(row._items.length, 2, "heading with no hint has 2 items: label and line");
+  assert.equal(row._items[0].getText(), "Preview (drag to move)");
+  assert.equal(row._items[0]._textColor, "#a6a6a6");
+});
+
+test("GeoStyle.frameField is a rounded dark box holding a grey F and the field", () => {
+  const { context, ui } = buildSandbox();
+  const field = new ui.NumericField(5);
+  field.setFixedWidth(48);
+  const box = context.GeoStyle.frameField(field);
+  assert.ok(box instanceof ui.Container);
+  assert.equal(box._background, "#282828");
+  assert.deepEqual(plain(box._radius), [3, 3, 3, 3]);
+  const row = box._layout;
+  assert.ok(row instanceof ui.HLayout);
+  assert.deepEqual(plain(row._margins), [4, 0, 0, 0]);
+  assert.equal(row._spacing, 2);
+  assert.equal(row._items.length, 2);
+  const [f, held] = row._items;
+  assert.ok(f instanceof ui.Label);
+  assert.equal(f.getText(), "F");
+  assert.equal(f._textColor, "#8a8a8a");
+  assert.equal(f._fontSize, undefined);
+  assert.equal(held, field);
+  assert.equal(field._fixedWidth, 48, "the field keeps its width");
+});
+
+test("GeoStyle.frameField without ui.Container is a row of the F and the field", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const field = new ui.NumericField(5);
+  const row = context.GeoStyle.frameField(field);
+  assert.ok(row instanceof ui.HLayout);
+  assert.equal(row._items.length, 2);
+  assert.equal(row._items[0].getText(), "F");
+  assert.equal(row._items[1], field);
+});
+
 test("GeoStyle.heading without ui.Container is just the label", () => {
   const api = makeFakeApi(), ui = makeFakeUi();
   delete ui.Container;
@@ -3183,7 +3625,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview", "Camera"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -3243,7 +3685,7 @@ test("layer categories and data Show options are toggle buttons; yes/no settings
   assert.equal(context.regionsCheck.getValue(), true);
   assert.equal(context.legendCheck.getValue(), true);
   assert.equal(context.bubblesCheck.getValue(), false);
-  [context.creditCheck, context.lookupCheck, context.pinsAtStops, context.labelsAtStops].forEach((c) => assert.ok(c instanceof ui.Checkbox));
+  [context.creditCheck, context.lookupCheck, context.labelsAtStops].forEach((c) => assert.ok(c instanceof ui.Checkbox));
 });
 
 test("Add layers reads the toggles, and asks to turn one on when none are", () => {
@@ -3504,6 +3946,160 @@ test("preview: the current camera shows as a dashed frame", () => {
   assert.equal(strokes(p._draw, "#e6e6e6").length, 1);
 });
 
+// ---- Preview overlay: the zoom readout and − / + are drawn inside the map -----------------
+const PILL = "#000000a6", GLYPH = "#e6e6e6";
+const centreOf = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+// View coordinates (y down) to the Draw's: flipped when it is y-up, like the preview does.
+const drawPos = (p, r, yUp) => { const c = centreOf(r); return { x: c.x, y: yUp ? p._draw._size[1] - c.y : c.y }; };
+
+test("preview overlay: three dark pills and the light glyphs and readout text are drawn last", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setCurrentCamera({ lat: 45, lon: 2, zoom: 4 });
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], 0);
+  p._render();
+  const pills = fills(p._draw, PILL);
+  assert.equal(pills.length, 3, "readout, minus, plus");
+  const glyphs = fills(p._draw, GLYPH);
+  assert.equal(textCmds(glyphs).length, 1, "the readout text");
+  assert.equal(glyphs.reduce((n, x) => n + x.path.cmds.filter((c) => c[0] === "moveTo").length, 0), 3, "a bar for minus and two for plus");
+  assert.equal(strokes(p._draw, GLYPH).length, 1, "only the camera's dashed frame is stroked in that colour");
+  assert.equal(strokes(p._draw, "#33CE70").length >= 1, true);
+  const last = p._draw._paths.slice(-5);
+  assert.ok(last.every((x) => (x.paint.color === PILL || x.paint.color === GLYPH) && !x.paint.stroke), "the overlay is the last thing drawn");
+});
+
+test("preview overlay: rectangles sit 8 px in from the bottom corners, 20 px high, 4 px apart", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  const o = p._overlay();
+  assert.equal(o.plus.w, 20); assert.equal(o.plus.h, 20);
+  assert.equal(o.minus.w, 20); assert.equal(o.minus.h, 20);
+  assert.equal(o.plus.x + o.plus.w, 320 - 8);
+  assert.equal(o.plus.y + o.plus.h, 180 - 8);
+  assert.equal(o.minus.y, o.plus.y);
+  assert.equal(o.plus.x - (o.minus.x + o.minus.w), 4, "minus is left of plus");
+  assert.equal(o.readout.x, 8);
+  assert.equal(o.readout.y + o.readout.h, 180 - 8);
+  assert.equal(o.readout.h, 20);
+  assert.ok(o.readout.w > 30 && o.readout.x + o.readout.w < o.minus.x, "wide enough for its text, clear of the buttons");
+});
+
+test("preview overlay: the readout says the frame's zoom and follows it", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  const text = () => textCmds(fills(p._draw, GLYPH));
+  assert.equal(text()[0][1], "Zoom 5.0");
+  assert.equal(text()[0][2], 10, "10 px text");
+  p.zoomBy(1);
+  p._render();
+  assert.equal(text()[0][1], "Zoom 6.0");
+});
+
+test("preview overlay: glyphs are bars centred in their squares (10 by 2, plus 2 by 10)", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p._render();
+  const o = p._overlay(), m = centreOf(o.minus), q = centreOf(o.plus);
+  const bars = fills(p._draw, GLYPH).filter((x) => !textCmds([x]).length).reduce((a, x) => a.concat(x.path.cmds), []);
+  const rects = [];
+  for (let i = 0; i < bars.length; i += 5) {
+    const pts = bars.slice(i, i + 4).map((c) => [c[1], c[2]]);
+    const xs = pts.map((t) => t[0]), ys = pts.map((t) => t[1]);
+    rects.push({ x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) });
+  }
+  assert.equal(rects.length, 3);
+  const has = (cx, cy, w, h) => rects.some((r) => Math.abs((r.x0 + r.x1) / 2 - cx) < 1e-9 && Math.abs((r.y0 + r.y1) / 2 - cy) < 1e-9 && Math.abs(r.x1 - r.x0 - w) < 1e-9 && Math.abs(r.y1 - r.y0 - h) < 1e-9);
+  assert.ok(has(m.x, m.y, 10, 2), "minus bar");
+  assert.ok(has(q.x, q.y, 10, 2), "plus horizontal bar");
+  assert.ok(has(q.x, q.y, 2, 10), "plus vertical bar");
+});
+
+test("preview overlay: with a y-up Draw the pills are flipped like everything else", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { yUp: true });
+  p.setWidth(320);
+  p._render();
+  const o = p._overlay();
+  const plusPill = fills(p._draw, PILL)[2].path.cmds;
+  const ys = plusPill.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").map((c) => c[2]);
+  assert.equal(Math.min(...ys), 180 - (o.plus.y + o.plus.h), "the plus pill's bottom edge is at the bottom in y-up coordinates");
+  assert.equal(Math.max(...ys), 180 - o.plus.y);
+});
+
+[false, true].forEach((yUp) => {
+  test("preview overlay: pressing + or - zooms by one and starts no drag (y-up " + yUp + ")", () => {
+    const { context } = buildSandbox({ setup: installNe });
+    const { p, picks } = makePreview(context, { yUp: yUp });
+    p.setWidth(320);
+    p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+    p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+    const o = p._overlay();
+    p._draw.onMousePress(drawPos(p, o.plus, yUp), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "+ zooms in");
+    const at = p.frameCamera();
+    p._draw.onMouseMove({ x: 10, y: 10 });
+    assert.deepEqual(plain(p.frameCamera()), plain(at), "no drag started");
+    p._draw.onMouseRelease({ x: 10, y: 10 }, "left");
+    p._draw.onMousePress(drawPos(p, o.minus, yUp), "left");
+    p._draw.onMousePress(drawPos(p, o.minus, yUp), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 4) < 1e-9, "- zooms out, once per press");
+    assert.deepEqual(picks, [], "and picks nothing");
+  });
+});
+
+test("preview overlay: a press on the readout does nothing, and a press elsewhere still drags", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress(drawPos(p, p._overlay().readout, false), "left");
+  p._draw.onMouseMove({ x: 200, y: 120 });
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "the readout is no drag handle");
+  p._draw.onMouseRelease({ x: 200, y: 120 }, "left");
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  assert.ok(p.frameCamera().lon < before.lon, "elsewhere it drags");
+});
+
+test("preview overlay: a double-click on a button or the readout is ignored", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const o = p._overlay();
+  ["plus", "minus", "readout"].forEach((k) => {
+    p._draw.onMouseDoubleClick(drawPos(p, o[k], false), "left");
+    assert.ok(Math.abs(p.frameCamera().zoom - 5) < 1e-9, k + " double-click leaves the zoom");
+  });
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "elsewhere it still zooms in");
+});
+
+test("preview overlay: the Draw says how to use it, and the old note row and native buttons are gone", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p._draw._toolTip, "Drag to move · double-click or + / − to zoom");
+  assert.deepEqual(p.layout._items.filter((n) => n instanceof ui.HLayout), [], "nothing but the map under the heading");
+  assert.equal(p.layout._items[0], p._draw);
+  const texts = [];
+  walkUi(p.layout, (n) => { if (n.getText) texts.push(n.getText()); });
+  assert.ok(!texts.some((t) => /Zoom|drag/i.test(t)), "no note text");
+  const noTip = makeFakeUi();
+  delete noTip.Draw.prototype.setToolTip;
+  const ctx2 = vm.createContext({ api: makeFakeApi(), ui: noTip, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), ctx2, { filename: "CavalryGeo.js" });
+  assert.equal(ctx2.preview.available(), true, "a Draw without setToolTip is fine");
+});
+
 test("preview: without ui.Draw, or with the data missing, it says so and is unavailable", () => {
   const api = makeFakeApi(), ui = makeFakeUi();
   delete ui.Draw;
@@ -3617,12 +4213,15 @@ test("preview: a drag that paused before release renders full detail once, not t
 // ---- Preview in the Map tab ----------------------------------------------------------
 function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
 
-test("Map tab: the preview sits between Search and Camera", () => {
+test("Map tab: the preview sits between Search and the Jump here row, with no Camera heading", () => {
   const { context } = buildSandbox({ setup: installNe });
   const items = context.sectionPages.pages[0]._items;
   const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
-  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview"), iCamera = texts.indexOf("Camera");
-  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iCamera);
+  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview (drag to move)");
+  const iJump = items.findIndex((w) => holds(w, context.jumpBtn));
+  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iJump);
+  assert.equal(texts.indexOf("Camera"), -1, "no Camera heading");
+  assert.ok(items.indexOf(context.preview.layout) === iPreview + 1 && iJump === iPreview + 2, "the Jump here row follows the preview directly");
   assert.ok(mapPageHas(context, context.preview._draw));
 });
 
@@ -3737,8 +4336,8 @@ test("Map tab: after moving the preview, Fly here goes to the green frame", () =
   const map = context.currentMap();
   context.preview.showCamera({ lat: 10, lon: 20, zoom: 6 }, "camera");
   context.preview.zoomBy(1);
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  longComp(api);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the preview frame: frames 20–29\./);
   api.setFrame(29);
@@ -3753,8 +4352,8 @@ test("Map tab: with the preview unavailable, Fly here still names the picked res
   createWorldMap(context);
   searchFinds(context, [PARIS]);
   mapSearch(context, "Paris");
-  context.flyFramesField.setValue(10);
-  api.setFrame(20);
+  longComp(api);
+  flyRange(context, 20, 29);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to Paris: frames 20–29\./);
 });
@@ -3802,8 +4401,7 @@ test("Map tab: Jump here and Fly here leave the preview where it is and only mov
   context.resultPicker.setValue(0);
   context.resultPicker.onValueChanged();
   const world = context.preview.frameCamera();
-  context.flyFramesField.setValue(5);
-  api.setFrame(0);
+  flyRange(context, 0, 4);
   context.flyBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Flight to the world view/);
   assert.deepEqual(plain(context.preview.frameCamera()), plain(world), "no recentre after Fly");
@@ -4125,6 +4723,7 @@ test("controls: labels share Hide, Colour and Size", () => {
 
 test("controls: a route gets shared colour, width and arc height, then each leg's draw on %", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const r = context.GeoControlPanel.sync(map);
@@ -4221,6 +4820,7 @@ test("controls: a label helper whose connections can't be read skips only its ow
 
 test("controls: a leg whose name doesn't say its number is numbered by its place in the route", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const realName = api.getNiceName;
@@ -4481,4 +5081,381 @@ test("controls: two maps with the same name each keep their own Controls (never 
   assert.ok(directlyAbove(api, r1.componentId, m1.groupId));
   assert.ok(directlyAbove(api, r2.componentId, m2.groupId));
   assert.equal(context.GeoControlPanel.sync(m1).componentId, r1.componentId, "and a later sync still finds its own");
+});
+
+// ---- Routes remake --------------------------------------------------------------------
+const GeoCurveT = require("../src/core/curve.js");
+const GeoProjT = require("../src/core/projection.js");
+function routeMap(context) { createWorldMap(context); return context.GeoScene.findMaps()[0]; }
+const ABC = [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }, { name: "C", lon: 20, lat: 0 }];
+function routeData(api, groupId) { return plain(api.getUserDataKey(groupId, "geoRoute")); }
+
+test("routes: Create route builds stops, Bézier legs and helpers, top to bottom", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  assert.equal(api.getNiceName(r.groupId), "Route: A → B → C");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  assert.deepEqual(api.getChildren(r.groupId).map((id) => api.getNiceName(id)), ["Stop: A", "Stop: B", "Stop: C", "Leg 2: B → C", "Leg 1: A → B", "Route helpers"]);
+  const d = routeData(api, r.groupId);
+  assert.equal(d.camera, map.cameraId);
+  assert.deepEqual(d.stops.map((s) => s.name), ["A", "B", "C"]);
+  assert.deepEqual(d.legs.map((l) => [l.number, l.from, l.to]), [[1, 0, 1], [2, 1, 2]]);
+  assert.deepEqual(plain(r.legs), d.legs.map((l) => l.line));
+  assert.deepEqual(plain(r.stops), d.stops.map((s) => s.circle));
+  d.stops.forEach((s) => {
+    assert.equal(api.getParent(s.circle), s.holder);
+    assert.equal(api.getNiceName(s.circle), s.name);
+    [s.position, s.visibility, s.endPoint].forEach((id) => assert.equal(api.getParent(id), d.helpers));
+  });
+  d.legs.forEach((l) => {
+    assert.equal(api.getLayerType(l.line), "basicLine");
+    assert.equal(api.get(l.line, "generator"), "bezierLine");
+    [l.startHandle, l.endHandle, l.fade].forEach((id) => assert.equal(api.getParent(id), d.helpers));
+  });
+  assert.equal(api.getNiceName(d.legs[0].startHandle), "Leg 1: A → B start handle");
+  assert.equal(api.getNiceName(d.stops[1].endPoint), "B end point");
+});
+
+test("routes: stops ride with the camera and legs are wired to them", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId), [a, b] = d.stops, leg = d.legs[0];
+  const IN = (id, attr) => api.getInConnection(id, attr);
+  for (let i = 0; i < 5; i++) assert.equal(IN(a.position, "array." + i), map.cameraId + ".array." + i);
+  assert.equal(api.get(a.position, "array.5"), 0); assert.equal(api.get(b.position, "array.6"), 10);
+  assert.match(api.get(a.position, "expression"), /"category":"stopDriver"/);
+  assert.equal(IN(a.holder, "position"), a.position + ".id");
+  assert.equal(IN(a.holder, "opacity"), a.visibility + ".id");
+  assert.equal(IN(a.visibility, "array.5"), a.position + ".array.5");
+  assert.deepEqual([0, 1, 2, 3].map((i) => IN(a.endPoint, "array." + i)), [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y"]);
+  assert.equal(IN(leg.line, "generator.startPosition"), a.endPoint + ".id");
+  assert.equal(IN(leg.line, "generator.endPosition"), b.endPoint + ".id");
+  assert.equal(IN(leg.line, "generator.startOffset"), leg.startHandle + ".id");
+  assert.equal(IN(leg.line, "generator.endOffset"), leg.endHandle + ".id");
+  assert.equal(IN(leg.line, "opacity"), leg.fade + ".id");
+  assert.deepEqual([IN(leg.fade, "array.0"), IN(leg.fade, "array.1")], [a.holder + ".opacity", b.holder + ".opacity"]);
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((i) => IN(leg.startHandle, "array." + i)),
+    [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y", b.holder + ".position.x", b.holder + ".position.y", b.circle + ".position.x", b.circle + ".position.y"]);
+  assert.match(api.get(leg.startHandle, "expression"), /GeoCurve\.handles[\s\S]*\.start\);/);
+  assert.match(api.get(leg.endHandle, "expression"), /\.end\);/);
+});
+
+test("routes: styles, trim, starting arc and hand values seeded with the plugin's shape", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId), leg = d.legs[0];
+  d.stops.forEach((s) => { assert.deepEqual(plain(api.get(s.circle, "generator.radius")), [8, 8]); assert.equal(api.get(s.circle, "material.materialColor"), "#1F8F4E"); assert.equal(api.hasFill(s.circle), true); assert.equal(api.hasStroke(s.circle), false); });
+  assert.equal(api.get(leg.line, "stroke.strokeColor"), "#1F8F4E");
+  assert.equal(api.get(leg.line, "stroke.width"), 3);
+  assert.equal(api.get(leg.line, "stroke.trim"), true);
+  assert.equal(api.get(leg.line, "stroke.trimEnd"), 100);
+  assert.equal(api.hasFill(leg.line), false);
+  assert.equal(api.get(leg.startHandle, "array.8"), 40);
+  assert.equal(api.get(leg.startHandle, "array.11"), 0);
+  const cam = context.GeoScene.readCamera(map.cameraId);
+  const pa = GeoProjT.makeProjector(cam), A = [0, 0], B = [0, 0];
+  pa(0, 0, A); pa(10, 10, B);
+  const want = GeoCurveT.handles(A, B, { arc: 40, lean: 0, flip: false });
+  assert.ok(Math.abs(api.get(leg.startHandle, "array.12") - want.start[0]) < 1e-9 && Math.abs(api.get(leg.startHandle, "array.13") - want.start[1]) < 1e-9);
+  assert.ok(Math.abs(api.get(leg.endHandle, "array.12") - want.end[0]) < 1e-9 && Math.abs(api.get(leg.endHandle, "array.13") - want.end[1]) < 1e-9);
+});
+
+test("routes: labels at stops sit inside their circles; a round trip has one stop per place", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, [ABC[0], ABC[1], ABC[0]], { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 2);
+  assert.deepEqual(d.legs.map((l) => [l.from, l.to]), [[0, 1], [1, 0]]);
+  d.stops.forEach((s) => {
+    assert.equal(api.getParent(s.label), s.circle);
+    assert.equal(api.get(s.label, "text"), s.name);
+  });
+});
+
+test("routes: every new layer is reset to an identity transform after parenting (api.parent keeps the world transform)", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  const xy = (id) => [api.get(id, "position.x"), api.get(id, "position.y")];
+  const identity = (id, what) => {
+    assert.deepEqual(xy(id), [0, 0], what + " position");
+    assert.equal(api.get(id, "rotation.z"), 0, what + " rotation");
+    assert.deepEqual([api.get(id, "scale.x"), api.get(id, "scale.y")], [1, 1], what + " scale");
+  };
+  identity(r.groupId, "route group");
+  identity(d.helpers, "Route helpers");
+  d.stops.forEach((s) => {
+    identity(s.circle, "circle " + s.name);
+    assert.equal(api.get(s.holder, "rotation.z"), 0, "holder rotation");
+    assert.deepEqual([api.get(s.holder, "scale.x"), api.get(s.holder, "scale.y")], [1, 1], "holder scale");
+    assert.equal(api.get(s.holder, "position"), undefined, "the holder's position is only the driver's");
+    assert.equal(api.get(s.holder, "position.x"), undefined);
+    assert.equal(api.get(s.label, "rotation.z"), 0, "label rotation");
+    assert.deepEqual([api.get(s.label, "scale.x"), api.get(s.label, "scale.y")], [1, 1], "label scale");
+    assert.deepEqual(plain(api.get(s.label, "position")), [14, 14]);
+  });
+  d.legs.forEach((l) => identity(l.line, "leg " + l.number));
+});
+
+test("routes: a build that fails part-way leaves nothing behind", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const before = api.getCompLayers(false).slice().sort();
+  const real = api.setGenerator; let n = 0;
+  api.setGenerator = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  assert.throws(() => context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true }), /boom/);
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+});
+
+test("routes: without Bézier lines, Create route makes old-style legs", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  delete api.setGenerator;
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 25, labels: false });
+  const legs = context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "route");
+  assert.equal(legs.length, 2);
+  assert.equal(api.get(legs[0].id, "generator.array.7"), 25);
+  assert.equal(api.hasUserDataKey(r.groupId, "geoRoute"), false);
+  assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 3, "stops become pins on the fallback");
+});
+
+test("routes: without primitive shapes or user data, Create route also makes old-style legs", () => {
+  ["primitive", "setUserData"].forEach((fn) => {
+    const { context, api } = buildSandbox();
+    const map = routeMap(context);
+    delete api[fn];
+    const r = context.GeoScene.createRoute(map, ABC, { arc: 25, labels: false });
+    assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "route").length, 2, fn);
+    assert.equal(api.hasUserDataKey(r.groupId, "geoRoute"), false, fn);
+    assert.equal(r.stops, undefined, fn);
+    assert.deepEqual([api.get(r.groupId, "position.x"), api.get(r.groupId, "position.y"), api.get(r.groupId, "rotation.z")], [0, 0, 0], fn + ": the route group is reset too");
+  });
+});
+
+test("routes: findRoutes finds new routes and skips deleted parts", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  let found = plain(context.GeoScene.findRoutes(map));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, r.groupId);
+  assert.equal(found[0].legs.length, 2);
+  api.deleteLayer(found[0].legs[1].line);
+  found = plain(context.GeoScene.findRoutes(map));
+  assert.deepEqual(found[0].legs.map((l) => l.number), [1]);
+  createWorldMap(context);
+  const other = context.GeoScene.findMaps().find((m) => m.cameraId !== map.cameraId);
+  assert.deepEqual(plain(context.GeoScene.findRoutes(other)), []);
+});
+
+test("routes: Pin here turns a dragged stop into its new place and zeroes the drag", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const s = routeData(api, r.groupId).stops[0];
+  const cam = { lat: 48, lon: 2, zoom: 5, rotation: 10, projection: 0 };
+  api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection });
+  api.set(s.holder, { position: { x: 100, y: 50, z: 0 } });   // what the position driver computed
+  api.set(s.circle, { position: { x: 20, y: -10, z: 0 } });   // the user's drag
+  const res = plain(context.GeoScene.pinStops(map, [s.label]));
+  assert.deepEqual(res, { pinned: 1, offGlobe: [] });
+  const want = GeoProjT.unproject(cam, 120, 40);
+  assert.ok(Math.abs(api.get(s.position, "array.5") - want.lon) < 1e-9 && Math.abs(api.get(s.position, "array.6") - want.lat) < 1e-9);
+  const p = api.get(s.circle, "position");
+  assert.deepEqual([p.x !== undefined ? p.x : p[0], p.y !== undefined ? p.y : p[1]], [0, 0]);
+});
+
+test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores other layers", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[1];
+  api.set(s.position, { "array.0": 0, "array.1": 0, "array.2": 2, "array.3": 0, "array.4": 2 });
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 100000, y: 0, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [s.circle, map.cameraId])), { pinned: 0, offGlobe: ["B"] });
+  assert.equal(api.get(s.position, "array.5"), 10);
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [map.cameraId])), { pinned: 0, offGlobe: [] });
+});
+
+test("routes: Pin here treats a stop whose camera inputs aren't numbers as off the map's edge, and writes no NaN", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[0];
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.set(s.position, { "array.0": 0, "array.1": 0, "array.2": undefined, "array.3": 0, "array.4": 0 });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [s.circle])), { pinned: 0, offGlobe: ["A"] });
+  assert.equal(api.get(s.position, "array.5"), 0, "the stop keeps its place");
+  assert.deepEqual(plain(api.get(s.circle, "position")), { x: 10, y: 10, z: 0 }, "and its drag");
+});
+
+test("controls: a new route gets stop, curve and hand rows; values drive every handle", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: true });
+  const s = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, s.componentId)).slice(7);
+  assert.deepEqual(names.slice(0, 6), ["Labels · Hide", "Labels · Colour", "Labels · Size", "Stops · Hide", "Stops · Colour", "Stops · Size"]);
+  assert.deepEqual(names.slice(6, 11), ["A → B → C · Colour", "A → B → C · Width", "A → B → C · Arc height", "A → B → C · Lean", "A → B → C · Flip side"]);
+  assert.equal(names[11], "A → B → C · Leg 1 draw on %");
+  assert.equal(names.length, 6 + 5 + 2 * 6);
+  const d = routeData(api, r.groupId), slots = slotsOf(api, s.valuesId);
+  const arc = slots["route:" + r.groupId + ":arc"];
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), s.valuesId + "." + arc)));
+  assert.equal(api.get(s.valuesId, arc), 40);
+  const size = slots["stops:size"];
+  d.stops.forEach((st) => ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(st.circle, a), s.valuesId + "." + size)));
+  const hx = slots["leg:" + d.legs[0].line + ":startX"];
+  assert.equal(api.get(s.valuesId, hx), api.get(d.legs[0].startHandle, "array.12"), "hand X starts with the seeded value");
+});
+
+test("Routes tab: Arc height %, Labels at stops and Pin here; no Pins at stops", () => {
+  const { context } = buildSandbox();
+  const page = context.labelPages.pages[1];
+  assert.ok(holds(page, context.arcField) && holds(page, context.pinStopsBtn) && holds(page, context.createRouteBtn));
+  assert.equal(context.pinsAtStops, undefined);
+  assert.equal(context.liftField, undefined);
+  let label = null;
+  walkUi(page, (n) => { if (n._text === "Arc height %") label = n; });
+  assert.ok(label, "an 'Arc height %' label");
+});
+
+test("Create route passes Arc height % and makes a new-style route", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.stops.push({ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 });
+  context.arcField.setValue(55);
+  context.createRouteBtn.onClick();
+  const map = context.GeoScene.findMaps()[0];
+  const found = plain(context.GeoScene.findRoutes(map));
+  assert.equal(found.length, 1);
+  assert.equal(api.get(found[0].legs[0].startHandle, "array.8"), 55);
+  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\. Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls\./);
+});
+
+test("Bake selected layers: a new route's legs and stops are skipped, with a message of their own", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  api.select([d.legs[0].line]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
+  api.select([d.stops[0].circle, d.stops[0].holder, d.stops[0].label, d.legs[0].startHandle, d.helpers]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Error: Route legs and stops are already Cavalry shapes/);
+  const countries = context.GeoScene.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, d.legs[0].line, d.stops[1].circle]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Skipped 2 route part\(s\) — they're already Cavalry shapes\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
+});
+
+test("Pin here: needs a selected stop, then pins it", () => {
+  const { context, api } = buildSandbox();
+  context.pinStopsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+  createWorldMap(context);
+  api.select([]);
+  context.pinStopsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select one or more route stops (the circles) first.");
+  const map = context.GeoScene.findMaps()[0];
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const st = routeData(api, r.groupId).stops[0];
+  api.set(st.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(st.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.select([st.circle]);
+  context.pinStopsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Pinned 1 stop\(s\)\./);
+  api.set(st.position, { "array.4": 2, "array.2": 2 });
+  api.set(st.circle, { position: { x: 100000, y: 0, z: 0 } });
+  context.pinStopsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Pinned 0 stop\(s\)\. A is past the map's edge, so it kept its place\./);
+});
+
+function stubFind(context) {
+  const calls = [];
+  context.GeoScene.findMapLayers = () => [{ id: 1, name: "Streets", meta: { category: "streets" } }];
+  context.GeoScene.readLayerData = () => "enc";
+  context.GeoCodec.findByName = (enc, q) => { calls.push(q); return [{ name: "Rue de Rivoli", indices: [0] }]; };
+  return calls;
+}
+
+test("Extract Find box: Enter (commit) with new text runs Find once, the same text again does nothing, blank runs it", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli ");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli"]);
+  assert.equal(context.statusLabel.getText(), "1 match(es). Select some, then Extract.");
+  assert.deepEqual(plain(context.featureList._model), [{ uuid: "g0", label: "Rue de Rivoli" }]);
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1, "same text: nothing");
+  context.featureQuery.setText("");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli", ""], "a change to blank runs Find (blank = all named)");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2);
+});
+
+test("Extract Find box: the Find button always runs, and the text it ran counts as already found", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli");
+  context.findBtn.onClick();
+  context.findBtn.onClick();
+  assert.equal(calls.length, 2, "the button always runs");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2, "Enter after the button with the same text does nothing");
+  context.featureQuery.setText("Louvre");
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
+});
+
+function stubLoad(context) {
+  const fetched = [];
+  context.GeoNet.fetchCsv = (url) => { fetched.push(url); return "Location,Visitors\nParis,30\n"; };
+  context.GeoNet.neLayer = () => context.GeoCodec.encodeLayer({ kind: "polygon", features: [] });
+  return fetched;
+}
+
+test("Data link box: Enter (commit) with a new link loads once, the same link again does nothing, empty does nothing", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  context.dataLinkField.setText(" https://example.com/a.csv ");
+  context.dataLinkField.onValueCommitted();
+  assert.deepEqual(fetched, ["https://example.com/a.csv"]);
+  assert.match(context.statusLabel.getText(), /^1 rows, /);
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 1, "same link: nothing");
+  context.dataLinkField.setText("   ");
+  context.statusLabel.setText("untouched");
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 1, "empty: nothing");
+  assert.equal(context.statusLabel.getText(), "untouched");
+  context.dataLinkField.setText("https://example.com/b.csv");
+  context.dataLinkField.onValueCommitted();
+  assert.deepEqual(fetched, ["https://example.com/a.csv", "https://example.com/b.csv"]);
+});
+
+test("Data link box: the Load button with the same link still loads again", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  context.dataLinkField.setText("https://example.com/a.csv");
+  context.dataLinkField.onValueCommitted();
+  context.dataLoadBtn.onClick();
+  assert.equal(fetched.length, 2, "the button reloads");
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 2, "Enter after the button with the same link does nothing");
 });

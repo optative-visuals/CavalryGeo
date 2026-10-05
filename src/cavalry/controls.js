@@ -165,7 +165,7 @@ var GeoControlPanel = (function () {
     var S = G.STATE_ATTRS, imagery = GeoScene.findImagery(map), skip = {}, routes = {}, sets = {};
     imagery.forEach(function (im) { skip[im.groupId] = true; });
     var order = sceneOrder(map.groupId, skip);
-    var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], data: { year: [], sets: [] }, imagery: [] };
+    var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], data: { year: [], sets: [] }, imagery: [] };
     GeoScene.findMapLayers(map).sort(order).forEach(function (l, i) {
       var c = l.meta.category;
       if (G.BASE.indexOf(c) >= 0 || c === "extract") {
@@ -188,7 +188,21 @@ var GeoControlPanel = (function () {
       }
     });
     model.routes.forEach(function (r) { sortLegs(r.legs); });
-    model.labels = GeoScene.findLabels(map).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
+    var routeLabels = [];
+    GeoScene.findRoutes(map).sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
+      model.newRoutes.push({
+        id: r.groupId, name: stripPrefix(r.name, "Route: "),
+        legs: r.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) {
+          return { id: l.line, number: l.number, state: linkState(l.line, S.newLeg),
+            start: { id: l.startHandle, state: linkState(l.startHandle, S.handle) }, end: { id: l.endHandle, state: linkState(l.endHandle, S.handle) } };
+        })
+      });
+      r.stops.forEach(function (s) {
+        model.stops.push({ id: s.circle, state: linkState(s.circle, S.stop) });
+        if (s.label && (typeof api.layerExists !== "function" || api.layerExists(s.label))) routeLabels.push(s.label);
+      });
+    });
+    model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
     return model;
   }

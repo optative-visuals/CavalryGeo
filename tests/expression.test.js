@@ -166,3 +166,23 @@ test("imagery level drivers: position, scale and opacity", () => {
   assert.equal(vm.runInNewContext(E.imageryLevelExpression(src, "opacity", level), { camLat: 0, camLon: 0, camZoom: 5, camRotation: 0, camProjection: 0 }), 0);
   assert.throws(() => E.imageryLevelExpression(src, "rotation", level), /Unknown imagery driver/);
 });
+
+test("route helper expressions: end point, handles (plugin and hand mode) and fade", () => {
+  const vm = require("node:vm");
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const curveSrc = fs.readFileSync(path.join(__dirname, "../src/core/curve.js"), "utf8");
+  const Curve = require("../src/core/curve.js");
+  const run = (expr, inputs) => vm.runInNewContext(expr, Object.fromEntries(inputs.map((v, i) => ["n" + i, v])));
+  assert.deepEqual(Array.from(run(E.routeEndPointExpression({ camera: "c", category: "stopEnd" }), [100, 50, 20, -10])), [120, 40]);
+  const ins = [0, 0, 10, 0, 200, 0, -10, 0, 40, 20, 0, 0, 7, 8];
+  const want = Curve.handles([10, 0], [190, 0], { arc: 40, lean: 20, flip: 0 });
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(curveSrc, { camera: "c", category: "legHandle" }, "start"), ins)), want.start);
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(curveSrc, { camera: "c", category: "legHandle" }, "end"), ins)), want.end);
+  const hand = ins.slice(); hand[11] = 1;
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(curveSrc, { camera: "c", category: "legHandle" }, "end"), hand)), [7, 8]);
+  assert.throws(() => E.routeHandleExpression(curveSrc, {}, "middle"), /Unknown handle/);
+  assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 0]), 0);
+  assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
+  assert.deepEqual(E.HANDLE_INPUTS.map((i) => i[0]), ["aHolderX", "aHolderY", "aStopX", "aStopY", "bHolderX", "bHolderY", "bStopX", "bStopY", "arc", "lean", "flip", "hand", "handX", "handY"]);
+});

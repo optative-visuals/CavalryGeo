@@ -13,8 +13,10 @@ var GeoScene = (function () {
     roads: { stroke: "#8a948e", width: 2 }, railways: { stroke: "#a0a7a3", width: 1.5 },
     extractFill: { fill: "#e4572e" }, extractLine: { stroke: "#e4572e", width: 3 },
     pin: { fill: "#1F8F4E" }, label: { fill: "#e6e6e6" },
+    stop: { fill: "#1F8F4E" },
     route: { stroke: "#1F8F4E", width: 3 }
   };
+  var STOP_RADIUS = 8, ROUTE_KEY = "geoRoute";
 
   function setOne(id, attr, value) { var o = {}; o[attr] = value; api.set(id, o); }
 
@@ -165,27 +167,29 @@ var GeoScene = (function () {
   // Same lon/lat to 1e-9, matching the panel's Add-stop duplicate check.
   function samePlace(a, b) { return Math.abs(a.lon - b.lon) < 1e-9 && Math.abs(a.lat - b.lat) < 1e-9; }
 
-  // stops: [{ name, lon, lat }] in travel order; opts: { lift, pins, labels }.
-  function createRoute(map, stops, opts) {
+  // Pairs of consecutive stops that make a leg; identical consecutive stops are skipped
+  // (e.g. a round trip's A -> ... -> A would make an empty leg), so leg numbering continues
+  // without gaps. Refuses before anything is created.
+  function routePairs(stops) {
     if (!stops || stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
-    opts = opts || {};
-    // Identical consecutive stops (e.g. a round trip's A -> ... -> A) would make an
-    // empty leg, so skip those pairs; leg numbering continues without gaps. If that
-    // leaves no legs at all, refuse before creating the group.
     var pairs = [];
-    for (var i = 0; i < stops.length - 1; i++) {
-      var a = stops[i], b = stops[i + 1];
-      if (!samePlace(a, b)) pairs.push([a, b]);
-    }
+    for (var i = 0; i < stops.length - 1; i++) if (!samePlace(stops[i], stops[i + 1])) pairs.push([stops[i], stops[i + 1]]);
     if (!pairs.length) throw new Error("Add at least 2 different stops to make a route.");
+    return pairs;
+  }
+
+  // Old-style route (script-drawn legs + pins at stops), used when this Cavalry can't make Bézier lines.
+  function createOldRoute(map, stops, pairs, opts) {
     var groupId = api.create("group", routeTitle(stops));
     api.parent(groupId, map.groupId);
+    api.set(groupId, identityTransform()); // api.parent keeps the world transform: reset it
     var legs = [];
+    var lift = opts.arc != null ? opts.arc : (opts.lift != null ? opts.lift : 30);
     pairs.forEach(function (pair, idx) {
       var a = pair[0], b = pair[1], name = a.name + " → " + b.name;
       var ends = A.TRIM_REVERSED ? [[b.lon, b.lat], [a.lon, a.lat]] : [[a.lon, a.lat], [b.lon, b.lat]];
       var enc = GeoCodec.encodeLayer({ kind: "route", features: [{ name: name, rank: 1, rings: [ends] }] });
-      legs.push(createRouteLeg(map, groupId, "Leg " + (idx + 1) + ": " + name, enc, opts.lift != null ? opts.lift : 30));
+      legs.push(createRouteLeg(map, groupId, "Leg " + (idx + 1) + ": " + name, enc, lift));
     });
     // At most one pin and one label per distinct place, so a round trip A -> B -> A
     // gets one pin at A, not two.
@@ -193,10 +197,174 @@ var GeoScene = (function () {
     stops.forEach(function (s) {
       if (seen.some(function (p) { return samePlace(p, s); })) return;
       seen.push(s);
-      if (opts.pins) addPin(map, s.name, s.lon, s.lat, groupId);
+      if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId);
       if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId);
     });
     return { groupId: groupId, legs: legs };
+  }
+
+  // A new-style route: stops (holder following the camera + a circle to drag) joined by
+  // Bézier legs whose ends and handles are worked out by small helper scripts.
+  // api.create / api.primitive make a layer beside the selection and api.parent keeps the
+  // world transform (rewriting the local one), so every layer is reset right after it is
+  // parented. A holder's position is driven, so only its rotation and scale are reset; the
+  // helper utilities have no transform at all.
+  function buildRoute(map, stops, pairs, opts, track) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
+    var groupId = track(api.create("group", routeTitle(stops)));
+    api.parent(groupId, map.groupId);
+    api.set(groupId, identityTransform());
+    var helpers = track(api.create("group", "Route helpers"));
+    api.parent(helpers, groupId);
+    api.set(helpers, identityTransform());
+    var places = [];
+    stops.forEach(function (s) { if (!places.some(function (p) { return samePlace(p, s); })) places.push(s); });
+    function placeIndex(s) { for (var i = 0; i < places.length; i++) if (samePlace(places[i], s)) return i; return -1; }
+    function utility(name, inputs, values, expr) {
+      var id = track(api.create(A.CAMERA_LAYER_TYPE, name));
+      addInputs(id, CA, inputs, values);
+      setOne(id, A.CAMERA_EXPR_ATTR, expr);
+      api.parent(id, helpers);
+      return id;
+    }
+    function feed(id, sources) { sources.forEach(function (s, i) { api.connect(s[0], s[1], id, CA + "." + i, true); }); }
+    var meta = function (category) { return { camera: map.cameraId, category: category }; };
+
+    var stopData = places.map(function (p) {
+      var holder = track(api.create("group", "Stop: " + p.name));
+      var circle = track(api.primitive("ellipse", p.name));
+      setOne(circle, "generator.radius", [STOP_RADIUS, STOP_RADIUS]);
+      applyStyle(circle, STYLE.stop);
+      api.parent(circle, holder);
+      api.set(circle, identityTransform());
+      var label = null;
+      if (opts.labels) {
+        label = track(api.create(A.TEXT_LAYER_TYPE, p.name));
+        setOne(label, A.TEXT_ATTR, p.name);
+        applyStyle(label, STYLE.label);
+        api.parent(label, circle);
+        api.set(label, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+        setOne(label, "position", [STOP_RADIUS + 6, STOP_RADIUS + 6]);
+      }
+      var position = utility(p.name + " position", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
+      connectCamera(map.cameraId, position, CA);
+      api.connect(position, A.DRIVER_OUTPUT_ATTR, holder, "position", true);
+      var visibility = utility(p.name + " visibility", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("stopVisibility")));
+      connectCamera(map.cameraId, visibility, CA);
+      api.connect(position, CA + ".5", visibility, CA + ".5", true);
+      api.connect(position, CA + ".6", visibility, CA + ".6", true);
+      api.connect(visibility, A.DRIVER_OUTPUT_ATTR, holder, "opacity", true);
+      var endPoint = utility(p.name + " end point", E.END_POINT_INPUTS, {}, E.routeEndPointExpression(meta("stopEnd")));
+      feed(endPoint, [[holder, "position.x"], [holder, "position.y"], [circle, "position.x"], [circle, "position.y"]]);
+      return { name: p.name, lon: p.lon, lat: p.lat, holder: holder, circle: circle, label: label, position: position, visibility: visibility, endPoint: endPoint };
+    });
+
+    var cam = readCamera(map.cameraId);
+    var legData = pairs.map(function (pair, idx) {
+      var a = stopData[placeIndex(pair[0])], b = stopData[placeIndex(pair[1])];
+      var name = "Leg " + (idx + 1) + ": " + a.name + " → " + b.name;
+      var line = track(api.create("basicLine", name));
+      api.setGenerator(line, "generator", "bezierLine");
+      applyStyle(line, STYLE.route);
+      if (A.STROKE_CAP_ATTR) { try { setOne(line, A.STROKE_CAP_ATTR, A.ROUND_CAP_VALUE); } catch (e) { /* default caps */ } }
+      try { setOne(line, "stroke.trim", true); setOne(line, "stroke.trimEnd", 100); } catch (e) { /* draw-on stays off */ }
+      api.connect(a.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.startPosition", true);
+      api.connect(b.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.endPosition", true);
+      var seed = GeoCurve.handles(GeoRuntime.projectPoint(a.lon, a.lat, cam), GeoRuntime.projectPoint(b.lon, b.lat, cam), { arc: arc, lean: 0, flip: false });
+      var sources = [[a.holder, "position.x"], [a.holder, "position.y"], [a.circle, "position.x"], [a.circle, "position.y"],
+        [b.holder, "position.x"], [b.holder, "position.y"], [b.circle, "position.x"], [b.circle, "position.y"]];
+      var handle = {};
+      ["start", "end"].forEach(function (which) {
+        var h = utility(name + " " + which + " handle", E.HANDLE_INPUTS, { arc: arc, handX: seed[which][0], handY: seed[which][1] },
+          E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which));
+        feed(h, sources);
+        api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
+        handle[which] = h;
+      });
+      var fade = utility(name + " fade", E.FADE_INPUTS, {}, E.routeFadeExpression(meta("legFade")));
+      feed(fade, [[a.holder, "opacity"], [b.holder, "opacity"]]);
+      api.connect(fade, A.DRIVER_OUTPUT_ATTR, line, "opacity", true);
+      return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, from: placeIndex(pair[0]), to: placeIndex(pair[1]) };
+    });
+
+    // New layers land on top of their group: legs first, then stops last-to-first, so the
+    // first stop ends on top and every stop sits above the legs.
+    legData.forEach(function (l) { api.parent(l.line, groupId); api.set(l.line, identityTransform()); });
+    for (var i = stopData.length - 1; i >= 0; i--) {
+      api.parent(stopData[i].holder, groupId);
+      api.set(stopData[i].holder, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+    }
+
+    api.setUserData(groupId, ROUTE_KEY, {
+      camera: map.cameraId, helpers: helpers,
+      stops: stopData.map(function (s) { return { name: s.name, holder: s.holder, circle: s.circle, label: s.label, position: s.position, visibility: s.visibility, endPoint: s.endPoint }; }),
+      legs: legData
+    });
+    return { groupId: groupId, legs: legData.map(function (l) { return l.line; }), stops: stopData.map(function (s) { return s.circle; }) };
+  }
+
+  // stops: [{ name, lon, lat }] in travel order; opts: { arc, labels }.
+  function createRoute(map, stops, opts) {
+    var pairs = routePairs(stops);
+    opts = opts || {};
+    if (typeof api.setGenerator !== "function" || typeof api.primitive !== "function" || typeof api.setUserData !== "function") return createOldRoute(map, stops, pairs, opts);
+    var made = [];
+    function track(id) { made.push(id); return id; }
+    try {
+      return buildRoute(map, stops, pairs, opts, track);
+    } catch (e) {
+      for (var i = made.length - 1; i >= 0; i--) { try { if (layerThere(made[i])) api.deleteLayer(made[i]); } catch (e2) { /* already gone */ } }
+      throw e;
+    }
+  }
+
+  function findRoutes(map) {
+    var out = [];
+    if (typeof api.hasUserDataKey !== "function") return out;
+    function there(id) { return !!id && layerThere(id); }
+    api.getCompLayers(false).forEach(function (id) {
+      try {
+        if (!api.hasUserDataKey(id, ROUTE_KEY)) return;
+        var d = api.getUserDataKey(id, ROUTE_KEY);
+        if (!d || d.camera !== map.cameraId) return;
+        out.push({
+          groupId: id, name: String(api.getNiceName(id)), helpers: d.helpers,
+          stops: (d.stops || []).filter(function (s) { return there(s.holder) && there(s.circle) && there(s.position); }),
+          legs: (d.legs || []).filter(function (l) { return there(l.line) && there(l.startHandle) && there(l.endHandle); })
+        });
+      } catch (e) { /* not a readable route */ }
+    });
+    return out;
+  }
+
+  function xy(v) { return v && v.x !== undefined ? [Number(v.x) || 0, Number(v.y) || 0] : [Number(v && v[0]) || 0, Number(v && v[1]) || 0]; }
+
+  // ids: the user's selection. A stop counts when its circle, holder or label is selected.
+  // Its dropped spot becomes its new place (the longitude and latitude on its position
+  // driver) and the drag is zeroed. A stop whose spot is past the map's edge (the far side
+  // of a globe, outside the Equal Earth outline), or whose camera inputs can't be read as
+  // numbers, keeps its place and is listed in offGlobe.
+  function pinStops(map, ids) {
+    var want = {}, res = { pinned: 0, offGlobe: [] };
+    (ids || []).forEach(function (id) { want[id] = true; });
+    findRoutes(map).forEach(function (r) {
+      r.stops.forEach(function (s) {
+        if (!want[s.circle] && !want[s.holder] && !(s.label && want[s.label])) return;
+        var h = xy(api.get(s.holder, "position")), c = xy(api.get(s.circle, "position"));
+        function v(i) { return Number(api.get(s.position, A.CAMERA_ARRAY_ATTR + "." + i)); }
+        var cam = { lat: v(0), lon: v(1), zoom: v(2), rotation: v(3), projection: Math.round(v(4)) };
+        var ll = [cam.lat, cam.lon, cam.zoom, cam.rotation, cam.projection].every(isFinite)
+          ? GeoProjection.unproject(cam, h[0] + c[0], h[1] + c[1]) : null;
+        if (!ll || !isFinite(ll.lon) || !isFinite(ll.lat)) { res.offGlobe.push(s.name); return; }
+        var o = {};
+        o[A.CAMERA_ARRAY_ATTR + ".5"] = ll.lon;
+        o[A.CAMERA_ARRAY_ATTR + ".6"] = ll.lat;
+        api.set(s.position, o);
+        api.set(s.circle, { position: [0, 0] });
+        res.pinned++;
+      });
+    });
+    return res;
   }
 
   var DATA_STYLE = {
@@ -706,6 +874,29 @@ var GeoScene = (function () {
   }
 
   // ---- Fly-to -------------------------------------------------------------------
+  // Lengthens the composition to newEnd. Layers already made keep their own out frames (they would
+  // cut a longer flight off), so every layer that reached the old end is moved to newEnd + 1 (a
+  // layer's out frame is one past its last frame); layers trimmed to end earlier are left alone.
+  // The play range follows only when it reached the old end. Returns null when nothing is needed.
+  function extendComp(newEnd) {
+    var comp = api.getActiveComp(), oldEnd = compFrameRange().end, layers = 0;
+    if (!(newEnd > oldEnd)) return null;
+    if (typeof api.getOutFrame === "function" && typeof api.setOutFrame === "function") {
+      api.getCompLayers(false).forEach(function (id) {
+        try {
+          if (Number(api.getOutFrame(id)) >= oldEnd) { api.setOutFrame(id, newEnd + 1); layers++; }
+        } catch (e) { /* one layer that can't be extended never stops the rest */ }
+      });
+    }
+    var playsToEnd = false;
+    try { playsToEnd = Number(api.get(comp, A.COMP_PLAYBACK_END_ATTR)) >= oldEnd; } catch (e) { /* no play range to keep */ }
+    var end = {}, play = {};
+    end[A.COMP_END_ATTR] = newEnd;
+    api.set(comp, end);
+    if (playsToEnd) { play[A.COMP_PLAYBACK_END_ATTR] = newEnd; api.set(comp, play); } // after the comp is long enough to hold it
+    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+  }
+
   function flyCamera(map, points, startFrame) {
     var end = startFrame + points.length - 1, attrs = [0, 1, 2].map(function (i) { return A.CAMERA_ARRAY_ATTR + "." + i; });
     attrs.forEach(function (attr) {
@@ -761,10 +952,10 @@ var GeoScene = (function () {
   return {
     STYLE: STYLE, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
     compSize: compSize, createMapLayer: createMapLayer, findMapLayers: findMapLayers, readLayerData: readLayerData, readLayerMeta: layerMeta,
-    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute,
+    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, pinStops: pinStops,
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera, findLabels: findLabels, findOcean: findOcean
+    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean
   };
 })();

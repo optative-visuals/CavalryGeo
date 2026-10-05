@@ -29,7 +29,9 @@ city.
 ![The end of a camera flight into Paris, over satellite imagery](docs/images/flight.jpg)
 
 ### Routes
-Flight arcs and multi‑stop journeys that draw on, lift off the map and wrap round a globe.
+Stops you can drag, joined by Bézier lines that draw on. Shape the curves from the map's
+Controls (Arc height, Lean, Flip side) or by hand for each leg, and press **Pin here** to keep a
+dragged stop on its new spot.
 
 ### Data maps
 Paste a Google Sheet or CSV link and get coloured countries, bubbles, value labels and a legend —

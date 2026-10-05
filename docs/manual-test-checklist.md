@@ -28,6 +28,10 @@ fixed before release.
       named "… 2". Type a name and search again with "New map" picked → the map takes that name.
       The map name and projection fields hide once a map is picked and come back when
       "New map" is picked.
+- [ ] 3b. Type a place in the Map search box and press Enter → results appear and the first is
+      picked; with "New map" picked no map is made until you press Search (which then makes it
+      at the first result). Press Enter again with the same text → nothing happens; with an empty
+      box → nothing happens. The same goes for the Pins and Routes search boxes.
 - [ ] 4. Label → Pins → the search field and result list already show the Map tab's search →
       **Pin here** → a red dot at the centre of the frame.
 - [ ] 5. Keyframe the camera's zoom from ~16 to ~19 over 50 frames → the pin stays
@@ -36,8 +40,9 @@ fixed before release.
       status says "Pick one, then Jump here or Fly here". Pick the result → **Jump here** →
       the camera moves there. Open the result dropdown → index 0 is "World view"; pick it →
       Jump here → the camera jumps to the world view. A search with no results makes no map.
-- [ ] 5c. Preview: drag at world, country and city zoom (smooth), double-click and + / −
-      zoom, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
+- [ ] 5c. Preview: drag at world, country and city zoom (smooth), double-click and the + / −
+      squares inside the map (bottom right) zoom, the "Zoom N.N" readout (bottom left) follows,
+      hovering the map shows its tooltip, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
       Create map here land where the green frame showed.
 
 ## Layers tab
@@ -119,18 +124,36 @@ adding street layers.
 
 ## Label → Routes
 
-- [ ] 22. World map (Web Mercator): Label → Routes → add London and New York → Create route →
-      a green arc bowing upward between them; in the map's Controls animate
-      London → New York · Leg 1 draw on % 0 → 100 → it draws from London to New York; leg ends
-      are round.
-- [ ] 23. Keyframe London → New York · Arc height 0 → 60 → the arc rises smoothly; the ends stay put.
-- [ ] 24. Set the camera projection to 2 (globe) → the arc rises off the surface; spin the
-      globe → it hides behind the globe, and a high arc peeks over the edge.
-- [ ] 25. Journey: Paris, Lyon, Marseille with Pins at stops and Labels at stops
-      ticked → a "Route: Paris → Lyon → Marseille" group with 2 legs, 3 pins, 3 labels;
-      routes stay above map layers after Add layers.
-- [ ] 26. Bake a leg → an editable path with the same shape as the current frame (stroke
-      style is not copied).
+- [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
+      → a "Route: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each
+      leg attached to its two stops.
+- [ ] 22b. Select a stop circle, then Create route again → the new route's stops sit on their
+      places and its legs stay attached.
+- [ ] 23. Drag a stop in the viewer → its legs follow it. In the map's Controls, animate
+      Paris → Lyon → Marseille · Leg 1 draw on % 0 → 100 → leg 1 draws on from Paris to Lyon.
+- [ ] 24. Play a Fly here with the route in view → the stops ride along with the map and the curves
+      keep their shape.
+- [ ] 25. Drag a stop and play a Fly here → the dragged stop slides against the map (it is a fixed
+      offset on screen). Select it, press **Pin here**, then play the Fly here again → it now
+      stays on the spot of the map where you dropped it. A stop on the far side of a globe, or
+      outside a flat map, says it is past the map's edge and keeps its place. With **Labels at
+      stops** ticked, each label sits beside its circle and follows when you drag the stop. If a
+      stop's place is keyframed, Pin here sets a key at the current frame.
+- [ ] 25b. In Controls, change Arc height, Lean and Flip side → every leg of the route changes.
+- [ ] 25c. Tick Leg 1 shape by hand and change its start / end handle X / Y numbers → only Leg 1
+      changes; untick it → it goes back to the plugin's shape. Stops · Hide / Colour / Size
+      change every circle.
+- [ ] 25d. Set the camera projection to 2 (globe) and rotate so a stop goes behind the Earth →
+      the stop and its legs fade out.
+- [ ] 26. Bake an old-style leg (a route from v0.5.0, or one made where Bézier lines aren't
+      available) → an editable path with the same shape as the current frame (stroke style is
+      not copied).
+- [ ] 26a. Select a new route's leg (or a stop) and press **Bake** → "Route legs and stops are
+      already Cavalry shapes, so there's nothing to bake." New legs are native Bézier lines that
+      Bake skips; with a map layer selected as well, the layer bakes and the status says how many
+      route parts were skipped.
+- [ ] 26b. An old-style route made by v0.5.0 still draws, and its Controls rows (Arc height,
+      Leg N draw on %) still work.
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
 - [ ] 27b. Label → Routes: add 3 stops, select #2, **Remove selected** → list renumbers to
       1. A, 2. C; **Clear** empties it.
@@ -167,12 +190,19 @@ adding street layers.
       **Yes** → progress bar runs through the download, then "Building imagery: n / N images…";
       Cavalry stays usable throughout (no "Not responding") → satellite imagery under the
       countries, coastlines lining up; no half-built imagery shows while it builds.
-- [ ] 41. Search Paris → pick it → Frames 150 → Fly here → play: smooth zoom-out, travel, zoom-in. Build
+- [ ] 41. Search Paris → pick it → From: 0, To: 149 → Fly here → play: smooth zoom-out, travel, zoom-in. Build
       imagery from a world view with EOX → about 40–60 images, no "Sharpest detail is limited"
       note → Paris is sharp at the end of the flight; the build takes well under a minute. A
       flight needing more than 150 images (or 2000 tiles' worth) shows "Sharpest detail is
       limited to zoom Z to stay under 150 images — imagery gets softer as the flight zooms in
       further."
+- [ ] 41b. Fly here with **To:** past the composition's end → a dialog "Extend the timeline" asks; **Yes**
+      extends the composition, the layers reaching its end and the play range, and the flight plays
+      to the end (nothing cut off); **No** changes nothing (no keys, composition unchanged). A
+      **To:** not after **From:**, or a **From:** before the composition's first frame, is refused
+      with a message.
+- [ ] 41c. Fly to a place, then search another place and press Fly here again → the second flight
+      starts where the first ended (the fields moved on: From: = the old **To:**).
 - [ ] 42. Build imagery again → the question counts only the new images → Yes → only those download → the old imagery stays until the new
       one is built, then swaps at once and "Removing the old imagery…" shows → play: sharper levels
       fade in, no flashes or see-through frames; past zoom Z the top level just gets softer.
@@ -221,3 +251,5 @@ adding street layers.
 - [ ] 21. Uninstall check: rename `CavalryGeo.js` in the Cavalry Scripts folder (or
       delete it), reopen the saved scene → the maps in the scene still render, even
       though the script is gone.
+- [ ] 22. Type a name in Extract's Find box and press Enter → matches appear; paste a sheet link
+      and press Enter → it loads.

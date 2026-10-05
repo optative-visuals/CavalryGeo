@@ -186,3 +186,45 @@ test("routes and data sets with the same name are numbered, separately from the 
   assert.deepEqual(L.filter((l) => / · Low colour$/.test(l)), ["GDP · Low colour", "GDP 2 · Low colour"]);
   assert.equal(row(p, "A → B 2 · Leg 1 draw on %").layer, "l2");
 });
+
+test("new routes: shared stop rows, then per-route curve rows and per-leg hand rows", () => {
+  const leg = (id, n) => ({ id, number: n, state: {}, start: { id: id + "s", state: {} }, end: { id: id + "e", state: {} } });
+  const p = G.plan(model({
+    stops: [{ id: "c1", state: {} }, { id: "c2", state: {} }],
+    newRoutes: [{ id: "rg", name: "A → B", legs: [leg("l1", 1), leg("l2", 2)] }]
+  }));
+  assert.deepEqual(labels(p).slice(5), [
+    "Stops · Hide", "Stops · Colour", "Stops · Size",
+    "A → B · Colour", "A → B · Width", "A → B · Arc height", "A → B · Lean", "A → B · Flip side",
+    "A → B · Leg 1 draw on %", "A → B · Leg 1 shape by hand", "A → B · Leg 1 start handle X", "A → B · Leg 1 start handle Y", "A → B · Leg 1 end handle X", "A → B · Leg 1 end handle Y",
+    "A → B · Leg 2 draw on %", "A → B · Leg 2 shape by hand", "A → B · Leg 2 start handle X", "A → B · Leg 2 start handle Y", "A → B · Leg 2 end handle X", "A → B · Leg 2 end handle Y"
+  ]);
+  assert.deepEqual(row(p, "Stops · Size").link, [
+    { layer: "c1", attr: "generator.radius.x" }, { layer: "c1", attr: "generator.radius.y" },
+    { layer: "c2", attr: "generator.radius.x" }, { layer: "c2", attr: "generator.radius.y" }
+  ]);
+  assert.equal(row(p, "Stops · Size").key, "stops:size");
+  assert.deepEqual(row(p, "A → B · Colour").link, [{ layer: "l1", attr: "stroke.strokeColor" }, { layer: "l2", attr: "stroke.strokeColor" }]);
+  assert.deepEqual(row(p, "A → B · Arc height").link.map((t) => t.layer + "." + t.attr), ["l1s.array.8", "l1e.array.8", "l2s.array.8", "l2e.array.8"]);
+  assert.equal(row(p, "A → B · Arc height").key, "route:rg:arc");
+  assert.equal(row(p, "A → B · Flip side").type, "bool");
+  assert.deepEqual(row(p, "A → B · Lean").link[0], { layer: "l1s", attr: "array.9" });
+  assert.deepEqual(row(p, "A → B · Leg 1 shape by hand").link, [{ layer: "l1s", attr: "array.11" }, { layer: "l1e", attr: "array.11" }]);
+  assert.equal(row(p, "A → B · Leg 1 shape by hand").type, "bool");
+  assert.deepEqual(row(p, "A → B · Leg 2 end handle Y"), { kind: "value", key: "leg:l2:endY", type: "double", label: "A → B · Leg 2 end handle Y", link: [{ layer: "l2e", attr: "array.13" }], linked: [] });
+  assert.deepEqual(row(p, "A → B · Leg 1 draw on %"), { kind: "direct", layer: "l1", attr: "stroke.trimEnd", label: "A → B · Leg 1 draw on %" });
+  assert.deepEqual(p.trim, ["l1", "l2"]);
+});
+
+test("new routes: an old-style route and a new one share the route name numbering; ids include every part", () => {
+  const leg = { id: "n1", number: 1, state: {}, start: { id: "n1s", state: {} }, end: { id: "n1e", state: {} } };
+  const m = model({ routes: [{ id: "old", name: "A → B", legs: [{ id: "o1", number: 1, state: {} }] }], stops: [{ id: "c1", state: {} }], newRoutes: [{ id: "new", name: "A → B", legs: [leg] }] });
+  const p = G.plan(m);
+  assert.ok(labels(p).indexOf("A → B · Arc height") >= 0 && labels(p).indexOf("A → B 2 · Lean") >= 0);
+  assert.ok(labels(p).indexOf("Stops · Hide") < labels(p).indexOf("A → B · Colour"));
+  const ids = Object.keys(G.ids(m));
+  ["c1", "n1", "n1s", "n1e"].forEach((id) => assert.ok(ids.indexOf(id) >= 0, id));
+  assert.deepEqual(G.STATE_ATTRS.stop, ["hidden", "material.materialColor", "generator.radius.x", "generator.radius.y"]);
+  assert.deepEqual(G.STATE_ATTRS.newLeg, ["stroke.strokeColor", "stroke.width"]);
+  assert.deepEqual(G.STATE_ATTRS.handle, ["array.8", "array.9", "array.10", "array.11", "array.12", "array.13"]);
+});

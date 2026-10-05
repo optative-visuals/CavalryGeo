@@ -63,19 +63,31 @@ var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place,
 var searchBtn = GeoStyle.primaryButton("Search");
 var resultPicker = new ui.DropDown();
 var jumpBtn = GeoStyle.button("Jump here");
-var flyFramesField = new ui.NumericField(100);
-flyFramesField.setType(0);
-flyFramesField.setMin(2);
+// Fly here runs from Start to End (frames). Both open on the playhead and 100 frames on, and move
+// on after each flight so the next one chains from where this one ended.
+function playhead() {
+  try { var f = Number(api.getFrame()); return isFinite(f) ? Math.round(f) : 0; } catch (e) { return 0; }
+}
+var flyStartField = new ui.NumericField(playhead());
+var flyEndField = new ui.NumericField(playhead() + 100);
+[flyStartField, flyEndField].forEach(function (f) {
+  f.setType(0); f.setMin(0);
+  if (typeof f.setFixedWidth === "function") f.setFixedWidth(48); // number-sized, so the whole Fly row fits
+});
 var flyBtn = GeoStyle.primaryButton("Fly here");
+var flyNote = GeoStyle.note("(animates the camera to the map preview)");
 
-// Search and Fly here share one width so they line up above each other on the right.
+// Search and Fly here share one width.
 var MAP_ACTION_WIDTH = 84;
 if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_ACTION_WIDTH);
 if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
 
 // The preview: settled by probing Cavalry (2026-10).
 var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
-var framesLabel = new ui.Label("Frames");
+var fromLabel = new ui.Label("From:");
+var toLabel = new ui.Label("To:");
+var flyStartBox = GeoStyle.frameField(flyStartField);
+var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
@@ -125,7 +137,7 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
-  [jumpBtn, framesLabel, flyFramesField, flyBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
 }
@@ -194,17 +206,42 @@ resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
 refreshMapsBtn.onClick = guard(function () { refreshMaps(); say(maps.length + " map(s) in this composition."); });
 
+// The query the Map box last searched: pressing Enter again, or Search after Enter, doesn't ask the network twice.
+var lastMapQuery = null;
+function mapSearchResults(q) {
+  results = GeoNet.search(q);
+  lastMapQuery = q;
+  refreshResultPicker();
+  previewFollowPicked(); // clears old dots when nothing was found
+  if (!results.length) return results;
+  resultPicker.setValue(1);
+  previewFollowPicked();
+  prefillPins(q, results);
+  return results;
+}
+
+// Return (or leaving the box) lists the results, but never makes a map: that stays with Search.
+searchField.onValueCommitted = guard(function () {
+  var q = searchField.getText().trim();
+  if (!q || q === lastMapQuery) return;
+  var creating = newMapSelected();
+  mapSearchResults(q);
+  if (!results.length) { say("No results for \"" + q + "\"."); return; }
+  say(results.length + (creating ? " result(s). Press Search to make the map at the first one." : " result(s). Pick one, then Jump here or Fly here."));
+});
+
 searchBtn.onClick = guard(function () {
   var q = searchField.getText().trim();
   if (!q) throw new Error("Type a place to search for.");
   var creating = newMapSelected();
-  results = GeoNet.search(q);
-  refreshResultPicker();
-  previewFollowPicked(); // clears old dots when nothing was found
+  if (q === lastMapQuery && results.length) {
+    // Same text as the last search (often an Enter just now): use those results, starting at the first.
+    resultPicker.setValue(1);
+    previewFollowPicked();
+  } else {
+    mapSearchResults(q);
+  }
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
-  resultPicker.setValue(1);
-  previewFollowPicked();
-  prefillPins(q, results);
   if (!creating) { say(results.length + " result(s). Pick one, then Jump here or Fly here."); return; }
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
   var made = makeMap(name, camForResult(r, projPicker.getValue()));
@@ -220,17 +257,36 @@ jumpBtn.onClick = guard(function () {
   previewShowCurrent();
 });
 
+// Flies from the Start frame to the End frame. Everything is checked (and a longer composition
+// asked for) before anything changes; the flight leaves from the camera as it is at Start.
 flyBtn.onClick = guard(function () {
-  var map = currentMap(), s = GeoScene.compSize(), start = GeoScene.readCamera(map.cameraId), t = pickedTarget(start.projection);
-  var frame = api.getFrame();
-  var pts = GeoFly.path(start, t.cam, flyFramesField.getValue(), s.width);
-  var range = GeoScene.flyCamera(map, pts, frame);
-  api.setFrame(frame);
+  var map = currentMap(), from = Math.round(Number(flyStartField.getValue())), to = Math.round(Number(flyEndField.getValue()));
+  if (!(to >= from + 1)) throw new Error("Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+  var comp = GeoScene.compFrameRange();
+  if (from < comp.start) throw new Error("Start is before the composition's first frame (" + comp.start + ").");
+  var t = pickedTarget(GeoScene.readCamera(map.cameraId).projection), s = GeoScene.compSize(), extended = false;
+  if (to > comp.end) {
+    var dialog = questionDialog();
+    if (!dialog) throw new Error("End is after your composition's last frame (" + comp.end + "). Set End to " + comp.end + " or earlier, or lengthen the composition first.");
+    if (!dialog.showQuestion("Extend the timeline", "This flight ends at frame " + to + ", after your composition's last frame (" + comp.end +
+      "). Fly here will extend the composition, and the layers that reach its end, to frame " + to + ". Continue?")) {
+      say("Cancelled. Set End to " + comp.end + " or earlier to stay within your composition.");
+      return;
+    }
+    extended = !!GeoScene.extendComp(to);
+  }
+  var previous = api.getFrame(), range;
+  try {
+    api.setFrame(from);
+    var pts = GeoFly.path(GeoScene.readCamera(map.cameraId), t.cam, to - from + 1, s.width);
+    range = GeoScene.flyCamera(map, pts, from);
+  } finally { api.setFrame(previous); }
   var msg = "Flight to " + t.name + ": frames " + range.start + "–" + range.end + ".";
+  if (extended) msg += " The composition was extended to frame " + to + " so the flight isn't cut off.";
   if (t.world) msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
   msg += " Press Build imagery (Imagery tab) for sharp imagery along the way.";
-  var compEnd = GeoScene.compFrameRange().end;
-  if (range.end > compEnd) msg += " Note: the flight ends after the composition's last frame (" + compEnd + ").";
+  flyStartField.setValue(to);
+  flyEndField.setValue(to + (to - from));
   say(msg);
   resetImageryPlan();
   previewShowCurrent();
@@ -252,10 +308,11 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
-    GeoStyle.heading("Preview"),
+    GeoStyle.heading("Preview (drag to move)"),
     preview.layout,
-    GeoStyle.heading("Camera"),
-    row(jumpBtn, framesLabel, flyFramesField, flyBtn),
+    row(jumpBtn),
+    row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
+    flyNote,
     createHereBtn
   ]));
 });
@@ -405,7 +462,11 @@ mapPicker.onValueChanged = guard(function () {
   previewShowMap(); // last, so a preview problem can't skip the layer refresh
 });
 
-findBtn.onClick = guard(function () {
+// Find runs from the button (always) or from Return / leaving the box (only when the text changed;
+// blank is a valid Find, meaning all named features).
+var lastFindText = "";
+function runFind() {
+  lastFindText = featureQuery.getText().trim();
   // Refresh always (the map may have changed layers since the last refresh), but
   // keep the user's picked layer selected if it still exists.
   var pickedId = (sourceLayers[layerPicker.getValue()] || {}).id;
@@ -416,11 +477,15 @@ findBtn.onClick = guard(function () {
   layerPicker.setValue(idx);
   groupsLayer = sourceLayers[idx];
   groupsEnc = GeoScene.readLayerData(groupsLayer.id);
-  groups = GeoCodec.findByName(groupsEnc, featureQuery.getText().trim()).slice(0, 500);
+  groups = GeoCodec.findByName(groupsEnc, lastFindText).slice(0, 500);
   featureList.setModel(groups.map(function (g, i) {
     return { uuid: "g" + i, label: g.name + (g.indices.length > 1 ? " (" + g.indices.length + " parts)" : "") };
   }));
   say(groups.length ? groups.length + " match(es). Select some, then Extract." : "No named features match.");
+}
+findBtn.onClick = guard(runFind);
+featureQuery.onValueCommitted = guard(function () {
+  if (featureQuery.getText().trim() !== lastFindText) runFind();
 });
 
 extractBtn.onClick = guard(function () {
@@ -435,8 +500,21 @@ extractBtn.onClick = guard(function () {
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, other = 0;
+  var baked = 0, skippedData = 0, skippedRoute = 0, other = 0;
+  // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
+  // so its parts are skipped with a message of their own rather than counted as "other".
+  var routeParts = {};
+  try {
+    GeoScene.findMaps().forEach(function (m) {
+      GeoScene.findRoutes(m).forEach(function (r) {
+        if (r.helpers) routeParts[r.helpers] = true;
+        r.stops.forEach(function (s) { [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade].forEach(function (p) { if (p) routeParts[p] = true; }); });
+      });
+    });
+  } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
+    if (routeParts[id]) { skippedRoute++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "data") { skippedData++; return; }
@@ -445,7 +523,9 @@ bakeBtn.onClick = guard(function () {
   });
 
   if (baked === 0) {
-    if (skippedData && !other) {
+    if (skippedRoute) {
+      throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
+    } else if (skippedData && !other) {
       throw new Error("Data layers can't be baked yet. Select map layers such as \"world: Countries\" instead.");
     } else {
       throw new Error("Select Cavalry Geo map layers to bake (groups and the camera can't be baked).");
@@ -454,6 +534,7 @@ bakeBtn.onClick = guard(function () {
 
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
+  if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
   if (!newMapSelected()) msg += syncControls(currentMap());
@@ -493,13 +574,24 @@ TAB_BUILDERS.push(function (tabs) {
 });
 
 // Runs a place search from a text field into a results dropdown (no "World view" entry).
-function searchInto(field, picker) {
+// memo ({ q, found }) holds the box's last search, so the same text isn't searched twice.
+function searchInto(field, picker, memo) {
   var q = field.getText().trim();
   if (!q) throw new Error("Type a place to search for.");
-  var found = GeoNet.search(q);
+  var found = memo.q === q && memo.found.length ? memo.found : GeoNet.search(q);
+  memo.q = q;
+  memo.found = found.slice();
   fillPlaces(picker, found);
   if (!found.length) say("No results for \"" + q + "\".");
   return found;
+}
+// Return (or leaving the box) runs the box's search, unless it is empty or already searched.
+function searchOnCommit(field, memo, run) {
+  field.onValueCommitted = guard(function () {
+    var q = field.getText().trim();
+    if (!q || q === memo.q) return;
+    run();
+  });
 }
 function fillPlaces(picker, found) {
   picker.clear();
@@ -510,7 +602,7 @@ function fillPlaces(picker, found) {
 // ---- Pins (Label section) ---------------------------------------------------
 // The Pins page has its own search (a Map tab search fills it in too), so a pin or label
 // always goes to the place shown right here (never to whatever is picked on the Map tab).
-var pinResults = [];
+var pinResults = [], pinMemo = { q: null, found: [] };
 var pinSearchField = new ui.LineEdit(); pinSearchField.setPlaceholder("Search a place, e.g. Eiffel Tower");
 var pinSearchBtn = GeoStyle.primaryButton("Search");
 var pinResultPicker = new ui.DropDown();
@@ -528,6 +620,8 @@ function coordName() { return latField.getValue().toFixed(4) + ", " + lonField.g
 function prefillPins(q, found) {
   pinSearchField.setText(q);
   pinResults = found.slice();
+  pinMemo.q = q;
+  pinMemo.found = found.slice();
   fillPlaces(pinResultPicker, pinResults);
 }
 function pinPlace() {
@@ -536,10 +630,12 @@ function pinPlace() {
   return pinResults[idx];
 }
 
-pinSearchBtn.onClick = guard(function () {
-  pinResults = searchInto(pinSearchField, pinResultPicker);
+function pinSearch() {
+  pinResults = searchInto(pinSearchField, pinResultPicker, pinMemo);
   if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here or Label here.");
-});
+}
+pinSearchBtn.onClick = guard(pinSearch);
+searchOnCommit(pinSearchField, pinMemo, pinSearch);
 pinHereBtn.onClick = guard(function () {
   var r = pinPlace(), name = labelOr(shortName(r)), map = currentMap();
   GeoScene.addPin(map, name, r.lon, r.lat);
@@ -562,8 +658,8 @@ labelCoordBtn.onClick = guard(function () {
 });
 
 // ---- Routes (Label section) -------------------------------------------------
-// A flight arc is a route with two stops; a journey has more. One leg layer per pair.
-var routeResults = [], stops = [];
+// A route is stops joined by legs: each stop is a circle you can drag; each leg a Bézier line.
+var routeResults = [], stops = [], routeMemo = { q: null, found: [] };
 var routeSearchField = new ui.LineEdit(); routeSearchField.setPlaceholder("Search a stop, e.g. London");
 var routeSearchBtn = GeoStyle.primaryButton("Search");
 var routeResultPicker = new ui.DropDown();
@@ -571,19 +667,21 @@ var addStopBtn = GeoStyle.button("Add stop");
 var stopsList = new ui.List(); stopsList.setSelectionMode("extended");
 var removeStopBtn = GeoStyle.button("Remove selected");
 var clearStopsBtn = GeoStyle.button("Clear");
-var liftField = new ui.NumericField(30); liftField.setType(1); liftField.setMin(0); liftField.setMax(100);
-var pinsAtStops = new ui.Checkbox(true);
+var arcField = new ui.NumericField(30); arcField.setType(1); arcField.setMin(0); arcField.setMax(100);
 var labelsAtStops = new ui.Checkbox(false);
 var createRouteBtn = GeoStyle.primaryButton("Create route");
+var pinStopsBtn = GeoStyle.button("Pin here");
 
 function refreshStops() {
   stopsList.setModel(stops.map(function (s, i) { return { uuid: "s" + i, label: (i + 1) + ". " + s.name }; }));
 }
 
-routeSearchBtn.onClick = guard(function () {
-  routeResults = searchInto(routeSearchField, routeResultPicker);
+function routeSearch() {
+  routeResults = searchInto(routeSearchField, routeResultPicker, routeMemo);
   if (routeResults.length) say(routeResults.length + " result(s). Pick one, then Add stop.");
-});
+}
+routeSearchBtn.onClick = guard(routeSearch);
+searchOnCommit(routeSearchField, routeMemo, routeSearch);
 addStopBtn.onClick = guard(function () {
   var idx = routeResultPicker.getValue();
   if (!routeResults.length || idx < 0 || idx >= routeResults.length) throw new Error("Search for a stop under Label → Routes first.");
@@ -610,8 +708,20 @@ clearStopsBtn.onClick = guard(function () { stops = []; refreshStops(); say("Sto
 createRouteBtn.onClick = guard(function () {
   var map = currentMap();
   if (stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
-  var r = GeoScene.createRoute(map, stops, { lift: liftField.getValue(), pins: pinsAtStops.getValue(), labels: labelsAtStops.getValue() });
-  say("Route created: " + r.legs.length + " leg(s). Animate each leg's draw on % in the map's Controls to draw it on." + syncControls(map));
+  var r = GeoScene.createRoute(map, stops, { arc: arcField.getValue(), labels: labelsAtStops.getValue() });
+  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls."
+    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate each leg's draw on % in the map's Controls.";
+  say("Route created: " + r.legs.length + " leg(s)." + how + syncControls(map));
+});
+pinStopsBtn.onClick = guard(function () {
+  var map = currentMap(), sel = [];
+  try { sel = api.getSelection() || []; } catch (e) { sel = []; }
+  if (!sel.length) throw new Error("Select one or more route stops (the circles) first.");
+  var r = GeoScene.pinStops(map, sel);
+  if (!r.pinned && !r.offGlobe.length) throw new Error("Select one or more route stops (the circles) first.");
+  var msg = "Pinned " + r.pinned + " stop(s).";
+  if (r.offGlobe.length) msg += " " + r.offGlobe.join(", ") + (r.offGlobe.length > 1 ? " are" : " is") + " past the map's edge, so " + (r.offGlobe.length > 1 ? "they" : "it") + " kept " + (r.offGlobe.length > 1 ? "their places." : "its place.");
+  say(msg + syncControls(map));
 });
 
 // ---- Label section: Pins and Routes, switched by a small tab bar -----------------
@@ -642,9 +752,11 @@ TAB_BUILDERS.push(function (tabs) {
     stopsList,
     row(removeStopBtn, clearStopsBtn),
     GeoStyle.heading("Style"),
-    row(new ui.Label("Lift %"), liftField),
-    row(pinsAtStops, new ui.Label("Pins at stops"), labelsAtStops, new ui.Label("Labels at stops")),
-    createRouteBtn
+    row(new ui.Label("Arc height %"), arcField),
+    row(labelsAtStops, new ui.Label("Labels at stops")),
+    createRouteBtn,
+    GeoStyle.note("Drag stops in the viewer, then Pin here to keep them there."),
+    pinStopsBtn
   ]));
   labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
   // No margins here: the page columns already carry theirs.
@@ -704,8 +816,12 @@ function showUnmatched(list) {
   dataUnmatchedList.setModel(list.slice(0, 300).map(function (label, i) { return { uuid: "u" + i, label: label || "(blank)" }; }));
 }
 
-dataLoadBtn.onClick = guard(function () {
+// Load runs from the button (always, so a link can be reloaded) or from Return / leaving the box
+// (only for a non-empty link that differs from the last one loaded).
+var lastLoadedLink = "";
+function runLoad() {
   var url = dataLinkField.getText().trim();
+  lastLoadedLink = url;
   sayNow("Downloading data…");
   var table = GeoCsv.parse(GeoNet.fetchCsv(url));
   if (!table.rows.length) throw new Error("That link has no data rows.");
@@ -718,6 +834,11 @@ dataLoadBtn.onClick = guard(function () {
   var prepared = GeoDataset.prepare(table, currentChoice(), GeoNet.neLayer("countries", "50m"));
   showUnmatched(prepared.unmatched);
   say(table.rows.length + " rows, " + prepared.matched + " place(s) matched, " + prepared.unmatched.length + " unmatched" + (prepared.unmatched.length ? " (see list)." : "."));
+}
+dataLoadBtn.onClick = guard(runLoad);
+dataLinkField.onValueCommitted = guard(function () {
+  var url = dataLinkField.getText().trim();
+  if (url && url !== lastLoadedLink) runLoad();
 });
 
 addDataBtn.onClick = guard(function () {

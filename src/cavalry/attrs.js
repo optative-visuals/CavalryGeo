@@ -27,6 +27,8 @@ var GeoAttrs = {
   FILL_ALPHA_ATTR: "opacity",                 // check 9: fill opacity 0-100 (null if none found)
   WEBCLIENT_FOLLOWS_REDIRECTS: false,         // check 9: Google's CSV export answers 307
   ROTATION_SIGN: 1,                           // check 11 (2026-10-02): confirmed - rotation.z direction vs map rotation (+1 same, -1 opposite)
+  COMP_END_ATTR: "endFrame",                 // probed 2026-10-05: setting it lengthens the comp; frameRange follows
+  COMP_PLAYBACK_END_ATTR: "playbackEnd",      // probed 2026-10-05: does NOT follow endFrame
   COMP_FRAME_RANGE_ATTR: "frameRange",        // check 11 (2026-10-02): confirmed - composition frame range attribute ({x: start, y: end})
   ELLIPSE_SCALE: 1,                           // probe 2 P6: addEllipse(x, y, 5, 5) is 10 wide
   // ui.scriptLocation is undefined in Cavalry scripts, so data lives at a fixed path.
