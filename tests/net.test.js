@@ -409,3 +409,18 @@ test("reverse: a failed or empty lookup gives null and never throws", () => {
   assert.equal(buildGeoNet([200], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null, "body [] has no name");
   assert.equal(buildGeoNet([-1, -1, -1, -1, -1], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null, "network failures");
 });
+
+test("reverse: one network failure is one attempt, then no network for the next minute", () => {
+  const { GeoNet, api } = buildGeoNet([-1, 200, 200], { __loadSearch: true });
+  assert.equal(GeoNet.reverse(48.85, 2.35, 12), null);
+  assert.equal(api._state.constructed, 1, "no retries");
+  assert.equal(GeoNet.reverse(48.86, 2.36, 12), null);
+  assert.equal(api._state.constructed, 1, "backed off: the network isn't contacted");
+});
+
+test("reverse: an HTTP error does not back off", () => {
+  const { GeoNet, api } = buildGeoNet([500, 500], { __loadSearch: true });
+  assert.equal(GeoNet.reverse(48.85, 2.35, 12), null);
+  assert.equal(GeoNet.reverse(48.86, 2.36, 12), null);
+  assert.equal(api._state.constructed, 2, "the second lookup contacted the network");
+});

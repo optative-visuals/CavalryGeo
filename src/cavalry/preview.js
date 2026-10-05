@@ -15,7 +15,7 @@ var GeoPreviewPanel = (function () {
     var p = {}, draw = null, error = null;
     var view = { lat: 20, lon: 0, zoom: 0, width: 320, height: 180 }, source = null, places = [], picked = -1, current = null;
     var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, running = false, failed = false, sized = false;
-    var levels = {}, lakes = null, streets = null;
+    var levels = {}, lakes = null, streets = null, budgeted = null; // budgeted: the street budget for one view and street list
     var colors = { water: WATER, land: LAND, border: BORDER };
     var overlay = null, draft = null, spot = null, press = null, panning = false;
 
@@ -140,6 +140,16 @@ var GeoPreviewPanel = (function () {
     // The panel's callback may throw; that must not take the preview down with it.
     function click(lon, lat) { try { opts.onClick(lon, lat); } catch (e) { console.log("[CavalryGeo] Map preview: onClick failed: " + (e && e.message ? e.message : e)); } }
 
+    // GeoPreview.budget is worked out again only when the street list or the view changes (not for
+    // overlay, draft or spot redraws).
+    function streetBudget() {
+      var b = budgeted;
+      if (!b || b.streets !== streets || b.lat !== view.lat || b.lon !== view.lon || b.zoom !== view.zoom || b.width !== view.width || b.height !== view.height) {
+        b = budgeted = { streets: streets, lat: view.lat, lon: view.lon, zoom: view.zoom, width: view.width, height: view.height, layers: GeoPreview.budget(streets, view, STREET_POINTS) };
+      }
+      return b.layers;
+    }
+
     function render() {
       var c = comp(), settling = dragging && Date.now() - lastMove < SETTLE_MS, li = GeoPreview.detailFor(view.zoom, settling);
       if (!settling) dragging = false; // a full-detail render ends the drag's low-detail phase
@@ -156,7 +166,7 @@ var GeoPreviewPanel = (function () {
         if (big.length) draw.addPath(ringsPath(GeoPreview.project(big, view)), { color: colors.water });
       }
       if (streets && !dragging) {
-        GeoPreview.budget(streets, view, STREET_POINTS).forEach(function (l) {
+        streetBudget().forEach(function (l) {
           var rings = GeoPreview.project(l.features, view);
           if (!rings.length) return;
           if (l.kind === "fill") { draw.addPath(ringsPath(rings), { color: l.color }); return; }
@@ -273,6 +283,7 @@ var GeoPreviewPanel = (function () {
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(colors.water);
       draw.onMousePress = guarded(function (pos, button) {
+        press = null; drag = null; panning = false; // a release that never came must not leave its press behind
         if (button && button !== "left") return;
         var y = sy(pos.y), o = overlayRects();
         if (inside(o.minus, pos.x, y)) { drag = null; p.zoomBy(-1); return; }
@@ -294,7 +305,7 @@ var GeoPreviewPanel = (function () {
         changed();
       });
       draw.onMouseRelease = guarded(function () {
-        var was = drag, at = !panning ? press : null;
+        var was = drag, at = (was && !panning) ? press : null;
         drag = null; press = null; panning = false;
         if (at && typeof opts.onClick === "function") {
           var ll = GeoPreview.fromPx(view, at.x, at.y);

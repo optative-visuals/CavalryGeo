@@ -3801,6 +3801,41 @@ test("Routes preview: the same spot as the last stop is refused without a lookup
   assert.equal(context.routesPreview.frameCamera().zoom, z);
 });
 
+test("Routes preview: a click during a lookup is ignored with a status, so stops stay in click order", () => {
+  const { context } = buildSandbox();
+  let nestedStatus = null, fired = false;
+  context.GeoNet.reverse = () => {
+    if (!fired) { fired = true; clickAt(context.routesPreview, 140, 100); nestedStatus = context.statusLabel.getText(); return "A"; }
+    return "C";
+  };
+  clickAt(context.routesPreview, 100, 60);
+  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A"], "only the first click was added");
+  assert.equal(context.statusLabel.getText(), "Added stop 1: A.");
+  context.GeoNet.reverse = () => "B";
+  clickAt(context.routesPreview, 140, 100);
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A", "B"], "clicks work again afterwards");
+});
+
+test("Pins preview: a click during a lookup is ignored, so spot, ring and name all belong to the first click", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  let nestedStatus = null, fired = false;
+  context.GeoNet.reverse = () => {
+    if (!fired) { fired = true; clickAt(context.pinsPreview, 140, 100); nestedStatus = context.statusLabel.getText(); return "First"; }
+    return "Second";
+  };
+  clickAt(context.pinsPreview, 100, 60);
+  assert.equal(nestedStatus, "Still looking up the last place…");
+  const v = context.pinsPreview._view(), want = context.GeoPreview.fromPx(v, 100, v.height - 60); // the Label previews are y-up
+  assert.ok(Math.abs(context.lonField.getValue() - want.lon) < 1e-3 && Math.abs(context.latField.getValue() - want.lat) < 1e-3, "Lat / Lon are the first click's");
+  assert.equal(context.labelText.getText(), "First");
+  context.pinsPreview._render();
+  const rings = ellipseCmds(strokes(context.pinsPreview._draw, "#ffffff"));
+  assert.equal(rings.length, 1);
+  assert.ok(Math.abs(rings[0][1] - 100) < 0.5, "the ring is at the first click");
+  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates or Label at coordinates.");
+});
+
 test("Previews follow the map: picking a map centres the Label previews on its camera; Create route redraws them", () => {
   const { context } = buildSandbox({ setup: installNe });
   createWorldMap(context);
@@ -4482,6 +4517,34 @@ test("preview click: − / + and result dots keep their meaning; no onClick mean
   plainPreview.setWidth(320);
   plainPreview._draw.onMousePress({ x: 100, y: 60 }, "left");
   plainPreview._draw.onMouseRelease({ x: 100, y: 60 }, "left"); // must not throw
+});
+
+test("preview click: a missed release never turns the next press on + into a click at the old spot", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const z = p.frameCamera().zoom, o = p._overlay();
+  p._draw.onMousePress({ x: 100, y: 60 }, "left"); // the release never arrives
+  p._draw.onMousePress({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p._draw.onMouseRelease({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.ok(p.frameCamera().zoom > z, "the + still zoomed");
+});
+
+test("preview click: a missed release never turns the next press on a result dot into a click at the old spot", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p, picks } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Dot" }], -1);
+  p._draw.onMousePress({ x: 20, y: 20 }, "left"); // the release never arrives
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  p._draw.onMouseRelease({ x: 160, y: 90 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.deepEqual(plain(picks), [0], "the dot was picked");
 });
 
 test("preview options: double-click zoom can be turned off; frame off hides the green frame; hint sets the tooltip", () => {
@@ -6607,6 +6670,27 @@ test("preview streets: drawn within the budget, and not while dragging", () => {
   p._draw.onMouseMove({ x: 140, y: 60 });
   p._render();
   assert.equal(strokes(p._draw, "#c9c2b2").length, 0, "hidden while dragging");
+});
+
+test("preview streets: the budget is worked out once per view and street list, not on every redraw", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+  const prepared = context.GeoPreview.prepare({ features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const real = context.GeoPreview.budget;
+  let calls = 0;
+  context.GeoPreview.budget = function () { calls++; return real.apply(this, arguments); };
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render(); p._render();
+  assert.equal(calls, 1, "same view, same streets: one budget");
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 1, "still drawn from the cache");
+  p.zoomBy(1);
+  p._render();
+  assert.equal(calls, 2, "a new view recomputes");
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render();
+  assert.equal(calls, 3, "a new street list recomputes");
 });
 
 test("refreshPreviews hands the map's street layers to every preview (read once, then cached)", () => {

@@ -726,8 +726,17 @@ function labelPreview(hint, onClick, onPick) {
     yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, redraw: PREVIEW_REDRAW, hint: hint
   });
 }
-// guard() drops its arguments, so the click handlers get them passed on here.
-function guardClick(fn) { return function (lon, lat) { guard(function () { fn(lon, lat); })(); }; }
+// guard() drops its arguments, so the click handlers get them passed on here. A lookup lets Cavalry
+// run queued events (sayNow, and reverse's wait for its turn), so a second click could start inside
+// the first: while one is being handled, further clicks are ignored.
+var lookingUp = false;
+function guardClick(fn) {
+  return function (lon, lat) {
+    if (lookingUp) { say("Still looking up the last place…"); return; }
+    lookingUp = true;
+    try { guard(function () { fn(lon, lat); })(); } finally { lookingUp = false; }
+  };
+}
 function round4(v) { return Math.round(v * 1e4) / 1e4; }
 var spotName = null; // the name the last Pins click put in the text box
 function pinsClick(lon, lat) {
