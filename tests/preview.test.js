@@ -174,3 +174,53 @@ test("dashes splits a rectangle's outline into dash segments", () => {
   segs.forEach((s) => assert.ok(Math.hypot(s[2] - s[0], s[3] - s[1]) <= 4 + 1e-9));
   assert.deepEqual(segs[0], [0, 0, 4, 0]);
 });
+
+test("isClick: under 4 px is a click, 4 px or more is a drag", () => {
+  assert.equal(P.isClick({ x: 10, y: 10 }, { x: 13, y: 10 }), true);
+  assert.equal(P.isClick({ x: 10, y: 10 }, { x: 12, y: 12 }), true);
+  assert.equal(P.isClick({ x: 10, y: 10 }, { x: 14, y: 10 }), false);
+  assert.equal(P.isClick({ x: 10, y: 10 }, { x: 10, y: 15 }), false);
+});
+
+test("legCurve runs from stop to stop and bulges to the same side as the real leg", () => {
+  const view = { lat: 0, lon: 0, zoom: 2, width: 320, height: 180 };
+  const a = { lon: -40, lat: 0 }, b = { lon: 40, lat: 0 };
+  const pts = P.legCurve(view, a, b, { arc: 50, lean: 0, flip: false });
+  assert.equal(pts.length, 17);
+  const pa = P.toPx(view, a.lon, a.lat), pb = P.toPx(view, b.lon, b.lat);
+  assert.ok(Math.abs(pts[0][0] - pa[0]) < 1e-9 && Math.abs(pts[0][1] - pa[1]) < 1e-9);
+  assert.ok(Math.abs(pts[16][0] - pb[0]) < 1e-9 && Math.abs(pts[16][1] - pb[1]) < 1e-9);
+  // West to east: GeoCurve's normal (90° anticlockwise, y up) points north = up the preview (smaller y).
+  assert.ok(pts[8][1] < pa[1] - 10, "bulges up the screen");
+  const flipped = P.legCurve(view, a, b, { arc: 50, lean: 0, flip: true });
+  assert.ok(flipped[8][1] > pa[1] + 10, "flip bulges down");
+  const straight = P.legCurve(view, a, b, { arc: 0 });
+  assert.ok(Math.abs(straight[8][1] - pa[1]) < 1e-9, "arc 0 is straight");
+});
+
+test("dashPolyline dashes along every segment; dashes() still dashes a rectangle", () => {
+  const segs = P.dashPolyline([[0, 0], [10, 0], [10, 10]], 4, 2);
+  assert.deepEqual(segs[0], [0, 0, 4, 0]);
+  assert.deepEqual(segs[1], [6, 0, 10, 0]);
+  assert.ok(segs.some((s) => s[0] === 10 && s[2] === 10), "continues down the second segment");
+  assert.equal(P.dashPolyline([[0, 0]], 4, 2).length, 0);
+  assert.ok(P.dashes({ x: 0, y: 0, w: 10, h: 10 }, 4, 3).length > 0);
+});
+
+test("wrapLon keeps longitudes in -180..180", () => {
+  assert.equal(P.wrapLon(190), -170);
+  assert.equal(P.wrapLon(-190), 170);
+  assert.equal(P.wrapLon(20), 20);
+});
+
+test("budget keeps on-screen features, largest first, under the point cap", () => {
+  const sq = (x, y, d) => [[x, y], [x + d, y], [x + d, y + d], [x, y + d], [x, y]];
+  const layer = (rings) => P.prepare({ features: rings.map((r, i) => ({ name: "f" + i, rings: [r] })) });
+  const view = { lat: 0, lon: 0, zoom: 4, width: 320, height: 180 };
+  const big = layer([sq(-5, -5, 8)]), small = layer([sq(1, 1, 1), sq(2, 2, 1)]), far = layer([sq(150, 60, 1)]);
+  const out = P.budget([{ kind: "fill", color: "#111111", prepared: small }, { kind: "line", color: "#222222", prepared: big }, { kind: "fill", color: "#333333", prepared: far }], view, 10);
+  assert.deepEqual(out.map((l) => l.color), ["#111111", "#222222"], "layer order kept; the off-screen layer dropped");
+  assert.equal(out[1].features.length, 1, "the big square (5 points) is kept first");
+  assert.equal(out[0].features.length, 1, "only one small square (5 points) still fits");
+  assert.deepEqual(P.budget([], view, 10), []);
+});

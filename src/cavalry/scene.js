@@ -138,8 +138,9 @@ var GeoScene = (function () {
   function findMapLayers(map) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
-      var meta = layerMeta(id);
-      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta });
+      var expr = readExpr(id, A.MAP_EXPR_ATTR), meta = GeoExpression.readTag(expr, "GEO_META");
+      // size (the expression's length, data included) tells a caller whether a layer's data changed
+      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length });
     });
     return out;
   }
@@ -641,9 +642,8 @@ var GeoScene = (function () {
     return out;
   }
 
-  // The text layers of this map's labels: each label's position helper drives its text's
-  // position, so the text is whatever that helper's output is connected to.
-  function findLabels(map) {
+  // Driver-mode labels of this map: each position helper and the text layer it moves.
+  function labelDrivers(map) {
     var out = [];
     if (typeof api.getOutConnections !== "function") return out;
     api.getCompLayers(false).forEach(function (id) {
@@ -653,11 +653,12 @@ var GeoScene = (function () {
       try { conns = api.getOutConnections(id, A.DRIVER_OUTPUT_ATTR) || []; } catch (e) { return; } // skips only this label
       conns.forEach(function (c) {
         var s = String(c), dot = s.indexOf(".");
-        if (dot > 0 && s.slice(dot + 1) === "position") out.push(s.slice(0, dot));
+        if (dot > 0 && s.slice(dot + 1) === "position") out.push({ driver: id, text: s.slice(0, dot) });
       });
     });
     return out;
   }
+  function findLabels(map) { return labelDrivers(map).map(function (l) { return l.text; }); }
 
   function findOcean(map) {
     return api.getChildren(map.groupId).filter(function (id) { return api.getNiceName(id) === OCEAN_NAME; })[0] || null;
@@ -1254,6 +1255,88 @@ var GeoScene = (function () {
     return GeoStyles.fromReadings(name, readings, styleOf(map));
   }
 
+  // ---- Previews: what the panel's map previews draw for a map ------------------------------
+  // A number input as it currently reads: through its incoming connection (a Controls value)
+  // when it has one, else its own value. NaN when unreadable.
+  function inputValue(id, attr) {
+    var from = "";
+    try { from = String(api.getInConnection(id, attr) || ""); } catch (e) { from = ""; }
+    var dot = from.indexOf(".");
+    try { return Number(dot > 0 ? api.get(from.slice(0, dot), from.slice(dot + 1)) : api.get(id, attr)); } catch (e) { return NaN; }
+  }
+  function lonLat(lon, lat) { return isFinite(lon) && isFinite(lat) ? { lon: lon, lat: lat } : null; }
+
+  // The map's street-level layers for the previews (ids, how to draw, colour); data is read
+  // separately (readPreviewLayer) so the panel can keep it.
+  // Bottom first (the map's stacking): parks, water, railways, roads, then extracts. layers is an
+  // optional findMapLayers(map) result, so a caller reading several things scans the comp once.
+  // sig changes when the layer's data does.
+  var STREET_ORDER = ["parks", "water", "railways", "roads", "extract"];
+  function previewStreets(map, layers) {
+    var look = styleOf(map), out = [];
+    (layers || findMapLayers(map)).forEach(function (l) {
+      var c = l.meta.category, rank = STREET_ORDER.indexOf(c);
+      if (rank < 0) return;
+      if (c === "roads" || c === "railways") out.push({ id: l.id, sig: l.size, rank: rank, kind: "line", color: look.colors[c] });
+      else if (c === "water" || c === "parks") out.push({ id: l.id, sig: l.size, rank: rank, kind: "fill", color: look.colors[c] });
+      else if (l.meta.source !== "cities") out.push({ id: l.id, sig: l.size, rank: rank, kind: LINE_SOURCES.indexOf(l.meta.source) >= 0 ? "line" : "fill", color: look.colors.extract });
+    });
+    out.forEach(function (s, i) { s.i = i; });
+    out.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
+    out.forEach(function (s) { delete s.rank; delete s.i; });
+    return out;
+  }
+  function readPreviewLayer(id) { return GeoCodec.decodeLayer(readLayerData(id)); }
+  function previewModel(map, layers) {
+    var look = styleOf(map), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR + ".";
+    var out = { colors: { accent: look.colors.accent, text: look.colors.text }, pins: [], labels: [], routes: [] };
+    var LIFT = A.MAP_ARRAY_ATTR + "." + E.inputIndex(E.ROUTE_INPUTS, "lift"), oldRoutes = {}, oldOrder = [];
+    function sameSpot(a, b) { return Math.abs(a.lon - b.lon) < 1e-9 && Math.abs(a.lat - b.lat) < 1e-9; }
+    (layers || findMapLayers(map)).forEach(function (l) {
+      var c = l.meta.category;
+      if (c !== "pin" && c !== "label" && c !== "route") return;
+      var layer;
+      try { layer = GeoCodec.decodeLayer(readLayerData(l.id)); } catch (e) { return; }
+      (layer.features || []).forEach(function (f) {
+        var ring = f.rings && f.rings[0];
+        if (!ring || !ring.length) return;
+        if (c === "pin") { var p = lonLat(ring[0][0], ring[0][1]); if (p) out.pins.push(p); }
+        else if (c === "label") { var q = lonLat(ring[0][0], ring[0][1]); if (q) out.labels.push({ lon: q.lon, lat: q.lat, text: String(f.name || "") }); }
+        else {
+          var a = lonLat(ring[0][0], ring[0][1]), b = lonLat(ring[ring.length - 1][0], ring[ring.length - 1][1]), g = api.getParent(l.id);
+          if (!a || !b) return;
+          if (!oldRoutes[g]) { oldRoutes[g] = { stops: [], legs: [] }; oldOrder.push(g); }
+          var lift = inputValue(l.id, LIFT);
+          oldRoutes[g].legs.push({ from: a, to: b, arc: isFinite(lift) ? lift : 30, lean: 0, flip: false });
+          [a, b].forEach(function (s) { if (!oldRoutes[g].stops.some(function (t) { return sameSpot(s, t); })) oldRoutes[g].stops.push(s); });
+        }
+      });
+    });
+    oldOrder.forEach(function (g) { out.routes.push(oldRoutes[g]); });
+    labelDrivers(map).forEach(function (l) {
+      var p = lonLat(inputValue(l.driver, CA + "5"), inputValue(l.driver, CA + "6"));
+      var text = "";
+      try { text = String(api.get(l.text, A.TEXT_ATTR) || ""); } catch (e) { text = ""; }
+      if (p) out.labels.push({ lon: p.lon, lat: p.lat, text: text });
+    });
+    findRoutes(map).forEach(function (r) {
+      var d = userData(r.groupId, ROUTE_KEY) || {};
+      var places = (d.stops || []).map(function (s) {
+        return s && s.position && layerThere(s.position) ? lonLat(inputValue(s.position, CA + "5"), inputValue(s.position, CA + "6")) : null;
+      });
+      var route = { stops: places.filter(function (p) { return !!p; }), legs: [] };
+      (d.legs || []).forEach(function (l) {
+        var a = places[l.from], b = places[l.to];
+        if (!a || !b || !l.line || !layerThere(l.line)) return;
+        var h = l.startHandle && layerThere(l.startHandle) ? l.startHandle : null;
+        function hv(name, dflt) { if (!h) return dflt; var v = inputValue(h, CA + E.inputIndex(E.HANDLE_INPUTS, name)); return isFinite(v) ? v : dflt; }
+        route.legs.push({ from: a, to: b, arc: hv("arc", 30), lean: hv("lean", 0), flip: !!hv("flip", 0) });
+      });
+      if (route.stops.length) out.routes.push(route);
+    });
+    return out;
+  }
+
   return {
     STYLE: STYLE,
     styleOf: styleOf, setMapStyle: setMapStyle, layerStyle: layerStyle, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
@@ -1264,6 +1347,7 @@ var GeoScene = (function () {
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
-    applyMapStyle: applyMapStyle, readMapStyle: readMapStyle
+    applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
+    previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
 })();

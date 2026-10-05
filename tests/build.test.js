@@ -399,8 +399,10 @@ function buildSandbox(options = {}) {
   // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
   // the timers they cause (downloads, builds, a preview they create), so leave that one out
   // (found by asking the preview for its timer).
-  const own = context.preview && context.preview._timer && context.preview._timer();
-  if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    const own = pv && pv._timer && pv._timer();
+    if (own && api._timers.indexOf(own) >= 0) api._timers.splice(api._timers.indexOf(own), 1);
+  });
   return { context: context, api: api, ui: ui };
 }
 
@@ -3709,8 +3711,156 @@ test("each section has grey headings in order", () => {
   assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
+});
+
+// ---- Label previews ----
+function lookupGives(context, name) { const asked = []; context.GeoNet.reverse = (lat, lon, zoom) => { asked.push([lat, lon, zoom]); return name; }; return asked; }
+function clickAt(pv, x, y) { pv._draw.onMousePress({ x, y }, "left"); pv._draw.onMouseRelease({ x, y }, "left"); }
+
+test("Label previews: Pins and Routes each get a preview under its heading, with double-click zoom off", () => {
+  const { context } = buildSandbox();
+  const pages = context.sectionPages.pages;
+  assert.ok(holds(pages[3], context.pinsPreview.layout) && holds(pages[3], context.routesPreview.layout));
+  assert.equal(context.pinsPreview._draw._toolTip, "Click to set the spot · drag to move · + / − to zoom");
+  assert.equal(context.routesPreview._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
+});
+
+test("Pins preview: a click fills Lat / Lon, sets the ring, and puts the looked-up name in the empty text box", () => {
+  const { context } = buildSandbox();
+  const asked = lookupGives(context, "Gare du Nord");
+  clickAt(context.pinsPreview, 100, 60);
+  assert.equal(asked.length, 1);
+  const lat = context.latField.getValue(), lon = context.lonField.getValue();
+  assert.equal(Math.round(lat * 1e4) / 1e4, lat, "4 decimals");
+  assert.equal(context.labelText.getText(), "Gare du Nord");
+  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates or Label at coordinates.");
+  lookupGives(context, "Gare de l'Est");
+  clickAt(context.pinsPreview, 120, 70);
+  assert.equal(context.labelText.getText(), "Gare de l'Est", "an earlier click's name is replaced");
+  context.labelText.setText("My cafe");
+  lookupGives(context, "Somewhere");
+  clickAt(context.pinsPreview, 130, 70);
+  assert.equal(context.labelText.getText(), "My cafe", "typed text is never overwritten");
+});
+
+test("Pins preview: a failed lookup says the coordinates and clears a stale looked-up name", () => {
+  const { context } = buildSandbox();
+  lookupGives(context, "Gare du Nord");
+  clickAt(context.pinsPreview, 100, 60);
+  lookupGives(context, null);
+  clickAt(context.pinsPreview, 140, 80);
+  assert.equal(context.labelText.getText(), "");
+  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates or Label at coordinates.");
+});
+
+test("Pins preview: Pin at coordinates after a click pins the looked-up name there, and the previews redraw with it", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  lookupGives(context, "Here");
+  clickAt(context.pinsPreview, 100, 60);
+  context.pinCoordBtn.onClick();
+  const pins = context.GeoScene.previewModel(context.currentMap()).pins;
+  assert.equal(pins.length, 1);
+  assert.ok(Math.abs(pins[0].lat - context.latField.getValue()) < 1e-9);
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    pv._render();
+    assert.ok(fills(pv._draw, "#1F8F4E").length >= 1, "each preview draws the new pin");
+  });
+  assert.ok(api);
+});
+
+test("Routes preview: each click adds a looked-up stop and the draft is drawn; a failed lookup names it by coordinates", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  lookupGives(context, "Paris");
+  clickAt(context.routesPreview, 100, 60);
+  lookupGives(context, "Lyon");
+  clickAt(context.routesPreview, 140, 100);
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["Paris", "Lyon"]);
+  assert.equal(context.statusLabel.getText(), "Added stop 2: Lyon.");
+  lookupGives(context, null);
+  clickAt(context.routesPreview, 180, 120);
+  const s = context.stops[2];
+  assert.equal(s.name, s.lat.toFixed(4) + ", " + s.lon.toFixed(4));
+  context.routesPreview._render();
+  assert.ok(strokes(context.routesPreview._draw, "#1F8F4E").length >= 1, "the dashed draft line");
+  assert.equal(context.stopsList._model.length, 3);
+});
+
+test("Routes preview: the same spot as the last stop is refused without a lookup; a double-click adds once and doesn't zoom", () => {
+  const { context } = buildSandbox();
+  const asked = lookupGives(context, "Paris");
+  clickAt(context.routesPreview, 100, 60);
+  const z = context.routesPreview.frameCamera().zoom;
+  clickAt(context.routesPreview, 100, 60);
+  context.routesPreview._draw.onMouseDoubleClick({ x: 100, y: 60 }, "left");
+  assert.equal(context.stops.length, 1);
+  assert.equal(asked.length, 1);
+  assert.equal(context.statusLabel.getText(), "That's already the last stop.");
+  assert.equal(context.routesPreview.frameCamera().zoom, z);
+});
+
+test("Routes preview: a click during a lookup is ignored with a status, so stops stay in click order", () => {
+  const { context } = buildSandbox();
+  let nestedStatus = null, fired = false;
+  context.GeoNet.reverse = () => {
+    if (!fired) { fired = true; clickAt(context.routesPreview, 140, 100); nestedStatus = context.statusLabel.getText(); return "A"; }
+    return "C";
+  };
+  clickAt(context.routesPreview, 100, 60);
+  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A"], "only the first click was added");
+  assert.equal(context.statusLabel.getText(), "Added stop 1: A.");
+  context.GeoNet.reverse = () => "B";
+  clickAt(context.routesPreview, 140, 100);
+  assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A", "B"], "clicks work again afterwards");
+});
+
+test("Pins preview: a click during a lookup is ignored, so spot, ring and name all belong to the first click", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  let nestedStatus = null, fired = false;
+  context.GeoNet.reverse = () => {
+    if (!fired) { fired = true; clickAt(context.pinsPreview, 140, 100); nestedStatus = context.statusLabel.getText(); return "First"; }
+    return "Second";
+  };
+  clickAt(context.pinsPreview, 100, 60);
+  assert.equal(nestedStatus, "Still looking up the last place…");
+  const v = context.pinsPreview._view(), want = context.GeoPreview.fromPx(v, 100, v.height - 60); // the Label previews are y-up
+  assert.ok(Math.abs(context.lonField.getValue() - want.lon) < 1e-3 && Math.abs(context.latField.getValue() - want.lat) < 1e-3, "Lat / Lon are the first click's");
+  assert.equal(context.labelText.getText(), "First");
+  context.pinsPreview._render();
+  const rings = ellipseCmds(strokes(context.pinsPreview._draw, "#ffffff"));
+  assert.equal(rings.length, 1);
+  assert.ok(Math.abs(rings[0][1] - 100) < 0.5, "the ring is at the first click");
+  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates or Label at coordinates.");
+});
+
+test("Previews follow the map: picking a map centres the Label previews on its camera; Create route redraws them", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  [context.pinsPreview, context.routesPreview].forEach((pv) => {
+    assert.ok(Math.abs(pv.frameCamera().lat - cam.lat) < 1e-6 && Math.abs(pv.frameCamera().lon - cam.lon) < 1e-6);
+  });
+  lookupGives(context, "A"); clickAt(context.routesPreview, 100, 60);
+  lookupGives(context, "B"); clickAt(context.routesPreview, 200, 120);
+  context.createRouteBtn.onClick();
+  const m = context.GeoScene.previewModel(context.currentMap());
+  assert.equal(m.routes.length, 1);
+  context.pinsPreview._render();
+  assert.ok(strokes(context.pinsPreview._draw, "#1F8F4E").length >= 2, "legs and stop circles on the Pins preview too");
+});
+
+test("Pins search shows its results on the Pins preview; clicking a result dot picks it", () => {
+  const { context } = buildSandbox();
+  searchFinds(context, [PARIS, PARIS_TX]);
+  context.pinSearchField.setText("Paris");
+  context.pinSearchBtn.onClick();
+  const pv = context.pinsPreview;
+  const f = pv.frameCamera();
+  assert.ok(Math.abs(f.lat - PARIS.lat) < 1e-6 && Math.abs(f.lon - PARIS.lon) < 1e-6, "centred on the picked result");
+  assert.equal(context.pinResultPicker.getValue(), 0);
 });
 
 test("every page column packs items 4 apart and puts 4 before each heading that isn't first", () => {
@@ -4289,6 +4439,125 @@ test("preview: a drag that paused before release renders full detail once, not t
     context.__now = realNow;
     vm.runInContext("Date.now = __now", context);
   }
+});
+
+const OVERLAY = {
+  colors: { accent: "#a63d2f", text: "#4a3423" },
+  pins: [{ lon: 2, lat: 45 }],
+  labels: [{ lon: 3, lat: 46, text: "Here" }],
+  routes: [{ stops: [{ lon: 0, lat: 44 }, { lon: 4, lat: 44 }], legs: [{ from: { lon: 0, lat: 44 }, to: { lon: 4, lat: 44 }, arc: 30, lean: 0, flip: false }] }]
+};
+const texts = (draw, color) => draw._paths.filter((x) => x.paint.color === color && (x.path.cmds || []).some((c) => c[0] === "addText"));
+
+test("preview overlay: pins, labels, route legs and stops in the overlay's colours", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setOverlay(OVERLAY);
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length, 1, "pins: one fill path");
+  assert.equal(strokes(p._draw, "#a63d2f").length, 2, "legs + stop circles");
+  assert.equal(texts(p._draw, "#4a3423").length, 1, "labels");
+  p.setOverlay(null);
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length + strokes(p._draw, "#a63d2f").length, 0);
+});
+
+test("preview draft and spot: dashed accent line with dots, and a white ring", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setOverlay(OVERLAY);
+  p.setDraft([{ lon: 1, lat: 45 }, { lon: 3, lat: 45 }]);
+  p.setSpot({ lon: 2, lat: 44 });
+  p._render();
+  assert.equal(fills(p._draw, "#a63d2f").length, 2, "pins + draft dots");
+  assert.equal(strokes(p._draw, "#a63d2f").length, 3, "legs + stop circles + dashed draft line");
+  assert.equal(strokes(p._draw, "#ffffff").length, 1, "the spot ring");
+});
+
+test("preview click: a short press and release reports the place; a drag doesn't", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 102, y: 61 });
+  p._draw.onMouseRelease({ x: 102, y: 61 }, "left");
+  assert.equal(clicks.length, 1);
+  const want = context.GeoPreview.fromPx({ lat: 45, lon: 2, zoom: p._view().zoom, width: 320, height: 180 }, 100, 60);
+  assert.ok(Math.abs(clicks[0][0] - want.lon) < 1e-6 && Math.abs(clicks[0][1] - want.lat) < 1e-6, "the press point's place");
+  assert.equal(p.frameCamera().lon, before.lon, "a click doesn't pan");
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 60 });
+  p._draw.onMouseRelease({ x: 140, y: 60 }, "left");
+  assert.equal(clicks.length, 1, "a drag isn't a click");
+  assert.notEqual(p.frameCamera().lon, before.lon, "the drag panned");
+});
+
+test("preview click: − / + and result dots keep their meaning; no onClick means no click", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p, picks } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const o = p._overlay();
+  p._draw.onMousePress({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p._draw.onMouseRelease({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Dot" }], -1);
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  p._draw.onMouseRelease({ x: 160, y: 90 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.deepEqual(plain(picks), [0]);
+  const plainPreview = makePreview(context).p; // no onClick
+  plainPreview.setWidth(320);
+  plainPreview._draw.onMousePress({ x: 100, y: 60 }, "left");
+  plainPreview._draw.onMouseRelease({ x: 100, y: 60 }, "left"); // must not throw
+});
+
+test("preview click: a missed release never turns the next press on + into a click at the old spot", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const z = p.frameCamera().zoom, o = p._overlay();
+  p._draw.onMousePress({ x: 100, y: 60 }, "left"); // the release never arrives
+  p._draw.onMousePress({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  p._draw.onMouseRelease({ x: o.plus.x + 5, y: o.plus.y + 5 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.ok(p.frameCamera().zoom > z, "the + still zoomed");
+});
+
+test("preview click: a missed release never turns the next press on a result dot into a click at the old spot", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p, picks } = makePreview(context, { onClick: (lon, lat) => clicks.push([lon, lat]) });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Dot" }], -1);
+  p._draw.onMousePress({ x: 20, y: 20 }, "left"); // the release never arrives
+  p._draw.onMousePress({ x: 160, y: 90 }, "left");
+  p._draw.onMouseRelease({ x: 160, y: 90 }, "left");
+  assert.equal(clicks.length, 0);
+  assert.deepEqual(plain(picks), [0], "the dot was picked");
+});
+
+test("preview options: double-click zoom can be turned off; frame off hides the green frame; hint sets the tooltip", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context, { doubleClickZoom: false, frame: false, dim: false, hint: "Click to add a stop · drag to move · + / − to zoom" });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  const z = p.frameCamera().zoom;
+  p._draw.onMouseDoubleClick({ x: 160, y: 90 }, "left");
+  assert.equal(p.frameCamera().zoom, z);
+  p._render();
+  assert.equal(strokes(p._draw, "#33CE70").length, 0, "no green frame");
+  assert.equal(p._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
 });
 
 // ---- Preview in the Map tab ----------------------------------------------------------
@@ -6305,4 +6574,218 @@ test("map styles: Apply recolours data region outlines and value labels but neve
   assert.equal(api.get(d.layers.legend, "material.materialColor"), "#333333");
   assert.equal(api.get(d.layers.bubbles, "material.materialColor"), "#bc4749");
   assert.deepEqual(api.get(d.layers.regions, low), before);
+});
+
+// ---- Previews: what the panel previews draw for a map ----
+test("previewModel: pins, labels and a new-style route with its curve settings, in the map's style colours", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("P", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Vintage"));
+  G.addPin(map, "Here", 2.35, 48.85);
+  G.createLabel(map, "Lisbon", -9.14, 38.72);
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 10 }, { name: "B", lon: 20, lat: 10 }, { name: "C", lon: 20, lat: 30 }], { arc: 40 });
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  const lean = "array." + context.GeoExpression.inputIndex(context.GeoExpression.HANDLE_INPUTS, "lean");
+  const flip = "array." + context.GeoExpression.inputIndex(context.GeoExpression.HANDLE_INPUTS, "flip");
+  api.set(rec.legs[1].startHandle, { [lean]: 25, [flip]: 1 });
+  const m = plain(G.previewModel(map));
+  assert.deepEqual(m.colors, { accent: "#a63d2f", text: "#4a3423" });
+  assert.deepEqual(m.pins, [{ lon: 2.35, lat: 48.85 }]);
+  assert.deepEqual(m.labels, [{ lon: -9.14, lat: 38.72, text: "Lisbon" }]);
+  assert.equal(m.routes.length, 1);
+  assert.deepEqual(m.routes[0].stops, [{ lon: 0, lat: 10 }, { lon: 20, lat: 10 }, { lon: 20, lat: 30 }]);
+  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 10 }, to: { lon: 20, lat: 10 }, arc: 40, lean: 0, flip: false });
+  assert.deepEqual(m.routes[0].legs[1], { from: { lon: 20, lat: 10 }, to: { lon: 20, lat: 30 }, arc: 40, lean: 25, flip: true });
+});
+
+test("previewModel: a stop's place follows Pin here (its position helper), and a curve setting driven by the Controls is read through", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 0 }], { arc: 30 });
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  api.set(rec.stops[1].position, { "array.5": 12, "array.6": 3 });
+  const sync = context.GeoControlPanel.sync(map);
+  const arcSlot = slotsOf(api, sync.valuesId)["route:" + r.groupId + ":arc"];
+  api.set(sync.valuesId, { [arcSlot]: 70 });
+  const m = plain(G.previewModel(map));
+  assert.deepEqual(m.routes[0].stops[1], { lon: 12, lat: 3 });
+  assert.equal(m.routes[0].legs[0].arc, 70);
+});
+
+test("previewModel: an old-style route gives its legs (arc from Arc height) and stops; nothing breaks on a deleted part", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const G = context.GeoScene;
+  const map = G.createMap("Old", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 5 }], { lift: 45, pins: true, labels: false });
+  const m = plain(G.previewModel(map));
+  assert.equal(m.routes.length, 1);
+  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 0 }, to: { lon: 10, lat: 5 }, arc: 45, lean: 0, flip: false });
+  assert.deepEqual(m.routes[0].stops, [{ lon: 0, lat: 0 }, { lon: 10, lat: 5 }]);
+  assert.equal(m.pins.length, 2, "an old route's stop pins are pins");
+  api.deleteLayer(r.legs[0]);
+  assert.equal(plain(G.previewModel(map)).routes.length, 0);
+});
+
+test("findLabels still finds driver labels (now through labelDrivers)", () => {
+  const { context } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("L", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const id = G.createLabel(map, "Here", 1, 2);
+  assert.deepEqual(plain(G.findLabels(map)), [id]);
+});
+
+test("Map styles: picking a style recolours the Label previews too", () => {
+  const { context } = buildSandbox();
+  pickStyle(context, "Light");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => assert.equal(pv._draw._background, "#cfe3ec"));
+});
+
+test("previewStreets lists roads, railways, water, parks and extracts with their style colours; buildings and data are left out", () => {
+  const { context } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("S", { lat: 0, lon: 0, zoom: 12, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Light"));
+  const C = require("../src/core/codec.js");
+  const line = C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const area = C.encodeLayer({ kind: "polygon", features: [{ name: "Park", rings: [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0]]] }] });
+  const add = (cat, enc) => G.createMapLayer(map, cat, enc, { camera: map.cameraId, category: cat }, G.layerStyle(map, cat), {});
+  const roads = add("roads", line), parks = add("parks", area);
+  add("buildings", area);
+  const list = plain(G.previewStreets(map));
+  assert.deepEqual(list.map((s) => [s.id, s.kind, s.color]).sort(), [[parks, "fill", "#d5e6c8"], [roads, "line", "#c9c2b2"]].sort());
+  assert.equal(G.readPreviewLayer(roads).features[0].name, "Road");
+});
+
+test("preview streets: drawn within the budget, and not while dragging", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+  const prepared = context.GeoPreview.prepare({ features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render();
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 1);
+  p._draw.onMousePress({ x: 100, y: 60 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 60 });
+  p._render();
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 0, "hidden while dragging");
+});
+
+test("preview streets: the budget is worked out once per view and street list, not on every redraw", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+  const prepared = context.GeoPreview.prepare({ features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const real = context.GeoPreview.budget;
+  let calls = 0;
+  context.GeoPreview.budget = function () { calls++; return real.apply(this, arguments); };
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render(); p._render();
+  assert.equal(calls, 1, "same view, same streets: one budget");
+  assert.equal(strokes(p._draw, "#c9c2b2").length, 1, "still drawn from the cache");
+  p.zoomBy(1);
+  p._render();
+  assert.equal(calls, 2, "a new view recomputes");
+  p.setStreets([{ kind: "line", color: "#c9c2b2", prepared }]);
+  p._render();
+  assert.equal(calls, 3, "a new street list recomputes");
+});
+
+test("refreshPreviews hands the map's street layers to every preview (read once, then cached)", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const C = require("../src/core/codec.js");
+  const road = C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], [0.01, 0.01]]] }] });
+  const id = G.createMapLayer(map, "Map: Roads", road, { camera: map.cameraId, category: "roads" }, G.layerStyle(map, "roads"), {});
+  let reads = 0;
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { reads++; return real(x); };
+  context.refreshPreviews();
+  context.refreshPreviews();
+  assert.equal(reads, 1, "decoded once");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((pv) => {
+    pv.showCamera({ lat: 0.005, lon: 0.005, zoom: 14 }, "camera");
+    pv._render();
+    assert.equal(strokes(pv._draw, "#8a948e").length, 1, "Dark roads colour");
+  });
+  assert.ok(api && id);
+});
+
+function streetFixture(context) {
+  const G = context.GeoScene, map = context.currentMap(), C = require("../src/core/codec.js");
+  const enc = (n) => C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[0, 0], ...Array.from({ length: n }, (_, i) => [0.001 * (i + 1), 0.001 * (i + 1)])]] }] });
+  const add = (cat, e, meta = {}) => G.createMapLayer(map, "Map: " + cat, e, Object.assign({ camera: map.cameraId, category: cat }, meta), G.layerStyle(map, cat), {});
+  return { G, map, enc, add };
+}
+
+test("previewStreets lists layers bottom first: parks, water, railways, roads, extracts", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, map, enc, add } = streetFixture(context);
+  const ex = G.createMapLayer(map, "Map: extract", enc(2), { camera: map.cameraId, category: "extract", source: "rivers" }, G.layerStyle(map, "extractLine"), {}), roads = add("roads", enc(2)), parks = add("parks", enc(2)), rail = add("railways", enc(2)), water = add("water", enc(2));
+  assert.deepEqual(plain(G.previewStreets(map).map((s) => s.id)), [parks, water, rail, roads, ex]);
+});
+
+test("street cache: changed data under the same id is re-read, and removed layers are pruned", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, map, enc, add } = streetFixture(context);
+  const a = add("roads", enc(2)), b = add("rail" + "ways", enc(2));
+  let reads = [];
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { reads.push(x); return real(x); };
+  context.refreshPreviews();
+  context.refreshPreviews();
+  assert.deepEqual(reads.slice().sort(), [a, b].sort(), "each read once");
+  const other = add("roads", enc(6));
+  api.set(a, { "generator.expression": api.get(other, "generator.expression") });
+  api.deleteLayer(other);
+  reads = [];
+  context.refreshPreviews();
+  assert.deepEqual(reads, [a], "only the changed layer is re-read");
+  api.deleteLayer(b);
+  context.refreshPreviews();
+  reads = [];
+  add("railways", enc(2)); // a new layer
+  context.refreshPreviews();
+  assert.equal(reads.length, 1, "only the new layer is read; the removed layer left no stale entry");
+  assert.ok(map);
+});
+
+test("refreshPreviews scans the comp's layers once for pins, routes and streets together", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, enc, add } = streetFixture(context);
+  const road = add("roads", enc(2));
+  context.refreshPreviews(); // decodes and caches
+  const realGet = api.get.bind(api), realFind = G.findMapLayers;
+  let exprReads = 0, finds = 0;
+  api.get = (id, attr) => { if (id === road && attr === "generator.expression") exprReads++; return realGet(id, attr); };
+  G.findMapLayers = (m) => { finds++; return realFind(m); };
+  context.refreshPreviews();
+  assert.equal(finds, 1);
+  assert.equal(exprReads, 1, "the layer's expression is read once per refresh");
+});
+
+test("a street layer that fails to read doesn't stop the overlay or the other streets", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const { G, enc, add } = streetFixture(context);
+  const bad = add("parks", enc(2)), good = add("roads", enc(2));
+  const real = G.readPreviewLayer;
+  G.readPreviewLayer = (x) => { if (x === bad) throw new Error("boom"); return real(x); };
+  let overlays = 0;
+  const pv = context.pinsPreview, realSet = pv.setOverlay;
+  pv.setOverlay = (m) => { overlays++; return realSet(m); };
+  context.refreshPreviews();
+  assert.equal(overlays, 1, "overlay refreshed");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => {
+    p.showCamera({ lat: 0.003, lon: 0.003, zoom: 14 }, "camera");
+    p._render();
+    assert.equal(strokes(p._draw, "#8a948e").length, 1, "the good street layer still draws");
+  });
+  assert.ok(good);
 });

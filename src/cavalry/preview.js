@@ -7,15 +7,17 @@ var GeoPreviewPanel = (function () {
   var WATER = "#1d2a33", LAND = "#4a5a50", BORDER = "#2a3530", FRAME = "#33CE70", DIM = "#00000059";
   var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff", OTHER_NAME = "#a6a6a6";
   var PILL = "#000000a6", GLYPH = "#e6e6e6"; // the zoom readout and − / + drawn inside the map
-  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5;
+  var SPOT = "#ffffff", DRAFT = "#1F8F4E";
+  var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5, STREET_POINTS = 15000;
   var HINT = "Drag to move · double-click or + / − to zoom";
 
   function create(opts) {
     var p = {}, draw = null, error = null;
     var view = { lat: 20, lon: 0, zoom: 0, width: 320, height: 180 }, source = null, places = [], picked = -1, current = null;
     var dirty = false, dragging = false, lastMove = 0, drag = null, timer = null, running = false, failed = false, sized = false;
-    var levels = {}, lakes = null;
+    var levels = {}, lakes = null, streets = null, budgeted = null; // budgeted: the street budget for one view and street list
     var colors = { water: WATER, land: LAND, border: BORDER };
+    var overlay = null, draft = null, spot = null, press = null, panning = false;
 
     function comp() { return opts.compSize(); }
     function sy(y) { return opts.yUp ? view.height - y : y; }
@@ -98,6 +100,56 @@ var GeoPreviewPanel = (function () {
       draw.addPath(label.toObject(), { color: GLYPH });
     }
 
+    function polyline(path, pts) { pts.forEach(function (q, i) { if (i === 0) path.moveTo(q[0], sy(q[1])); else path.lineTo(q[0], sy(q[1])); }); }
+    // The map's own pins, labels and routes (GeoScene.previewModel), in its style colours.
+    function drawModel() {
+      if (!overlay) return;
+      var accent = overlay.colors.accent, legs = new cavalry.Path(), stopRings = new cavalry.Path(), pins = new cavalry.Path(), labels = new cavalry.Path();
+      var has = { legs: false, stops: false, pins: false, labels: false };
+      (overlay.routes || []).forEach(function (r) {
+        (r.legs || []).forEach(function (l) { polyline(legs, GeoPreview.legCurve(view, l.from, l.to, { arc: l.arc, lean: l.lean, flip: l.flip })); has.legs = true; });
+        (r.stops || []).forEach(function (s) { var q = GeoPreview.toPx(view, s.lon, s.lat); stopRings.addEllipse(q[0], sy(q[1]), 3, 3); has.stops = true; });
+      });
+      (overlay.pins || []).forEach(function (s) { var q = GeoPreview.toPx(view, s.lon, s.lat); pins.addEllipse(q[0], sy(q[1]), 3, 3); has.pins = true; });
+      (overlay.labels || []).forEach(function (s) { var q = GeoPreview.toPx(view, s.lon, s.lat); labels.addText(String(s.text), 10, q[0] + 5, sy(q[1] - 3)); has.labels = true; });
+      if (has.legs) draw.addPath(legs.toObject(), { color: accent, stroke: true, strokeWidth: 1.5 });
+      if (has.stops) draw.addPath(stopRings.toObject(), { color: accent, stroke: true, strokeWidth: 1.5 });
+      if (has.pins) draw.addPath(pins.toObject(), { color: accent });
+      if (has.labels) draw.addPath(labels.toObject(), { color: overlay.colors.text });
+    }
+    // The route being built on the Routes page: its stops in order, joined by a dashed line.
+    function drawDraft() {
+      if (!draft || !draft.length) return;
+      var accent = overlay ? overlay.colors.accent : DRAFT, pts = draft.map(function (s) { return GeoPreview.toPx(view, s.lon, s.lat); });
+      if (pts.length > 1) {
+        var dash = new cavalry.Path();
+        GeoPreview.dashPolyline(pts, 5, 4).forEach(function (sg) { dash.moveTo(sg[0], sy(sg[1])); dash.lineTo(sg[2], sy(sg[3])); });
+        draw.addPath(dash.toObject(), { color: accent, stroke: true, strokeWidth: 1.5 });
+      }
+      var dots = new cavalry.Path();
+      pts.forEach(function (q) { dots.addEllipse(q[0], sy(q[1]), 3, 3); });
+      draw.addPath(dots.toObject(), { color: accent });
+    }
+    // Where the last click on the Pins page set the spot.
+    function drawSpot() {
+      if (!spot) return;
+      var q = GeoPreview.toPx(view, spot.lon, spot.lat), ring = new cavalry.Path();
+      ring.addEllipse(q[0], sy(q[1]), 5, 5);
+      draw.addPath(ring.toObject(), { color: SPOT, stroke: true, strokeWidth: 1.5 });
+    }
+    // The panel's callback may throw; that must not take the preview down with it.
+    function click(lon, lat) { try { opts.onClick(lon, lat); } catch (e) { console.log("[CavalryGeo] Map preview: onClick failed: " + (e && e.message ? e.message : e)); } }
+
+    // GeoPreview.budget is worked out again only when the street list or the view changes (not for
+    // overlay, draft or spot redraws).
+    function streetBudget() {
+      var b = budgeted;
+      if (!b || b.streets !== streets || b.lat !== view.lat || b.lon !== view.lon || b.zoom !== view.zoom || b.width !== view.width || b.height !== view.height) {
+        b = budgeted = { streets: streets, lat: view.lat, lon: view.lon, zoom: view.zoom, width: view.width, height: view.height, layers: GeoPreview.budget(streets, view, STREET_POINTS) };
+      }
+      return b.layers;
+    }
+
     function render() {
       var c = comp(), settling = dragging && Date.now() - lastMove < SETTLE_MS, li = GeoPreview.detailFor(view.zoom, settling);
       if (!settling) dragging = false; // a full-detail render ends the drag's low-detail phase
@@ -113,14 +165,25 @@ var GeoPreviewPanel = (function () {
         var big = GeoPreview.visible(lakeData(), view).filter(function (f) { return (f.bbox.x1 - f.bbox.x0) * s >= MIN_LAKE_PX || (f.bbox.y1 - f.bbox.y0) * s >= MIN_LAKE_PX; });
         if (big.length) draw.addPath(ringsPath(GeoPreview.project(big, view)), { color: colors.water });
       }
+      if (streets && !dragging) {
+        streetBudget().forEach(function (l) {
+          var rings = GeoPreview.project(l.features, view);
+          if (!rings.length) return;
+          if (l.kind === "fill") { draw.addPath(ringsPath(rings), { color: l.color }); return; }
+          var path = new cavalry.Path();
+          rings.forEach(function (r) { for (var i = 0; i < r.length; i += 2) { if (i === 0) path.moveTo(r[0], sy(r[1])); else path.lineTo(r[i], sy(r[i + 1])); } });
+          draw.addPath(path.toObject(), { color: l.color, stroke: true, strokeWidth: 1 });
+        });
+      }
       var f = GeoPreview.frameRect(view, c.width, c.height);
       if (opts.dim) draw.addPath(appendPaths(rectPath({ x: 0, y: 0, w: view.width, h: view.height }, false), rectPath(f, true)), { color: DIM });
-      draw.addPath(rectPath(f, false).toObject(), { color: FRAME, stroke: true, strokeWidth: 2 });
+      if (opts.frame !== false) draw.addPath(rectPath(f, false).toObject(), { color: FRAME, stroke: true, strokeWidth: 2 });
       if (current) {
         var dash = new cavalry.Path();
         GeoPreview.dashes(GeoPreview.cameraRect(view, current, c.width, c.height), 4, 3).forEach(function (sg) { dash.moveTo(sg[0], sy(sg[1])); dash.lineTo(sg[2], sy(sg[3])); });
         draw.addPath(dash.toObject(), { color: CAMERA, stroke: true, strokeWidth: 1.2 });
       }
+      drawModel(); drawDraft(); drawSpot();
       if (places.length) {
         var dot = new cavalry.Path(), rings = new cavalry.Path(), names = new cavalry.Path(), label = new cavalry.Path();
         var hasDot = false, hasRing = false;
@@ -190,12 +253,17 @@ var GeoPreviewPanel = (function () {
       setView(GeoPreview.viewForCamera(cam, c.width, c.height, view.width, view.height), src || null);
     });
     p.setPlaces = guarded(function (list, index) { places = list || []; picked = typeof index === "number" ? index : -1; changed(); });
+    p.setStreets = guarded(function (list) { streets = list && list.length ? list : null; changed(); });
+    p.setOverlay = guarded(function (model) { overlay = model || null; changed(); });
+    p.setDraft = guarded(function (list) { draft = list && list.length ? list.slice() : null; changed(); });
+    p.setSpot = guarded(function (s) { spot = s || null; changed(); });
     p.setCurrentCamera = guarded(function (cam) { current = cam || null; changed(); });
     p.frameCamera = function () { var c = comp(); return GeoPreview.frameCamera(view, c.width, c.height); };
     p.source = function () { return source; };
     p.zoomBy = guarded(function (steps) { var c = comp(); setView(GeoPreview.zoomAt(view, steps, view.width / 2, view.height / 2, c.width, c.height), null); });
     p._render = guarded(function () { render(); });
     p._timer = function () { return timer; }; // test hook
+    p._view = function () { return view; }; // test hook
     p._overlay = function () { return overlayRects(); }; // test hook
 
     if (typeof ui.Draw !== "function" || typeof cavalry === "undefined" || typeof cavalry.Path !== "function") {
@@ -215,6 +283,7 @@ var GeoPreviewPanel = (function () {
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(colors.water);
       draw.onMousePress = guarded(function (pos, button) {
+        press = null; drag = null; panning = false; // a release that never came must not leave its press behind
         if (button && button !== "left") return;
         var y = sy(pos.y), o = overlayRects();
         if (inside(o.minus, pos.x, y)) { drag = null; p.zoomBy(-1); return; }
@@ -223,25 +292,37 @@ var GeoPreviewPanel = (function () {
         var keep = shown(), hit = GeoPreview.hitDot(view, keep.map(function (i) { return places[i]; }), pos.x, y, DOT_HIT);
         if (hit >= 0) hit = keep[hit]; // back to the place's own index
         if (hit >= 0) { picked = hit; changed(); pick(hit); return; }
-        drag = { x: pos.x, y: y };
+        drag = { x: pos.x, y: y }; press = { x: pos.x, y: y }; panning = false;
       });
       draw.onMouseMove = guarded(function (pos) {
         if (!drag) return;
         var y = sy(pos.y);
+        if (!panning && press && GeoPreview.isClick(press, { x: pos.x, y: y })) return; // still a click
+        panning = true;
         view = GeoPreview.pan(view, pos.x - drag.x, y - drag.y);
         drag = { x: pos.x, y: y };
         source = null; dragging = true; lastMove = Date.now();
         changed();
       });
-      draw.onMouseRelease = guarded(function () { var was = drag; drag = null; if (was) changed(); });
+      draw.onMouseRelease = guarded(function () {
+        var was = drag, at = (was && !panning) ? press : null;
+        drag = null; press = null; panning = false;
+        if (at && typeof opts.onClick === "function") {
+          var ll = GeoPreview.fromPx(view, at.x, at.y);
+          click(GeoPreview.wrapLon(ll.lon), ll.lat);
+          return;
+        }
+        if (was) changed();
+      });
       draw.onMouseDoubleClick = guarded(function (pos) {
+        if (opts.doubleClickZoom === false) return;
         var c = comp(), o = overlayRects();
         if (inside(o.minus, pos.x, sy(pos.y)) || inside(o.plus, pos.x, sy(pos.y)) || inside(o.readout, pos.x, sy(pos.y))) return; // the presses already zoomed
         drag = null;
         setView(GeoPreview.zoomAt(view, 1, pos.x, sy(pos.y), c.width, c.height), null);
       });
 
-      if (typeof draw.setToolTip === "function") draw.setToolTip(HINT);
+      if (typeof draw.setToolTip === "function") draw.setToolTip(opts.hint || HINT);
       p.layout.add(draw);
     } catch (e) {
       p.fail("Map preview unavailable: " + (e && e.message ? e.message : e));

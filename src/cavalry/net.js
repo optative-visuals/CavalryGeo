@@ -97,9 +97,10 @@ var GeoNet = (function () {
     return value;
   }
 
-  function get(base, path) {
+  function get(base, path, attempts) {
     var result;
-    for (var attempt = 0; attempt < NETWORK_ATTEMPTS; attempt++) {
+    if (attempts === undefined) attempts = NETWORK_ATTEMPTS;
+    for (var attempt = 0; attempt < attempts; attempt++) {
       var c = new api.WebClient(base);
       c.addHeader("User-Agent", USER_AGENT);
       c.get(path);
@@ -164,6 +165,23 @@ var GeoNet = (function () {
       if (hit && !hit.none) out[name] = [hit.lon, hit.lat];
     });
     return out;
+  }
+
+  // What is at this spot (a name, or null). Shares Search's one-request-per-second budget, waiting
+  // its turn instead of refusing, so quick clicks still work. Never throws.
+  // Click lookups are synchronous, so offline they would stall the panel for every WebClient timeout:
+  // one attempt only, and after a network failure no lookup touches the network for a minute.
+  var REVERSE_BACKOFF_MS = 60000, reverseOfflineUntil = 0;
+  function reverse(lat, lon, zoom) {
+    try {
+      if (Date.now() < reverseOfflineUntil) return null;
+      while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+      lastSearch = Date.now();
+      var r = get(NOMINATIM, GeoSearch.reversePath(lat, lon, zoom), 1);
+      if (r.status === -1) reverseOfflineUntil = Date.now() + REVERSE_BACKOFF_MS;
+      if (r.status !== 200) return null;
+      return GeoSearch.reverseName(JSON.parse(r.body));
+    } catch (e) { return null; }
   }
 
   // Overpass timeouts and out-of-memory conditions are often reported as HTTP 200
@@ -283,7 +301,7 @@ var GeoNet = (function () {
   }
 
   return {
-    search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces,
+    search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
