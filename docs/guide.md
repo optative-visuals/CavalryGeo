@@ -134,7 +134,9 @@ cache come after them).
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
 - **Bake:** select a map layer in the Scene Window and press **Bake** to turn it into a plain
-  editable shape at the current frame. Baked shapes stop following the camera.
+  editable shape at the current frame. Baked shapes stop following the camera. The legs and stops
+  of a new-style route are already ordinary Cavalry shapes, so Bake skips them (it still bakes the
+  legs of routes made by earlier versions).
 
 ## Label: pins and labels
 
@@ -146,11 +148,15 @@ cache come after them).
 
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
   stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
-  with), tick **Labels at stops** if you want a label inside each circle, and press **Create route**.
+  with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
+  the stop), and press **Create route**.
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
   camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
-  with it. When a dragged stop is where you want it, select it and press **Pin here**: it stays
-  there as the camera moves, instead of following the map.
+  with it. Until you press **Pin here**, a dragged stop is a fixed offset on screen, so it slides
+  against the map when the camera zooms or flies. When a dragged stop is where you want it,
+  select it and press **Pin here**: the spot you dropped it on becomes its new place, so from then
+  on it stays on that spot of the map as the camera moves. If a stop's place is animated
+  (keyframed), Pin here sets a key at the current frame.
 - The curve is shaped from the map's Controls: per route, **Arc height**, **Lean** and
   **Flip side** change every leg at once. For one leg, tick `<route> · Leg N shape by hand` and
   set its start and end handle X / Y numbers (in pixels, relative to each stop) — handy for still

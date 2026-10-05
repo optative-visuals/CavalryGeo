@@ -122,20 +122,31 @@ adding street layers.
 - [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
       → a "Route: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each
       leg attached to its two stops.
+- [ ] 22b. Select a stop circle, then Create route again → the new route's stops sit on their
+      places and its legs stay attached.
 - [ ] 23. Drag a stop in the viewer → its legs follow it. In the map's Controls, animate
       Paris → Lyon → Marseille · Leg 1 draw on % 0 → 100 → leg 1 draws on from Paris to Lyon.
 - [ ] 24. Play a Fly here with the route in view → the stops ride along with the map and the curves
       keep their shape.
-- [ ] 25. Drag a stop, select it and press **Pin here** → it stays where you put it as the
-      camera moves.
+- [ ] 25. Drag a stop and play a Fly here → the dragged stop slides against the map (it is a fixed
+      offset on screen). Select it, press **Pin here**, then play the Fly here again → it now
+      stays on the spot of the map where you dropped it. A stop on the far side of a globe, or
+      outside a flat map, says it is past the map's edge and keeps its place. With **Labels at
+      stops** ticked, each label sits beside its circle and follows when you drag the stop. If a
+      stop's place is keyframed, Pin here sets a key at the current frame.
 - [ ] 25b. In Controls, change Arc height, Lean and Flip side → every leg of the route changes.
 - [ ] 25c. Tick Leg 1 shape by hand and change its start / end handle X / Y numbers → only Leg 1
       changes; untick it → it goes back to the plugin's shape. Stops · Hide / Colour / Size
       change every circle.
 - [ ] 25d. Set the camera projection to 2 (globe) and rotate so a stop goes behind the Earth →
       the stop and its legs fade out.
-- [ ] 26. Bake a leg → an editable path with the same shape as the current frame (stroke
-      style is not copied).
+- [ ] 26. Bake an old-style leg (a route from v0.5.0, or one made where Bézier lines aren't
+      available) → an editable path with the same shape as the current frame (stroke style is
+      not copied).
+- [ ] 26a. Select a new route's leg (or a stop) and press **Bake** → "Route legs and stops are
+      already Cavalry shapes, so there's nothing to bake." New legs are native Bézier lines that
+      Bake skips; with a map layer selected as well, the layer bakes and the status says how many
+      route parts were skipped.
 - [ ] 26b. An old-style route made by v0.5.0 still draws, and its Controls rows (Arc height,
       Leg N draw on %) still work.
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
