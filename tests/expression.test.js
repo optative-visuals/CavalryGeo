@@ -186,3 +186,22 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
   assert.deepEqual(E.HANDLE_INPUTS.map((i) => i[0]), ["aHolderX", "aHolderY", "aStopX", "aStopY", "bHolderX", "bHolderY", "bStopX", "bStopY", "arc", "lean", "flip", "hand", "handX", "handY"]);
 });
+
+test("traveller helpers: tip clamps to 0..99.9; show is the current leg only", () => {
+  const vm = require("node:vm");
+  const run = (expr, inputs) => vm.runInNewContext(expr, Object.fromEntries(inputs.map((v, i) => ["n" + i, v])));
+  const tip = E.travellerTipExpression({ camera: "c", category: "travellerTip" });
+  assert.equal(run(tip, [0]), 0);
+  assert.equal(run(tip, [50]), 50);
+  assert.equal(run(tip, [100]), 99.9);
+  assert.equal(run(tip, [-5]), 0);
+  assert.deepEqual(E.TRAVELLER_TIP_INPUTS.map((i) => i[0]), ["drawOn"]);
+  assert.deepEqual(E.travellerShowInputs(2).map((i) => i[0]), ["drawOn", "legOpacity", "later1", "later2"]);
+  const show2 = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 2);
+  assert.equal(run(show2, [0, 100, 0, 0]), 0, "not started → hidden");
+  assert.equal(run(show2, [40, 100, 0, 0]), 100, "drawing, later legs not started → shown");
+  assert.equal(run(show2, [100, 100, 30, 0]), 0, "a later leg has started → hidden");
+  assert.equal(run(show2, [40, 0, 0, 0]), 0, "leg faded out → hidden");
+  const show0 = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 0);
+  assert.equal(run(show0, [100, 100]), 100, "last leg fully drawn → shown at the end");
+});

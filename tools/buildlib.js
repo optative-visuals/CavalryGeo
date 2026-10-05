@@ -8,7 +8,7 @@ const DATA_RUNTIME_FILES = RUNTIME_FILES.concat(["src/core/datamap.js"]);
 const IMAGERY_RUNTIME_FILES = ["src/core/tiles.js"];
 const CURVE_RUNTIME_FILES = ["src/core/curve.js"];
 const CORE_FILES = [
-  "src/core/projection.js", "src/core/routes.js", "src/core/curve.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js",
+  "src/core/projection.js", "src/core/routes.js", "src/core/curve.js", "src/core/markers.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js",
   "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js", "src/core/controls.js",
   "src/core/update.js", "src/core/preview.js"
 ];
