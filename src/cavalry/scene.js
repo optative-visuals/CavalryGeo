@@ -182,6 +182,7 @@ var GeoScene = (function () {
   function createOldRoute(map, stops, pairs, opts) {
     var groupId = api.create("group", routeTitle(stops));
     api.parent(groupId, map.groupId);
+    api.set(groupId, identityTransform()); // api.parent keeps the world transform: reset it
     var legs = [];
     var lift = opts.arc != null ? opts.arc : (opts.lift != null ? opts.lift : 30);
     pairs.forEach(function (pair, idx) {
@@ -204,12 +205,18 @@ var GeoScene = (function () {
 
   // A new-style route: stops (holder following the camera + a circle to drag) joined by
   // Bézier legs whose ends and handles are worked out by small helper scripts.
+  // api.create / api.primitive make a layer beside the selection and api.parent keeps the
+  // world transform (rewriting the local one), so every layer is reset right after it is
+  // parented. A holder's position is driven, so only its rotation and scale are reset; the
+  // helper utilities have no transform at all.
   function buildRoute(map, stops, pairs, opts, track) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
     var groupId = track(api.create("group", routeTitle(stops)));
     api.parent(groupId, map.groupId);
+    api.set(groupId, identityTransform());
     var helpers = track(api.create("group", "Route helpers"));
     api.parent(helpers, groupId);
+    api.set(helpers, identityTransform());
     var places = [];
     stops.forEach(function (s) { if (!places.some(function (p) { return samePlace(p, s); })) places.push(s); });
     function placeIndex(s) { for (var i = 0; i < places.length; i++) if (samePlace(places[i], s)) return i; return -1; }
@@ -229,12 +236,14 @@ var GeoScene = (function () {
       setOne(circle, "generator.radius", [STOP_RADIUS, STOP_RADIUS]);
       applyStyle(circle, STYLE.stop);
       api.parent(circle, holder);
+      api.set(circle, identityTransform());
       var label = null;
       if (opts.labels) {
         label = track(api.create(A.TEXT_LAYER_TYPE, p.name));
         setOne(label, A.TEXT_ATTR, p.name);
         applyStyle(label, STYLE.label);
         api.parent(label, circle);
+        api.set(label, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
         setOne(label, "position", [STOP_RADIUS + 6, STOP_RADIUS + 6]);
       }
       var position = utility(p.name + " position", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
@@ -280,8 +289,11 @@ var GeoScene = (function () {
 
     // New layers land on top of their group: legs first, then stops last-to-first, so the
     // first stop ends on top and every stop sits above the legs.
-    legData.forEach(function (l) { api.parent(l.line, groupId); });
-    for (var i = stopData.length - 1; i >= 0; i--) api.parent(stopData[i].holder, groupId);
+    legData.forEach(function (l) { api.parent(l.line, groupId); api.set(l.line, identityTransform()); });
+    for (var i = stopData.length - 1; i >= 0; i--) {
+      api.parent(stopData[i].holder, groupId);
+      api.set(stopData[i].holder, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+    }
 
     api.setUserData(groupId, ROUTE_KEY, {
       camera: map.cameraId, helpers: helpers,
@@ -295,7 +307,7 @@ var GeoScene = (function () {
   function createRoute(map, stops, opts) {
     var pairs = routePairs(stops);
     opts = opts || {};
-    if (typeof api.setGenerator !== "function") return createOldRoute(map, stops, pairs, opts);
+    if (typeof api.setGenerator !== "function" || typeof api.primitive !== "function" || typeof api.setUserData !== "function") return createOldRoute(map, stops, pairs, opts);
     var made = [];
     function track(id) { made.push(id); return id; }
     try {

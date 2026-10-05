@@ -131,6 +131,8 @@ function makeFakeApi() {
     set: function (id, obj) {
       var o = ensure(id);
       Object.keys(obj).forEach(function (k) {
+        // Like Cavalry: a JavaScript Utility has no transform attributes.
+        if (/^javaScript#/.test(id) && /^(position|rotation|scale)/.test(k)) throw new Error("Attribute not found: " + k);
         var m = PROMOTED_SLOT.exec(k);
         if (m && promoted[id] && promoted[id][Number(m[1])]) { promoted[id][Number(m[1])][m[2]] = obj[k]; return; }
         o[k] = obj[k];
@@ -4595,6 +4597,32 @@ test("routes: labels at stops sit inside their circles; a round trip has one sto
   });
 });
 
+test("routes: every new layer is reset to an identity transform after parenting (api.parent keeps the world transform)", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  const xy = (id) => [api.get(id, "position.x"), api.get(id, "position.y")];
+  const identity = (id, what) => {
+    assert.deepEqual(xy(id), [0, 0], what + " position");
+    assert.equal(api.get(id, "rotation.z"), 0, what + " rotation");
+    assert.deepEqual([api.get(id, "scale.x"), api.get(id, "scale.y")], [1, 1], what + " scale");
+  };
+  identity(r.groupId, "route group");
+  identity(d.helpers, "Route helpers");
+  d.stops.forEach((s) => {
+    identity(s.circle, "circle " + s.name);
+    assert.equal(api.get(s.holder, "rotation.z"), 0, "holder rotation");
+    assert.deepEqual([api.get(s.holder, "scale.x"), api.get(s.holder, "scale.y")], [1, 1], "holder scale");
+    assert.equal(api.get(s.holder, "position"), undefined, "the holder's position is only the driver's");
+    assert.equal(api.get(s.holder, "position.x"), undefined);
+    assert.equal(api.get(s.label, "rotation.z"), 0, "label rotation");
+    assert.deepEqual([api.get(s.label, "scale.x"), api.get(s.label, "scale.y")], [1, 1], "label scale");
+    assert.deepEqual(plain(api.get(s.label, "position")), [14, 14]);
+  });
+  d.legs.forEach((l) => identity(l.line, "leg " + l.number));
+});
+
 test("routes: a build that fails part-way leaves nothing behind", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
@@ -4615,6 +4643,19 @@ test("routes: without Bézier lines, Create route makes old-style legs", () => {
   assert.equal(api.get(legs[0].id, "generator.array.7"), 25);
   assert.equal(api.hasUserDataKey(r.groupId, "geoRoute"), false);
   assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 3, "stops become pins on the fallback");
+});
+
+test("routes: without primitive shapes or user data, Create route also makes old-style legs", () => {
+  ["primitive", "setUserData"].forEach((fn) => {
+    const { context, api } = buildSandbox();
+    const map = routeMap(context);
+    delete api[fn];
+    const r = context.GeoScene.createRoute(map, ABC, { arc: 25, labels: false });
+    assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "route").length, 2, fn);
+    assert.equal(api.hasUserDataKey(r.groupId, "geoRoute"), false, fn);
+    assert.equal(r.stops, undefined, fn);
+    assert.deepEqual([api.get(r.groupId, "position.x"), api.get(r.groupId, "position.y"), api.get(r.groupId, "rotation.z")], [0, 0, 0], fn + ": the route group is reset too");
+  });
 });
 
 test("routes: findRoutes finds new routes and skips deleted parts", () => {
