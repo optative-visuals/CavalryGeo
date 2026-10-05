@@ -194,8 +194,10 @@ adding street layers.
 
 ## Map controls
 
-- [ ] C1. Make a new map → "<map> Controls" sits at the top of the map group; its Controls tab
-      lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names.
+- [ ] C1. Make a new map (Search, or Create map here) → "<map> Controls" sits just above the map
+      group, not inside it, and is selected, so the Attribute Editor opens on it; its Controls tab
+      lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names. Add a
+      pin → the selection stays where it was.
 - [ ] C2. Change Countries · Fill colour and Countries · Detail there → the map updates.
 - [ ] C3. Add two pins → one Pins · Colour changes both; disconnect one pin's colour on the pin,
       press Refresh controls → that pin stays separate.
@@ -207,6 +209,10 @@ adding street layers.
 - [ ] C6. Promote any other setting onto the Controls layer yourself (also try a pin's Position),
       then add a layer → your settings are still there, at the end, with their names.
 - [ ] C7. Save, reopen the scene, add a pin → no duplicate controls; the pin links to Pins · Colour.
+- [ ] C8. Open a map made before this change (Controls inside the map group) → press Refresh
+      controls → the Controls layer moves out to just above the group, with its promotions intact.
+- [ ] C9. Drag a Controls layer into another group, then add a pin → the layer stays there and
+      still gets the new Pins settings; no second Controls layer appears.
 
 ## Scene persistence and install
 

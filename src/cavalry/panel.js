@@ -18,9 +18,14 @@ function guard(fn) {
 }
 // Brings the map's Controls component up to date after an action changed the map. Never
 // throws (the action already happened): returns "" or a note to add to the status line.
-function syncControls(map) {
+// With `select` (a map just made), the Controls component is selected afterwards so the
+// Attribute Editor opens on it.
+function syncControls(map, select) {
   try {
-    GeoControlPanel.sync(map);
+    var r = GeoControlPanel.sync(map);
+    if (select && r && r.componentId && typeof api.select === "function") {
+      try { api.select([r.componentId]); } catch (e) { /* cosmetic */ }
+    }
     return "";
   } catch (e) {
     return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Layers tab) to try again.";
@@ -204,7 +209,7 @@ searchBtn.onClick = guard(function () {
   var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
   var made = makeMap(name, camForResult(r, projPicker.getValue()));
   var starter = addStarterLayers(made);
-  var note = syncControls(made);
+  var note = syncControls(made, true);
   say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines, " : "") + "centred on " + shortName(r) + ". " + results.length + " result(s): pick one, then Jump here or Fly here." + starterNote(starter) + note);
 });
 
@@ -236,7 +241,7 @@ createHereBtn.onClick = guard(function () {
   var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
   var made = makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
   var starter = addStarterLayers(made);
-  var note = syncControls(made);
+  var note = syncControls(made, true);
   say("Created map \"" + name + "\" " + (starter === true ? "with countries and coastlines " : "") + "at the preview frame." + starterNote(starter) + note);
 });
 

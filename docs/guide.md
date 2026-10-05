@@ -46,8 +46,9 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 
 ## Map controls
 
-Every map has a **<map> Controls** layer at the top of its group. Select it and open the
-**Controls** tab in the Attribute Editor to find the map's settings in one place:
+Every map has a **<map> Controls** layer, just above the map's group in the Scene Window (not
+inside it). The plugin selects it when you make a map, so the Attribute Editor opens on it. Open
+the **Controls** tab there to find the map's settings in one place:
 
 - **Camera:** zoom, centre, rotation and projection (0 flat, 1 Equal Earth, 2 globe).
 - **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
@@ -60,6 +61,13 @@ Every map has a **<map> Controls** layer at the top of its group. Select it and 
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
 press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
 kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.
+
+- **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
+  you like (another group, further down the stack); the plugin still finds it and keeps it up to date.
+- **Deleting a map:** deleting a map's group does not delete its Controls layer, because it sits
+  outside the group. Delete that layer too.
+- **Maps made before this change:** their Controls layer sat inside the map's group. Press
+  **Refresh controls** once and it moves out to just above the group, keeping its settings.
 
 - **One layer, its own value:** to give one layer its own value for a shared setting (one pin's
   colour, one leg's width, one data layer's Year…), right-click that setting on the layer and

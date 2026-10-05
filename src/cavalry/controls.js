@@ -23,6 +23,12 @@ var GeoControlPanel = (function () {
   function stripPrefix(name, prefix) { name = String(name); return name.indexOf(prefix) === 0 ? name.slice(prefix.length) : name; }
   function one(attr, value) { var o = {}; o[attr] = value; return o; }
 
+  // Cavalry strips plain spaces from the name of a script's dynamic input (array.N) but keeps
+  // non-breaking ones (a script reading such an input still works). Built-in attributes keep
+  // plain spaces.
+  var NBSP = "\u00a0";
+  function inputLabel(path, label) { return /^array\.\d+$/.test(String(path)) ? String(label).split(" ").join(NBSP) : label; }
+
   function requireApis() {
     ["setUserData", "getUserDataKey", "hasUserDataKey", "removeArrayIndex", "getLayerType"].forEach(function (fn) {
       if (!has(fn)) throw new Error("This version of Cavalry can't update a map's Controls.");
@@ -50,20 +56,54 @@ var GeoControlPanel = (function () {
     return byName;
   }
 
-  // The component (kept at the top of the map group) and the values utility inside it.
+  // What holds the map group: its parent, or the composition itself at the top level.
+  function containerOf(map) {
+    var parent = "";
+    try { parent = api.getParent(map.groupId) || ""; } catch (e) { /* treat as top level */ }
+    return { parent: String(parent), id: parent ? String(parent) : api.getActiveComp() };
+  }
+
+  // Any component in the composition tagged as this map's Controls (the user may have moved it).
+  function findAnywhere(map) {
+    var layers = [];
+    try { layers = api.getCompLayers(false) || []; } catch (e) { /* not available */ }
+    for (var i = 0; i < layers.length; i++) {
+      if (layerType(layers[i]) === "component" && userData(layers[i], CONTROLS_KEY) === map.cameraId) return layers[i];
+    }
+    return null;
+  }
+
+  // Puts a new (or just moved out) component in the map group's container, directly above the
+  // group. After that the plugin never moves it again. Without the optional calls it stays
+  // wherever it landed.
+  function place(comp, map) {
+    var where = containerOf(map);
+    attempt(function () {
+      if (where.parent) api.parent(comp, where.parent);
+      else if (has("unParent") && api.getParent(comp)) api.unParent(comp);
+    });
+    if (!has("bringForward") || !has("moveBackward") || !has("select")) return;
+    attempt(function () {
+      var guard = api.getChildren(where.id).length + 1;
+      api.select([comp]);
+      for (var i = 0; i < guard; i++) {
+        var kids = api.getChildren(where.id), at = kids.indexOf(comp), g = kids.indexOf(map.groupId);
+        if (at < 0 || g < 0 || at === g - 1) return;
+        if (at < g - 1) api.moveBackward(); else api.bringForward();
+      }
+    });
+  }
+
+  // The component (just above the map group) and the values utility inside it.
   function findOrCreate(map) {
     return keepSelection(function () {
       var compName = map.name + " Controls", valuesName = map.name + " control values";
-      var comp = findChild(map.groupId, "component", CONTROLS_KEY, map.cameraId, compName);
-      if (!comp) {
-        comp = api.create("component", compName);
-        api.parent(comp, map.groupId);
-      }
+      var comp = findChild(containerOf(map).id, "component", CONTROLS_KEY, map.cameraId, compName), move = false;
+      if (!comp) { comp = findChild(map.groupId, "component", CONTROLS_KEY, map.cameraId, compName); move = !!comp; } // an earlier build kept it inside the group
+      if (!comp) comp = findAnywhere(map);
+      if (!comp) { comp = api.create("component", compName); move = true; }
       setUserData(comp, CONTROLS_KEY, map.cameraId);
-      if (api.getChildren(map.groupId)[0] !== comp && has("bringToFront") && has("select")) {
-        api.select([comp]);
-        api.bringToFront();
-      }
+      if (move) place(comp, map);
       var values = findChild(comp, A.CAMERA_LAYER_TYPE, VALUES_KEY, map.cameraId, valuesName);
       if (!values) {
         values = api.create(A.CAMERA_LAYER_TYPE, valuesName);
@@ -263,7 +303,7 @@ var GeoControlPanel = (function () {
     try {
       p.rows.forEach(function (row) {
         if (row.kind === "direct") {
-          attempt(function () { api.renameAttribute(row.layer, row.attr, row.label); });
+          attempt(function () { api.renameAttribute(row.layer, row.attr, inputLabel(row.attr, row.label)); });
           if (row.overrides && has("setAttributeDefinitionOverride")) {
             Object.keys(row.overrides).forEach(function (k) {
               attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
@@ -274,7 +314,7 @@ var GeoControlPanel = (function () {
         }
         attempt(function () {
           var slot = ensureSlot(V, slots, row), path = slot.path, rec = G.recordFor(V, row.key);
-          attempt(function () { api.renameAttribute(V, path, row.label); });
+          attempt(function () { api.renameAttribute(V, path, inputLabel(path, row.label)); });
           row.link.forEach(function (t) {
             // A new input links only the targets already showing its value; any other target
             // was set apart on purpose, so it is marked as if the user had pressed Disconnect.
