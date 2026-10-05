@@ -63,6 +63,17 @@ function makeFakeApi() {
     },
     // Like Cavalry: a primitive shape is a basicShape layer.
     primitive: function (kind, name) { return this.create("basicShape", name); },
+    // Like Cavalry: a Basic Line's generator is swapped with setGenerator; a Bézier line has
+    // start / end positions and offsets (offsets are relative to their end).
+    setGenerator: function (id, attr, type) {
+      if (arguments.length !== 3) throw new Error("Argument count does not match function definition. Expected 3 but got " + arguments.length);
+      var o = ensure(id);
+      o[attr] = type;
+      if (type === "bezierLine") {
+        o["generator.startPosition"] = { x: -200, y: 200 }; o["generator.endPosition"] = { x: 200, y: -200 };
+        o["generator.startOffset"] = { x: 100, y: 0 }; o["generator.endOffset"] = { x: -100, y: 0 };
+      }
+    },
     createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return addToComp(id); },
     parent: function (id, parentId) {
       leave(id);
@@ -935,6 +946,7 @@ test("credit texts are light so they read on the dark map", () => {
 
 test("pins, route legs and route stop pins are drawn in the panel's green", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const pin = GeoScene.addPin(map, "Paris", 2.35, 48.85);
@@ -981,6 +993,7 @@ test("restackBaseLayers falls back to stepping backward when moveToBack does not
 
 test("createRoute builds a named group with one camera-linked leg per pair of stops", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const stops = [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "Lyon", lon: 4.84, lat: 45.76 }, { name: "Marseille", lon: 5.37, lat: 43.3 }];
@@ -1100,6 +1113,7 @@ test("Bake selected layers: selecting only a data layer gives the data layer err
 // F3: identical consecutive stops must not create an empty leg.
 test("createRoute skips a leg between identical consecutive stops, no gap in numbering (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const stops = [
@@ -1125,6 +1139,7 @@ test("createRoute throws when every consecutive pair of stops is identical (F3)"
 
 test("createRoute creates at most one pin per distinct place on a round trip A -> B -> A (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const A_ = { name: "A", lon: 0, lat: 0 }, B_ = { name: "B", lon: 10, lat: 10 };
@@ -1136,6 +1151,7 @@ test("createRoute creates at most one pin per distinct place on a round trip A -
 
 test("createRoute creates at most one label per distinct place on a round trip A -> B -> A (F3)", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const GeoScene = context.GeoScene;
   // Force the simple (non-driver) label path so labels are plain map layers named "Label: ...".
   context.GeoAttrs.LABEL_MODE = "simple";
@@ -4126,6 +4142,7 @@ test("controls: labels share Hide, Colour and Size", () => {
 
 test("controls: a route gets shared colour, width and arc height, then each leg's draw on %", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const r = context.GeoControlPanel.sync(map);
@@ -4222,6 +4239,7 @@ test("controls: a label helper whose connections can't be read skips only its ow
 
 test("controls: a leg whose name doesn't say its number is numbered by its place in the route", () => {
   const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const realName = api.getNiceName;
@@ -4482,4 +4500,165 @@ test("controls: two maps with the same name each keep their own Controls (never 
   assert.ok(directlyAbove(api, r1.componentId, m1.groupId));
   assert.ok(directlyAbove(api, r2.componentId, m2.groupId));
   assert.equal(context.GeoControlPanel.sync(m1).componentId, r1.componentId, "and a later sync still finds its own");
+});
+
+// ---- Routes remake --------------------------------------------------------------------
+const GeoCurveT = require("../src/core/curve.js");
+const GeoProjT = require("../src/core/projection.js");
+function routeMap(context) { createWorldMap(context); return context.GeoScene.findMaps()[0]; }
+const ABC = [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }, { name: "C", lon: 20, lat: 0 }];
+function routeData(api, groupId) { return plain(api.getUserDataKey(groupId, "geoRoute")); }
+
+test("routes: Create route builds stops, Bézier legs and helpers, top to bottom", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  assert.equal(api.getNiceName(r.groupId), "Route: A → B → C");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  assert.deepEqual(api.getChildren(r.groupId).map((id) => api.getNiceName(id)), ["Stop: A", "Stop: B", "Stop: C", "Leg 2: B → C", "Leg 1: A → B", "Route helpers"]);
+  const d = routeData(api, r.groupId);
+  assert.equal(d.camera, map.cameraId);
+  assert.deepEqual(d.stops.map((s) => s.name), ["A", "B", "C"]);
+  assert.deepEqual(d.legs.map((l) => [l.number, l.from, l.to]), [[1, 0, 1], [2, 1, 2]]);
+  assert.deepEqual(plain(r.legs), d.legs.map((l) => l.line));
+  assert.deepEqual(plain(r.stops), d.stops.map((s) => s.circle));
+  d.stops.forEach((s) => {
+    assert.equal(api.getParent(s.circle), s.holder);
+    assert.equal(api.getNiceName(s.circle), s.name);
+    [s.position, s.visibility, s.endPoint].forEach((id) => assert.equal(api.getParent(id), d.helpers));
+  });
+  d.legs.forEach((l) => {
+    assert.equal(api.getLayerType(l.line), "basicLine");
+    assert.equal(api.get(l.line, "generator"), "bezierLine");
+    [l.startHandle, l.endHandle, l.fade].forEach((id) => assert.equal(api.getParent(id), d.helpers));
+  });
+  assert.equal(api.getNiceName(d.legs[0].startHandle), "Leg 1: A → B start handle");
+  assert.equal(api.getNiceName(d.stops[1].endPoint), "B end point");
+});
+
+test("routes: stops ride with the camera and legs are wired to them", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId), [a, b] = d.stops, leg = d.legs[0];
+  const IN = (id, attr) => api.getInConnection(id, attr);
+  for (let i = 0; i < 5; i++) assert.equal(IN(a.position, "array." + i), map.cameraId + ".array." + i);
+  assert.equal(api.get(a.position, "array.5"), 0); assert.equal(api.get(b.position, "array.6"), 10);
+  assert.match(api.get(a.position, "expression"), /"category":"stopDriver"/);
+  assert.equal(IN(a.holder, "position"), a.position + ".id");
+  assert.equal(IN(a.holder, "opacity"), a.visibility + ".id");
+  assert.equal(IN(a.visibility, "array.5"), a.position + ".array.5");
+  assert.deepEqual([0, 1, 2, 3].map((i) => IN(a.endPoint, "array." + i)), [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y"]);
+  assert.equal(IN(leg.line, "generator.startPosition"), a.endPoint + ".id");
+  assert.equal(IN(leg.line, "generator.endPosition"), b.endPoint + ".id");
+  assert.equal(IN(leg.line, "generator.startOffset"), leg.startHandle + ".id");
+  assert.equal(IN(leg.line, "generator.endOffset"), leg.endHandle + ".id");
+  assert.equal(IN(leg.line, "opacity"), leg.fade + ".id");
+  assert.deepEqual([IN(leg.fade, "array.0"), IN(leg.fade, "array.1")], [a.holder + ".opacity", b.holder + ".opacity"]);
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((i) => IN(leg.startHandle, "array." + i)),
+    [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y", b.holder + ".position.x", b.holder + ".position.y", b.circle + ".position.x", b.circle + ".position.y"]);
+  assert.match(api.get(leg.startHandle, "expression"), /GeoCurve\.handles[\s\S]*\.start\);/);
+  assert.match(api.get(leg.endHandle, "expression"), /\.end\);/);
+});
+
+test("routes: styles, trim, starting arc and hand values seeded with the plugin's shape", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId), leg = d.legs[0];
+  d.stops.forEach((s) => { assert.deepEqual(plain(api.get(s.circle, "generator.radius")), [8, 8]); assert.equal(api.get(s.circle, "material.materialColor"), "#1F8F4E"); assert.equal(api.hasFill(s.circle), true); assert.equal(api.hasStroke(s.circle), false); });
+  assert.equal(api.get(leg.line, "stroke.strokeColor"), "#1F8F4E");
+  assert.equal(api.get(leg.line, "stroke.width"), 3);
+  assert.equal(api.get(leg.line, "stroke.trim"), true);
+  assert.equal(api.get(leg.line, "stroke.trimEnd"), 100);
+  assert.equal(api.hasFill(leg.line), false);
+  assert.equal(api.get(leg.startHandle, "array.8"), 40);
+  assert.equal(api.get(leg.startHandle, "array.11"), 0);
+  const cam = context.GeoScene.readCamera(map.cameraId);
+  const pa = GeoProjT.makeProjector(cam), A = [0, 0], B = [0, 0];
+  pa(0, 0, A); pa(10, 10, B);
+  const want = GeoCurveT.handles(A, B, { arc: 40, lean: 0, flip: false });
+  assert.ok(Math.abs(api.get(leg.startHandle, "array.12") - want.start[0]) < 1e-9 && Math.abs(api.get(leg.startHandle, "array.13") - want.start[1]) < 1e-9);
+  assert.ok(Math.abs(api.get(leg.endHandle, "array.12") - want.end[0]) < 1e-9 && Math.abs(api.get(leg.endHandle, "array.13") - want.end[1]) < 1e-9);
+});
+
+test("routes: labels at stops sit inside their circles; a round trip has one stop per place", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, [ABC[0], ABC[1], ABC[0]], { arc: 30, labels: true });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 2);
+  assert.deepEqual(d.legs.map((l) => [l.from, l.to]), [[0, 1], [1, 0]]);
+  d.stops.forEach((s) => {
+    assert.equal(api.getParent(s.label), s.circle);
+    assert.equal(api.get(s.label, "text"), s.name);
+  });
+});
+
+test("routes: a build that fails part-way leaves nothing behind", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const before = api.getCompLayers(false).slice().sort();
+  const real = api.setGenerator; let n = 0;
+  api.setGenerator = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  assert.throws(() => context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true }), /boom/);
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+});
+
+test("routes: without Bézier lines, Create route makes old-style legs", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  delete api.setGenerator;
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 25, labels: false });
+  const legs = context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "route");
+  assert.equal(legs.length, 2);
+  assert.equal(api.get(legs[0].id, "generator.array.7"), 25);
+  assert.equal(api.hasUserDataKey(r.groupId, "geoRoute"), false);
+  assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 3, "stops become pins on the fallback");
+});
+
+test("routes: findRoutes finds new routes and skips deleted parts", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  let found = plain(context.GeoScene.findRoutes(map));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, r.groupId);
+  assert.equal(found[0].legs.length, 2);
+  api.deleteLayer(found[0].legs[1].line);
+  found = plain(context.GeoScene.findRoutes(map));
+  assert.deepEqual(found[0].legs.map((l) => l.number), [1]);
+  createWorldMap(context);
+  const other = context.GeoScene.findMaps().find((m) => m.cameraId !== map.cameraId);
+  assert.deepEqual(plain(context.GeoScene.findRoutes(other)), []);
+});
+
+test("routes: Pin here turns a dragged stop into its new place and zeroes the drag", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: true });
+  const s = routeData(api, r.groupId).stops[0];
+  const cam = { lat: 48, lon: 2, zoom: 5, rotation: 10, projection: 0 };
+  api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection });
+  api.set(s.holder, { position: { x: 100, y: 50, z: 0 } });   // what the position driver computed
+  api.set(s.circle, { position: { x: 20, y: -10, z: 0 } });   // the user's drag
+  const res = plain(context.GeoScene.pinStops(map, [s.label]));
+  assert.deepEqual(res, { pinned: 1, offGlobe: [] });
+  const want = GeoProjT.unproject(cam, 120, 40);
+  assert.ok(Math.abs(api.get(s.position, "array.5") - want.lon) < 1e-9 && Math.abs(api.get(s.position, "array.6") - want.lat) < 1e-9);
+  const p = api.get(s.circle, "position");
+  assert.deepEqual([p.x !== undefined ? p.x : p[0], p.y !== undefined ? p.y : p[1]], [0, 0]);
+});
+
+test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores other layers", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[1];
+  api.set(s.position, { "array.0": 0, "array.1": 0, "array.2": 2, "array.3": 0, "array.4": 2 });
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 100000, y: 0, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [s.circle, map.cameraId])), { pinned: 0, offGlobe: ["B"] });
+  assert.equal(api.get(s.position, "array.5"), 10);
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [map.cameraId])), { pinned: 0, offGlobe: [] });
 });
