@@ -308,7 +308,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Search"),
     row(searchField, searchBtn),
     resultPicker,
-    GeoStyle.heading("Preview", "drag to move"),
+    GeoStyle.heading("Preview (drag to move)"),
     preview.layout,
     row(jumpBtn),
     row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),

@@ -3372,12 +3372,13 @@ test("GeoStyle.heading with a hint adds a grey hint label between the heading an
   assert.ok(plainHeading._items[1] instanceof ui.Container);
 });
 
-test("Map tab: the Preview heading carries the hint", () => {
+test("Map tab: the Preview heading reads Preview (drag to move)", () => {
   const { context } = buildSandbox();
-  const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview")[0];
+  const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview (drag to move)")[0];
   assert.ok(row, "found the Preview heading");
-  assert.equal(row._items[1].getText(), "drag to move");
-  assert.equal(row._items[1]._textColor, "#8a8a8a");
+  assert.equal(row._items.length, 2, "heading with no hint has 2 items: label and line");
+  assert.equal(row._items[0].getText(), "Preview (drag to move)");
+  assert.equal(row._items[0]._textColor, "#a6a6a6");
 });
 
 test("GeoStyle.frameField is a rounded dark box holding a grey F and the field", () => {
@@ -3624,7 +3625,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview"]);
+  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "At coordinates", "Stops", "Style"]);
@@ -4216,7 +4217,7 @@ test("Map tab: the preview sits between Search and the Jump here row, with no Ca
   const { context } = buildSandbox({ setup: installNe });
   const items = context.sectionPages.pages[0]._items;
   const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
-  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview");
+  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview (drag to move)");
   const iJump = items.findIndex((w) => holds(w, context.jumpBtn));
   assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iJump);
   assert.equal(texts.indexOf("Camera"), -1, "no Camera heading");

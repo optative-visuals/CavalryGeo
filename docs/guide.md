@@ -37,7 +37,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   world.
 - **Preview:** a flat map under the search results. Drag it to move and use the **+** / **−**
   squares in its bottom right corner (or double-click) to zoom; the zoom level reads out in its
-  bottom left corner, and a reminder sits beside the **Preview** heading. The green frame in the middle is
+  bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
   exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
   green frame. With **New map** picked, **Create map here** makes a map at the frame.
