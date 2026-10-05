@@ -5946,3 +5946,91 @@ test("controls: a traveller without a scale helper (older record) gets no size r
   assert.ok(names.indexOf("A → B → C · Traveller size") < 0);
   assert.ok(names.indexOf("A → B → C · Traveller hide") >= 0);
 });
+
+test("map styles: Apply recolours every part of a map and remembers the style", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = context.GeoScene.createMap("Paris", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const roads = G.createMapLayer(map, "Roads", { v: 1, kind: "line", f: [] }, { camera: map.cameraId, category: "roads" }, G.layerStyle(map, "roads"), {});
+  const pin = G.addPin(map, "Here", 0, 0);
+  const label = G.createLabel(map, "Here", 0, 0);
+  const credit = G.createAttribution(map);
+  const route = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30 });
+  G.addTraveller(map, route.groupId, "dot");
+  const marker = plain(api.getUserDataKey(route.groupId, "geoTraveller")).source;
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(r.skipped, 0);
+  assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
+  assert.equal(api.get(countries, "material.materialColor"), "#1a4a85");
+  assert.equal(api.get(countries, "stroke.strokeColor"), "#cfe3ff");
+  assert.equal(api.get(countries, "stroke.width"), 0.6);
+  assert.equal(api.get(roads, "stroke.strokeColor"), "#cfe3ff");
+  assert.equal(api.get(roads, "stroke.width"), 1.2);
+  assert.equal(api.get(pin, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(label, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(credit, "material.materialColor"), "#ffffff");
+  route.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+  route.stops.forEach((c) => assert.equal(api.get(c, "material.materialColor"), "#ffffff"));
+  assert.equal(api.get(marker, "material.materialColor"), "#ffffff");
+  assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Blueprint");
+  assert.equal(api.get(G.addPin(map, "Later", 1, 1), "material.materialColor"), "#ffffff", "later pins follow the applied style");
+});
+
+test("map styles: Apply sets a Controls-shared colour through its control value, and skips animated or wired colours", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  const a = G.addPin(map, "A", 0, 0), b = G.addPin(map, "B", 1, 1);
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const sync = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, sync.valuesId)["pins:color"];
+  assert.equal(api.getInConnection(a, "material.materialColor"), sync.valuesId + "." + slot);
+  api.keyframe(c, 0, { "material.materialColor": "#000000" });
+  const other = api.create("javaScript", "elsewhere");
+  api.connect(other, "array.0", c, "stroke.width");
+  const r = G.applyMapStyle(map, context.GeoStyles.builtIn("Vintage"));
+  assert.equal(api.get(sync.valuesId, slot), "#a63d2f", "the shared Pins colour changed");
+  assert.notEqual(api.get(a, "material.materialColor"), "#a63d2f", "the pin itself wasn't overwritten (it is driven)");
+  assert.equal(api.get(c, "material.materialColor"), "#000000", "animated colour left alone");
+  assert.equal(api.get(c, "stroke.strokeColor"), "#8b6b4a", "the rest of the layer restyled");
+  assert.equal(r.skipped, 2);
+  assert.ok(b);
+});
+
+test("map styles: Save reads a map's colours back (through Controls values) and Apply on another map gives the same look", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = controlsMap(context);
+  G.addPin(map, "A", 0, 0);
+  const c = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  const sync = context.GeoControlPanel.sync(map);
+  api.set(sync.valuesId, { [slotsOf(api, sync.valuesId)["pins:color"]]: "#123456" });
+  api.set(c, { "material.materialColor": "#654321", "stroke.width": 4 });
+  const saved = G.readMapStyle(map, "Mine");
+  assert.equal(saved.name, "Mine");
+  assert.equal(saved.colors.accent, "#123456");
+  assert.equal(saved.colors.land, "#654321");
+  assert.equal(saved.widths.borders, 4);
+  assert.equal(saved.colors.roads, "#8a948e", "a role the map lacks comes from its remembered style (Dark)");
+  const other = G.createMap("Other", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const pin = G.addPin(other, "B", 0, 0);
+  G.applyMapStyle(other, saved);
+  assert.equal(api.get(pin, "material.materialColor"), "#123456");
+  assert.equal(plain(api.getUserDataKey(other.groupId, "geoStyle")).name, "Mine");
+});
+
+test("map styles: Apply recolours data region outlines and value labels but never data colours or bubbles", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("Data", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const d = context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: true });
+  const low = "generator.array." + context.GeoExpression.inputIndex(context.GeoExpression.REGION_INPUTS, "low");
+  const before = api.get(d.layers.regions, low);
+  context.GeoScene.applyMapStyle(map, context.GeoStyles.builtIn("Light"));
+  assert.equal(api.get(d.layers.regions, "stroke.strokeColor"), "#cfe3ec");
+  assert.equal(api.get(d.layers.labels, "material.materialColor"), "#333333");
+  assert.equal(api.get(d.layers.legend, "material.materialColor"), "#333333");
+  assert.equal(api.get(d.layers.bubbles, "material.materialColor"), "#bc4749");
+  assert.deepEqual(api.get(d.layers.regions, low), before);
+});

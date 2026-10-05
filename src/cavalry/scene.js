@@ -1176,6 +1176,74 @@ var GeoScene = (function () {
     }
   }
 
+  // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
+  var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
+  var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
+
+  // The ids of every part of a map a style colours (see GeoStyles.targets).
+  function styleParts(map) {
+    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], regions: [] };
+    findMapLayers(map).forEach(function (l) {
+      var c = l.meta.category;
+      if (GeoControls.BASE.indexOf(c) >= 0) parts.layers.push({ id: l.id, category: c });
+      else if (c === "extract") parts.layers.push({ id: l.id, category: c, line: LINE_SOURCES.indexOf(l.meta.source) >= 0 });
+      else if (c === "pin") parts.pins.push(l.id);
+      else if (c === "route") parts.legs.push(l.id);
+      else if (c === "label") parts.labels.push(l.id);
+      else if (c === "data" && l.meta.display === "regions") parts.regions.push(l.id);
+      else if (c === "data" && l.meta.display === "labels") parts.valueLabels.push(l.id);
+      else if (c === "data" && (l.meta.display === "legend" || l.meta.display === "bubbleLegend")) parts.legends.push(l.id);
+    });
+    findRoutes(map).forEach(function (r) {
+      r.stops.forEach(function (s) { parts.stops.push(s.circle); if (s.label && layerThere(s.label)) parts.labels.push(s.label); });
+      r.legs.forEach(function (l) { parts.legs.push(l.line); });
+    });
+    findTravellers(map).forEach(function (t) { if (!t.userSource && t.source && layerThere(t.source)) parts.markers.push(t.source); });
+    findLabels(map).forEach(function (id) { parts.labels.push(id); });
+    api.getChildren(map.groupId).forEach(function (id) { if (CREDIT_NAMES.indexOf(api.getNiceName(id)) >= 0) parts.credits.push(id); });
+    return parts;
+  }
+
+  function keyed(id, attr) { try { return (api.getKeyframeTimes(id, attr) || []).length > 0; } catch (e) { return false; } }
+
+  // Where a target's value lives: { layer, attr } on the layer itself, or on the Controls values
+  // input that drives it; null when it is animated or wired to anything else.
+  function styleSlot(map, t) {
+    var from = "";
+    try { from = String(api.getInConnection(t.layer, t.attr) || ""); } catch (e) { from = ""; }
+    if (!from) return keyed(t.layer, t.attr) ? null : { layer: t.layer, attr: t.attr };
+    var dot = from.indexOf("."), src = from.slice(0, dot), attr = from.slice(dot + 1);
+    if (dot <= 0 || userData(src, "geoValues") !== map.cameraId || keyed(src, attr)) return null;
+    return { layer: src, attr: attr };
+  }
+
+  function applyMapStyle(map, style) {
+    style = GeoStyles.clean(style);
+    var done = {}, skipped = {};
+    GeoStyles.targets(styleParts(map)).forEach(function (t) {
+      var slot = styleSlot(map, t);
+      if (!slot) { skipped[t.layer + "." + t.attr] = true; return; }
+      var k = slot.layer + "." + slot.attr;
+      if (done[k]) return;
+      done[k] = true;
+      var v = GeoStyles.valueFor(style, t);
+      setOne(slot.layer, slot.attr, t.kind === "color" ? A.COLOR_VALUE(v) : v);
+    });
+    setMapStyle(map, style);
+    return { skipped: Object.keys(skipped).length };
+  }
+
+  function readMapStyle(map, name) {
+    var readings = GeoStyles.targets(styleParts(map)).map(function (t) {
+      var from = "", value;
+      try { from = String(api.getInConnection(t.layer, t.attr) || ""); } catch (e) { from = ""; }
+      var dot = from.indexOf("."), src = dot > 0 ? from.slice(0, dot) : "";
+      try { value = src && userData(src, "geoValues") === map.cameraId ? api.get(src, from.slice(dot + 1)) : api.get(t.layer, t.attr); } catch (e) { value = null; }
+      return { role: t.role, kind: t.kind, value: value };
+    });
+    return GeoStyles.fromReadings(name, readings, styleOf(map));
+  }
+
   return {
     STYLE: STYLE,
     styleOf: styleOf, setMapStyle: setMapStyle, layerStyle: layerStyle, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
@@ -1185,6 +1253,7 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean
+    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
+    applyMapStyle: applyMapStyle, readMapStyle: readMapStyle
   };
 })();
