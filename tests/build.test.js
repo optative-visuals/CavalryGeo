@@ -5584,3 +5584,18 @@ test("travellers: a build that fails part-way leaves nothing and restores your l
   assert.equal(api.get(logo, "hidden"), false);
   assert.equal(travData(api, r.groupId), null);
 });
+
+test("travellers: stacking the copies is best-effort — without moveBackward the traveller is still built", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  delete api.moveBackward;
+  assert.deepEqual(plain(context.GeoScene.addTraveller(map, r.groupId, "dot")), { routeName: "A → B → C", replaced: false });
+  const t = travData(api, r.groupId);
+  assert.equal(t.legs.length, 2);
+  t.legs.forEach((l) => {
+    assert.ok(api.layerExists(l.dup));
+    assert.equal(api.getInConnection(l.dup, "generator.travel"), l.tip + ".id");
+    assert.equal(api.getParent(l.dup), r.groupId);
+  });
+});

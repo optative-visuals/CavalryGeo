@@ -1074,6 +1074,7 @@ var GeoScene = (function () {
 
   // Steps a layer down its group until it sits directly above `below`.
   function placeAbove(id, below) {
+    if (typeof api.select !== "function" || typeof api.moveBackward !== "function") return;
     var parent = api.getParent(id);
     var at = function (x) { return api.getChildren(parent).indexOf(x); };
     api.select([id]);
@@ -1123,7 +1124,8 @@ var GeoScene = (function () {
       var order = api.getChildren(groupId);
       var top = info.legs.map(function (l) { return l.line; }).filter(function (id) { return order.indexOf(id) >= 0; })
         .sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); })[0];
-      if (top) legs.forEach(function (l) { placeAbove(l.dup, top); });
+      // Stacking is cosmetic (like restackBaseLayers): a failure here never undoes the traveller.
+      if (top) { try { legs.forEach(function (l) { placeAbove(l.dup, top); }); } catch (e5) { /* left on top of the group */ } }
       api.setUserData(groupId, TRAVELLER_KEY, { camera: map.cameraId, kind: kind, source: source, userSource: kind === "layer", legs: legs });
       return { routeName: stripRoute(info.name), replaced: replaced };
     } catch (e) {
