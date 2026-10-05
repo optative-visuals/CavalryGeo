@@ -19,7 +19,7 @@ const INSTALL = [
   "   not inside another folder). Updating? Drag them in again and replace the existing files.",
   "3. Open Scripts > CavalryGeo. No restart needed.",
   "",
-  "Tested on Windows; macOS has not been tested yet.",
+  "Tested on Windows and macOS.",
   "",
   "Street data (c) OpenStreetMap contributors (ODbL). World data: Natural Earth (public domain).",
   "Cavalry Geo is free software under the GNU GPL v3 or later (see LICENSE.txt); it comes with ABSOLUTELY NO WARRANTY.",
