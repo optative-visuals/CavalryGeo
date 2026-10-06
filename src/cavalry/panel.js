@@ -829,7 +829,7 @@ function pinsClick(lon, lat) {
   if (ours) { labelText.setText(name || ""); spotName = name || null; }
   say("Spot set: " + (name || coordName()) + ". Press Pin at coordinates or Label at coordinates.");
 }
-var pinsPreview = labelPreview("Click to set the spot · drag to move · + / − to zoom", guardClick(pinsClick), function (i) {
+var pinsPreview = labelPreview("Click to set the spot · drag to move · middle-drag or + / − to zoom", guardClick(pinsClick), function (i) {
   if (i < 0 || i >= pinResults.length) return;
   pinResultPicker.setValue(i);
   pinsFollowPicked();
@@ -917,7 +917,7 @@ function routesClick(lon, lat) {
   refreshStops();
   say("Added stop " + stops.length + ": " + name + ".");
 }
-var routesPreview = labelPreview("Click to add a stop · drag to move · + / − to zoom", guardClick(routesClick), function (i) {
+var routesPreview = labelPreview("Click to add a stop · drag to move · middle-drag or + / − to zoom", guardClick(routesClick), function (i) {
   if (i < 0 || i >= routeResults.length) return;
   routeResultPicker.setValue(i);
   routesFollowPicked();

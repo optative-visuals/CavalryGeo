@@ -3724,8 +3724,8 @@ test("Label previews: Pins and Routes each get a preview under its heading, with
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   assert.ok(holds(pages[3], context.pinsPreview.layout) && holds(pages[3], context.routesPreview.layout));
-  assert.equal(context.pinsPreview._draw._toolTip, "Click to set the spot · drag to move · + / − to zoom");
-  assert.equal(context.routesPreview._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
+  assert.equal(context.pinsPreview._draw._toolTip, "Click to set the spot · drag to move · middle-drag or + / − to zoom");
+  assert.equal(context.routesPreview._draw._toolTip, "Click to add a stop · drag to move · middle-drag or + / − to zoom");
 });
 
 test("Pins preview: a click fills Lat / Lon, sets the ring, and puts the looked-up name in the empty text box", () => {
@@ -4316,10 +4316,88 @@ test("preview overlay: a double-click on a button or the readout is ignored", ()
   assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "elsewhere it still zooms in");
 });
 
+[false, true].forEach((yUp) => {
+  test("preview: middle-drag up zooms in one level per 100 px, anchored at the press (y-up " + yUp + ")", () => {
+    const { context, api } = buildSandbox({ setup: installNe });
+    const { p, picks } = makePreview(context, { yUp: yUp, onClick() { throw new Error("a middle press is no click"); } });
+    p.setWidth(320);
+    p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+    p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+    const h = p._draw._size[1], at = (viewY) => ({ x: 250, y: yUp ? h - viewY : viewY });
+    const anchor = context.GeoPreview.fromPx(p._view(), 250, 40);
+    p._draw.onMousePress(at(40), "middle");
+    p._draw.onMouseMove(at(40 - 100));
+    assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "100 px up is one level in");
+    const back = context.GeoPreview.toPx(p._view(), anchor.lon, anchor.lat);
+    assert.ok(Math.abs(back[0] - 250) < 1e-6 && Math.abs(back[1] - 40) < 1e-6, "the point under the press stays put");
+    assert.equal(p.source(), null, "a manual view");
+    p._draw.onMouseRelease(at(40 - 100), "middle");
+    assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9);
+    // after the release, moving does nothing
+    p._draw.onMouseMove(at(0));
+    assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "released");
+    // down zooms out, measured from the press, not the last move
+    p._draw.onMousePress(at(40), "middle");
+    p._draw.onMouseMove(at(40 + 50));
+    p._draw.onMouseMove(at(40 + 100));
+    assert.ok(Math.abs(p.frameCamera().zoom - 5) < 1e-9, "100 px down is one level out");
+    p._draw.onMouseRelease(at(40 + 100), "middle");
+    assert.deepEqual(picks, [], "never picks a place");
+  });
+});
+
+test("preview: a middle press never pans or picks, and without movement changes nothing; left-drag still pans", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const clicks = [];
+  const { p, picks } = makePreview(context, { onClick(lon, lat) { clicks.push([lon, lat]); } });
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p.setPlaces([{ lat: 45, lon: 2, name: "Here" }], -1);
+  const before = p.frameCamera();
+  p._draw.onMousePress({ x: 160, y: 90 }, "middle"); // right on the place's dot
+  p._draw.onMouseRelease({ x: 160, y: 90 }, "middle");
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "press and release in place changes nothing");
+  assert.deepEqual(picks, [], "no place picked");
+  assert.deepEqual(clicks, [], "no click");
+  assert.equal(p.source(), "camera", "the source is kept");
+  p._draw.onMousePress({ x: 100, y: 100 }, "middle");
+  p._draw.onMouseMove({ x: 140, y: 100 }); // sideways only
+  assert.deepEqual(plain(p.frameCamera()), plain(before), "a sideways middle-drag does not pan");
+  p._draw.onMouseRelease({ x: 140, y: 100 }, "middle");
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  p._draw.onMouseRelease({ x: 140, y: 100 }, "left");
+  assert.ok(p.frameCamera().lon < before.lon, "a left drag pans as before");
+  assert.ok(Math.abs(p.frameCamera().zoom - before.zoom) < 1e-9, "and does not zoom");
+  // a middle press cancels a left drag that never released
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMousePress({ x: 100, y: 100 }, "middle");
+  const at = p.frameCamera();
+  p._draw.onMouseMove({ x: 100, y: 100 });
+  assert.deepEqual(plain(p.frameCamera()), plain(at));
+});
+
+test("preview: a middle-drag draws low detail while it moves and full detail after release", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  runTimersOnce(api);
+  runTimersOnce(api);
+  p._draw.onMousePress({ x: 160, y: 90 }, "middle");
+  p._draw.onMouseMove({ x: 160, y: 60 });
+  const before = p._draw._redraws;
+  runTimersOnce(api);
+  assert.equal(p._draw._redraws, before + 1, "redrawn while dragging");
+  p._draw.onMouseRelease({ x: 160, y: 60 }, "middle");
+  runTimersOnce(api);
+  assert.equal(p._draw._redraws, before + 2, "and once more on release");
+});
+
 test("preview overlay: the Draw says how to use it, and the old note row and native buttons are gone", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   const { p } = makePreview(context);
-  assert.equal(p._draw._toolTip, "Drag to move · double-click or + / − to zoom");
+  assert.equal(p._draw._toolTip, "Drag to move · middle-drag, double-click or + / − to zoom");
   assert.deepEqual(p.layout._items.filter((n) => n instanceof ui.HLayout), [], "nothing but the map under the heading");
   assert.equal(p.layout._items[0], p._draw);
   const texts = [];
@@ -4550,7 +4628,7 @@ test("preview click: a missed release never turns the next press on a result dot
 
 test("preview options: double-click zoom can be turned off; frame off hides the green frame; hint sets the tooltip", () => {
   const { context } = buildSandbox({ setup: installNe });
-  const { p } = makePreview(context, { doubleClickZoom: false, frame: false, dim: false, hint: "Click to add a stop · drag to move · + / − to zoom" });
+  const { p } = makePreview(context, { doubleClickZoom: false, frame: false, dim: false, hint: "Click to add a stop · drag to move · middle-drag or + / − to zoom" });
   p.setWidth(320);
   p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
   const z = p.frameCamera().zoom;
@@ -4558,7 +4636,7 @@ test("preview options: double-click zoom can be turned off; frame off hides the 
   assert.equal(p.frameCamera().zoom, z);
   p._render();
   assert.equal(strokes(p._draw, "#33CE70").length, 0, "no green frame");
-  assert.equal(p._draw._toolTip, "Click to add a stop · drag to move · + / − to zoom");
+  assert.equal(p._draw._toolTip, "Click to add a stop · drag to move · middle-drag or + / − to zoom");
 });
 
 // ---- Preview in the Map tab ----------------------------------------------------------

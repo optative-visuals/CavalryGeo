@@ -9,7 +9,7 @@ var GeoPreviewPanel = (function () {
   var PILL = "#000000a6", GLYPH = "#e6e6e6"; // the zoom readout and − / + drawn inside the map
   var SPOT = "#ffffff", DRAFT = "#1F8F4E";
   var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5, STREET_POINTS = 15000;
-  var HINT = "Drag to move · double-click or + / − to zoom";
+  var HINT = "Drag to move · middle-drag, double-click or + / − to zoom";
 
   function create(opts) {
     var p = {}, draw = null, error = null;
@@ -18,6 +18,7 @@ var GeoPreviewPanel = (function () {
     var levels = {}, lakes = null, streets = null, budgeted = null; // budgeted: the street budget for one view and street list
     var colors = { water: WATER, land: LAND, border: BORDER };
     var overlay = null, draft = null, spot = null, press = null, panning = false;
+    var zoomDrag = null; // a middle-button drag: where it started (y in view coordinates) and the view then
 
     function comp() { return opts.compSize(); }
     function sy(y) { return opts.yUp ? view.height - y : y; }
@@ -226,7 +227,7 @@ var GeoPreviewPanel = (function () {
     }
     function changed() {
       if (failed) return;
-      if (opts.redraw === "release" && drag) return; // redrawn on release
+      if (opts.redraw === "release" && (drag || zoomDrag)) return; // redrawn on release
       dirty = true;
       if (!timer) { timer = new api.Timer(new Tick()); timer.setRepeating(true); timer.setInterval(TICK_MS); }
       if (!running) { running = true; timer.start(); }
@@ -283,7 +284,8 @@ var GeoPreviewPanel = (function () {
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(colors.water);
       draw.onMousePress = guarded(function (pos, button) {
-        press = null; drag = null; panning = false; // a release that never came must not leave its press behind
+        press = null; drag = null; panning = false; zoomDrag = null; // a release that never came must not leave its press behind
+        if (button === "middle") { zoomDrag = { x: pos.x, y: sy(pos.y), view: view }; return; }
         if (button && button !== "left") return;
         var y = sy(pos.y), o = overlayRects();
         if (inside(o.minus, pos.x, y)) { drag = null; p.zoomBy(-1); return; }
@@ -295,6 +297,13 @@ var GeoPreviewPanel = (function () {
         drag = { x: pos.x, y: y }; press = { x: pos.x, y: y }; panning = false;
       });
       draw.onMouseMove = guarded(function (pos) {
+        if (zoomDrag) {
+          var c = comp();
+          view = GeoPreview.dragZoom(zoomDrag.view, zoomDrag.x, zoomDrag.y, sy(pos.y), c.width, c.height);
+          source = null; dragging = true; lastMove = Date.now();
+          changed();
+          return;
+        }
         if (!drag) return;
         var y = sy(pos.y);
         if (!panning && press && GeoPreview.isClick(press, { x: pos.x, y: y })) return; // still a click
@@ -305,6 +314,7 @@ var GeoPreviewPanel = (function () {
         changed();
       });
       draw.onMouseRelease = guarded(function () {
+        if (zoomDrag) { zoomDrag = null; changed(); return; } // a middle-drag is never a click
         var was = drag, at = (was && !panning) ? press : null;
         drag = null; press = null; panning = false;
         if (at && typeof opts.onClick === "function") {

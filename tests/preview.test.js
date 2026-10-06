@@ -40,6 +40,17 @@ test("zoomAt keeps the point under the mouse fixed and respects the camera zoom 
   near(P.frameCamera(bottom, 1920, 1080).zoom, 0, 1e-9);
 });
 
+test("dragZoom: 100 px up is one zoom level in, down is out, anchored at the press point", () => {
+  assert.equal(P.ZOOM_DRAG_PX, 100);
+  const up = P.dragZoom(VIEW, 160, 90, 90 - 100, 1920, 1080);
+  near(up.zoom, VIEW.zoom + 1, 1e-9);
+  const down = P.dragZoom(VIEW, 160, 90, 90 + 50, 1920, 1080);
+  near(down.zoom, VIEW.zoom - 0.5, 1e-9);
+  const before = P.fromPx(VIEW, 250, 40), after = P.fromPx(P.dragZoom(VIEW, 250, 40, 40 - 100, 1920, 1080), 250, 40);
+  near(after.lon, before.lon, 1e-9); near(after.lat, before.lat, 1e-9);
+  assert.equal(P.dragZoom(VIEW, 160, 90, 90, 1920, 1080).zoom, VIEW.zoom, "no movement, no zoom");
+});
+
 test("frameRect fits the composition's shape inside 60% of the preview", () => {
   const wide = P.frameRect(VIEW, 1920, 1080); // 16:9 in a 16:9 preview → limited by both equally
   near(wide.w, 192); near(wide.h, 108); near(wide.x, 64); near(wide.y, 36);
