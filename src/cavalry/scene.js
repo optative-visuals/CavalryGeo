@@ -175,7 +175,8 @@ var GeoScene = (function () {
     return capTitle("Route " + number + ": " + stops.map(function (s) { return s.name; }).join(" → "));
   }
   function stripRoute(name) { return String(name).replace(ROUTE_PREFIX, ""); }
-  function routeNumber(groupId) { var n = Number(userData(groupId, ROUTE_NUMBER_KEY)); return n >= 1 && Math.floor(n) === n ? n : 0; }
+  function numberOf(groupId, key) { var n = Number(userData(groupId, key)); return n >= 1 && Math.floor(n) === n ? n : 0; }
+  function routeNumber(groupId) { return numberOf(groupId, ROUTE_NUMBER_KEY); }
 
   // Sorts layers (ids or { id }) in Scene Window order under groupId: top first, a group's
   // children right after it; layers outside the group go last. The groups in `skip` (imagery,
@@ -208,34 +209,36 @@ var GeoScene = (function () {
     return out.sort(order || mapOrder(map));
   }
 
-  // A group still named with the plugin's `prefix` takes "Route <number>: " instead (capped at
+  // A group still named with the plugin's `prefix` takes "<word> <number>: " instead (capped at
   // 60 characters); a name the user gave it is left alone.
-  function renameRoute(groupId, prefix, number) {
+  function renameNumbered(groupId, prefix, word, number) {
     if (typeof api.rename !== "function") return;
     try {
       var name = String(api.getNiceName(groupId));
-      if (name.indexOf(prefix) === 0) api.rename(groupId, capTitle("Route " + number + ": " + name.slice(prefix.length)));
+      if (name.indexOf(prefix) === 0) api.rename(groupId, capTitle(word + " " + number + ": " + name.slice(prefix.length)));
     } catch (e) { /* cosmetic */ }
   }
 
-  // Gives every route a lasting number. groups: the map's route groups in Scene Window order (top
-  // first). They are walked in creation order (oldest first, from the bottom of the Scene Window
-  // up): a route without a number, or one sharing its number with an older route (a duplicated
-  // group copies the number), takes the highest number + 1. Returns the highest number.
-  function numberRoutes(map, groups) {
+  // Gives every numbered group (routes, highlights) a lasting number under `key`. groups: the
+  // map's groups in Scene Window order (top first). They are walked in creation order (oldest
+  // first, from the bottom of the Scene Window up): a group without a number, or one sharing its
+  // number with an older group (a duplicated group copies the number), takes the highest
+  // number + 1. Returns the highest number.
+  function numberGroups(groups, key, word) {
     var top = 0, seen = {};
-    groups.forEach(function (g) { top = Math.max(top, routeNumber(g)); });
+    groups.forEach(function (g) { top = Math.max(top, numberOf(g, key)); });
     if (typeof api.setUserData !== "function") return top;
     groups.slice().reverse().forEach(function (g) {
-      var n = routeNumber(g);
+      var n = numberOf(g, key);
       if (n && !seen[n]) { seen[n] = true; return; }
-      try { api.setUserData(g, ROUTE_NUMBER_KEY, top + 1); } catch (e) { return; }
+      try { api.setUserData(g, key, top + 1); } catch (e) { return; }
       top += 1;
       seen[top] = true;
-      renameRoute(g, n ? "Route " + n + ": " : "Route: ", top);
+      renameNumbered(g, n ? word + " " + n + ": " : word + ": ", word, top);
     });
     return top;
   }
+  function numberRoutes(map, groups) { return numberGroups(groups, ROUTE_NUMBER_KEY, "Route"); }
 
   // A "Leg k draw" helper: the route's Travel % -> this leg's trim end. A helper that can't be
   // set up and wired is deleted again before the error goes on.
@@ -588,6 +591,7 @@ var GeoScene = (function () {
     var meta = layerMeta(layerId);
     if (!meta) throw new Error("Select a Cavalry Geo map layer to bake.");
     if (meta.category === "data") throw new Error("Data layers can't be baked yet.");
+    if (meta.category === "highlight") throw new Error("Highlights can't be baked.");
     // Read the camera from the layer's own connected inputs (generator.array.0..4,
     // same order as GeoExpression.MAP_INPUTS: lat, lon, zoom, rotation, projection),
     // not from the stored meta.camera id - the layer's transform reflects whatever
@@ -1365,6 +1369,142 @@ var GeoScene = (function () {
     }
   }
 
+  // ---- Highlights ----------------------------------------------------------------------------
+  // A highlight is a group next to its extract: a highlight shape (the extract's outline, following
+  // the camera) plus, for Pulse, an Oscillator and a fade helper, and for Glow, a Fast Blur. All of
+  // them sit inside the group, so deleting the group removes the highlight completely. Its Amount %
+  // is keyed on an ordinary attribute (a script input renamed for the Controls stops working).
+  var HIGHLIGHT_KEY = "geoHighlight", HIGHLIGHT_NUMBER_KEY = "geoHighlightNumber";
+  var HIGHLIGHT_EFFECTS = [{ id: "fill", name: "Fill in" }, { id: "outline", name: "Outline draw-on" }, { id: "pulse", name: "Pulse" }, { id: "glow", name: "Glow" }];
+  var HIGHLIGHT_COLOUR = "#1F8F4E", HIGHLIGHT_WIDTH = 3, HIGHLIGHT_SPEED = 1, HIGHLIGHT_SIZE = 20;
+
+  function highlightNumber(groupId) { return numberOf(groupId, HIGHLIGHT_NUMBER_KEY); }
+  // Where a highlight's Amount % is keyed: [layer, attribute].
+  function amountTarget(rec, groupId) {
+    if (rec.effect === "pulse") return [groupId, "opacity"];
+    return [rec.shape, rec.effect === "outline" ? "stroke.trimEnd" : "opacity"];
+  }
+  // The map's highlight groups (the parents of its highlight shapes that carry a record), from the
+  // map layers already read, in Scene Window order (top first).
+  function highlightGroups(map, mapLayers, order) {
+    var seen = {}, out = [];
+    (mapLayers || findMapLayers(map)).forEach(function (l) {
+      if (l.meta.category !== "highlight") return;
+      var g = api.getParent(l.id);
+      if (g && !seen[g] && userData(g, HIGHLIGHT_KEY)) { seen[g] = true; out.push(g); }
+    });
+    return out.sort(order || mapOrder(map));
+  }
+  function there(id) { return id && layerThere(id) ? id : null; }
+  function findHighlights(map, mapLayers, order) {
+    return highlightGroups(map, mapLayers, order).map(function (g) {
+      var rec = userData(g, HIGHLIGHT_KEY) || {}, ex = there(rec.extract);
+      return { groupId: g, number: highlightNumber(g), effect: rec.effect, extract: ex,
+        name: ex ? String(api.getNiceName(ex)) : String(api.getNiceName(g)).replace(/^Highlight( \d+)?: /, ""),
+        shape: there(rec.shape), osc: there(rec.osc), fade: there(rec.fade), blur: there(rec.blur) };
+    });
+  }
+  function highlightParts(map, mapLayers) {
+    var out = {};
+    findHighlights(map, mapLayers).forEach(function (h) { [h.groupId, h.shape, h.osc, h.fade, h.blur].forEach(function (id) { if (id) out[id] = true; }); });
+    return out;
+  }
+  // Removes highlights whose extract is gone (only groups carrying the plugin's record), then
+  // numbers the rest like routes (a duplicated group copies its number). Returns how many it removed.
+  function prepareHighlights(map, mapLayers, order) {
+    var removed = 0;
+    var groups = highlightGroups(map, mapLayers, order).filter(function (g) {
+      var rec = userData(g, HIGHLIGHT_KEY);
+      if (rec && rec.extract && !layerThere(rec.extract)) {
+        try { api.deleteLayer(g); removed++; } catch (e) { /* next refresh */ }
+        return false;
+      }
+      return true;
+    });
+    numberGroups(groups, HIGHLIGHT_NUMBER_KEY, "Highlight");
+    return removed;
+  }
+  // Puts a layer directly below `above` in their shared group (placeAbove, then one more step down).
+  function placeBelow(id, above) {
+    placeAbove(id, above);
+    if (typeof api.moveBackward !== "function") return;
+    var parent = api.getParent(id), kids = api.getChildren(parent);
+    if (kids.indexOf(id) >= 0 && kids.indexOf(id) < kids.indexOf(above)) { api.select([id]); api.moveBackward(); }
+  }
+
+  // What a new highlight (not Glow) goes directly above, so the newest one sits on top: the
+  // topmost earlier highlight of this extract in the same group that is above the extract, else
+  // the extract itself.
+  function topHighlightAbove(parent, extractId, selfId) {
+    var kids = api.getChildren(parent), floor = kids.indexOf(extractId), anchor = extractId;
+    kids.forEach(function (k, i) {
+      if (k === selfId || i >= floor) return;
+      var rec = userData(k, HIGHLIGHT_KEY);
+      if (rec && rec.extract === extractId && rec.effect !== "glow" && i < kids.indexOf(anchor)) anchor = k;
+    });
+    return anchor;
+  }
+
+  function createHighlight(map, extractId, effect, opts) {
+    opts = opts || {};
+    if (!HIGHLIGHT_EFFECTS.some(function (e) { return e.id === effect; })) throw new Error("Unknown highlight effect: " + effect);
+    var meta = layerMeta(extractId);
+    if (!meta || meta.category !== "extract" || meta.camera !== map.cameraId) throw new Error("Pick an extracted feature of this map to highlight.");
+    var enc = readLayerData(extractId), made = [];
+    function track(id) { made.push(id); return id; }
+    var number = numberGroups(highlightGroups(map), HIGHLIGHT_NUMBER_KEY, "Highlight") + 1;
+    var name = String(api.getNiceName(extractId)), parent = api.getParent(extractId) || map.groupId, label = "Highlight " + number;
+    try {
+      var g = track(api.create("group", capTitle(label + ": " + name)));
+      api.parent(g, parent);
+      var shape = track(api.create(A.MAP_LAYER_TYPE, label + " shape"));
+      addInputs(shape, A.MAP_ARRAY_ATTR, GeoExpression.HIGHLIGHT_SHAPE_INPUTS, {});
+      setOne(shape, A.MAP_EXPR_ATTR, GeoExpression.highlightLayerExpression(GEO_RUNTIME_SRC, enc, { camera: map.cameraId, category: "highlight", effect: effect }, { ellipseScale: A.ELLIPSE_SCALE }));
+      connectCamera(map.cameraId, shape, A.MAP_ARRAY_ATTR);
+      // The extract's own detail and dot size.
+      ["detail", "pointRadius"].forEach(function (n) {
+        var at = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.MAP_INPUTS, n);
+        try { var v = api.get(extractId, at); if (v !== undefined && v !== null) setOne(shape, at, v); } catch (e) { /* default */ }
+      });
+      var line = effect === "outline" || effect === "pulse";
+      applyStyle(shape, line ? { stroke: HIGHLIGHT_COLOUR, width: HIGHLIGHT_WIDTH } : { fill: HIGHLIGHT_COLOUR });
+      api.parent(shape, g);
+      var rec = { extract: extractId, effect: effect, shape: shape };
+      if (effect === "outline") setOne(shape, "stroke.trim", true);
+      if (effect === "pulse") {
+        rec.osc = track(api.create("oscillator", label + " pulse"));
+        api.set(rec.osc, { waveType: 3, minimum: 0, maximum: 1, strengthToZero: false, frequency: HIGHLIGHT_SPEED });
+        api.parent(rec.osc, g);
+        api.connect(rec.osc, "id", shape, A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.HIGHLIGHT_SHAPE_INPUTS, "phase"), true);
+        rec.fade = track(api.create(A.CAMERA_LAYER_TYPE, label + " fade"));
+        addInputs(rec.fade, A.CAMERA_ARRAY_ATTR, GeoExpression.HIGHLIGHT_FADE_INPUTS, {});
+        setOne(rec.fade, A.CAMERA_EXPR_ATTR, GeoExpression.highlightFadeExpression({ camera: map.cameraId, category: "highlightFade" }));
+        api.parent(rec.fade, g);
+        api.connect(rec.osc, "id", rec.fade, A.CAMERA_ARRAY_ATTR + ".0", true);
+        api.connect(rec.fade, A.DRIVER_OUTPUT_ATTR, shape, "opacity", true);
+      }
+      if (effect === "glow") {
+        rec.blur = track(api.create("blurFilter", label + " glow"));
+        setOne(rec.blur, "amount", { x: HIGHLIGHT_SIZE, y: HIGHLIGHT_SIZE });
+        api.connect(rec.blur, "id", shape, "filters");
+        api.parent(rec.blur, g);
+      }
+      api.setUserData(g, HIGHLIGHT_KEY, rec);
+      api.setUserData(g, HIGHLIGHT_NUMBER_KEY, number);
+      var start = Math.max(0, Math.round(Number(opts.start) || 0)), duration = Math.max(1, Math.round(Number(opts.duration) || 25));
+      var t = amountTarget(rec, g), k0 = {}, k1 = {};
+      k0[t[1]] = 0; k1[t[1]] = 100;
+      api.keyframe(t[0], start, k0);
+      api.keyframe(t[0], start + duration, k1);
+      if (typeof api.magicEasing === "function") { try { api.magicEasing(t[0], t[1], start, "SlowInSlowOut"); } catch (e) { /* linear */ } }
+      if (effect === "glow") placeBelow(g, extractId); else placeAbove(g, topHighlightAbove(parent, extractId, g));
+      return g;
+    } catch (e) {
+      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* gone */ } });
+      throw e;
+    }
+  }
+
   // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
@@ -1624,6 +1764,7 @@ var GeoScene = (function () {
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
+    HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
