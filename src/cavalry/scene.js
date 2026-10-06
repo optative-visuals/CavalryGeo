@@ -966,17 +966,18 @@ var GeoScene = (function () {
     try { return typeof api.hasUserDataKey === "function" && api.hasUserDataKey(id, key) ? api.getUserDataKey(id, key) : null; } catch (e) { return null; }
   }
 
-  // True for the map group and anything in it, for the map's Controls (and what's inside it),
-  // and for a group that holds either of them.
+  // True for the map group and anything in it, for the map's Controls (and what's inside them),
+  // and for a group that holds any of them.
   function isMapPart(map, id) {
-    var controls = null;
+    var starts = [map.groupId];
     for (var cur = id, guard = 0; cur && guard < 64; guard++) {
       if (cur === map.groupId) return true;
       if (userData(cur, "geoControls") === map.cameraId) return true;
       cur = api.getParent(cur);
     }
-    api.getCompLayers(false).forEach(function (l) { if (!controls && userData(l, "geoControls") === map.cameraId) controls = l; });
-    return [map.groupId, controls].some(function (start) {
+    // Every Controls component of the map (main, Overlay, Data, Extract), wherever it sits.
+    api.getCompLayers(false).forEach(function (l) { if (userData(l, "geoControls") === map.cameraId) starts.push(l); });
+    return starts.some(function (start) {
       for (var up = start ? api.getParent(start) : "", guard = 0; up && guard < 64; guard++) {
         if (up === id) return true;
         up = api.getParent(up);

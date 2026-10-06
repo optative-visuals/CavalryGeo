@@ -67,14 +67,15 @@ var GeoControlPanel = (function () {
 
   function groupTag(id) { var g = userData(id, GROUP_KEY); return typeof g === "string" && g ? g : "main"; }
 
-  // A component tagged for this map and group (main = no group key); else an untagged one with the group's name.
-  function findGroupIn(parentId, map, group) {
+  // A component tagged for this map and group (main = no group key); else, when `adopt` says so
+  // (only while making one), an untagged one with the group's name.
+  function findGroupIn(parentId, map, group, adopt) {
     var kids = api.getChildren(parentId), byName = null, name = map.name + GROUP_SUFFIX[group];
     for (var i = 0; i < kids.length; i++) {
       if (layerType(kids[i]) !== "component") continue;
       var cam = userData(kids[i], CONTROLS_KEY);
       if (cam === map.cameraId && groupTag(kids[i]) === group) return kids[i];
-      if (!byName && cam === null && api.getNiceName(kids[i]) === name) byName = kids[i];
+      if (adopt && !byName && cam === null && api.getNiceName(kids[i]) === name) byName = kids[i];
     }
     return byName;
   }
@@ -105,7 +106,7 @@ var GeoControlPanel = (function () {
     var where = containerOf(map), target = map.groupId;
     attempt(function () {
       for (var j = GROUP_ORDER.indexOf(group) + 1; j < GROUP_ORDER.length; j++) {
-        var later = findGroupIn(where.id, map, GROUP_ORDER[j]);
+        var later = findGroupIn(where.id, map, GROUP_ORDER[j], false);
         if (later) { target = later; return; }
       }
     });
@@ -129,8 +130,8 @@ var GeoControlPanel = (function () {
   function findOrCreate(map, cache) {
     return keepSelection(function () {
       var compName = map.name + GROUP_SUFFIX.main, valuesName = map.name + " control values";
-      var comp = findGroupIn(containerOf(map).id, map, "main"), move = false;
-      if (!comp) { comp = findGroupIn(map.groupId, map, "main"); move = !!comp; } // an earlier build kept it inside the group
+      var comp = findGroupIn(containerOf(map).id, map, "main", true), move = false;
+      if (!comp) { comp = findGroupIn(map.groupId, map, "main", true); move = !!comp; } // an earlier build kept it inside the group
       if (!comp) comp = findAnywhere(map, "main", cache);
       if (!comp) { comp = api.create("component", compName); move = true; }
       setUserData(comp, CONTROLS_KEY, map.cameraId);
@@ -149,7 +150,7 @@ var GeoControlPanel = (function () {
   // The overlay / data / extract component: found again, or made when `create` says it is needed.
   function findOrCreateGroup(map, group, create, cache) {
     return keepSelection(function () {
-      var comp = findGroupIn(containerOf(map).id, map, group) || findAnywhere(map, group, cache), move = false;
+      var comp = findGroupIn(containerOf(map).id, map, group, create) || findAnywhere(map, group, cache), move = false;
       if (!comp && create) { comp = api.create("component", map.name + GROUP_SUFFIX[group]); move = true; }
       if (!comp) return null;
       setUserData(comp, CONTROLS_KEY, map.cameraId);
@@ -308,15 +309,17 @@ var GeoControlPanel = (function () {
     attempt(function () { api.setUserData(layer, LINKS_KEY, links); });
   }
 
-  // The list's length is the highest filled slot + 1 (other inputs don't count).
-  function readPromotions(comp) {
+  // The list's length is the highest filled slot + 1 (other inputs don't count). `status`, when
+  // given, gets `ok` = whether the list could be read at all (an unreadable list reads as empty).
+  function readPromotions(comp, status) {
     var count = 0, list = [], slot = /^promotedAttributes\.(\d+)\.attribute$/;
+    if (status) status.ok = true;
     try {
       api.getInConnectedAttributes(comp).forEach(function (a) {
         var m = slot.exec(String(a));
         if (m && Number(m[1]) + 1 > count) count = Number(m[1]) + 1;
       });
-    } catch (e) { count = 0; }
+    } catch (e) { count = 0; if (status) status.ok = false; }
     for (var i = 0; i < count; i++) {
       var src = "", name = "", notes = "";
       try { src = String(api.getInConnection(comp, PROMOTED + "." + i + ".attribute") || ""); } catch (e) { /* empty slot */ }
@@ -334,7 +337,9 @@ var GeoControlPanel = (function () {
   // it, or it comes from the values layer; everything else is the user's, whatever its layer.
   // Cavalry can't reorder promotions, so the list is kept up to the first difference and
   // everything after it is removed (highest first) and added again in order.
-  function rebuild(comp, valuesId, wanted) {
+  // `names` ({ "layer.attr": { name, notes } }, read before anything moved) gives a row the plugin
+  // adds again the name and notes the user had typed on it.
+  function rebuild(comp, valuesId, wanted, names) {
     var current = readPromotions(comp), ours = {}, stored = userData(comp, PROMOTED_KEY);
     (Array.isArray(stored) ? stored : []).concat(wanted.map(keyOf)).forEach(function (k) { ours[k] = true; });
     var theirs = current.filter(function (p) { return p.layer && p.layer !== valuesId && !ours[keyOf(p)]; });
@@ -350,10 +355,11 @@ var GeoControlPanel = (function () {
       var n = from;
       target.slice(from).forEach(function (p, k) {
         if (!attempt(function () { api.connect(p.layer, p.attr, comp, PROMOTED); })) return;
-        if (from + k >= wanted.length) {
+        var mine = from + k >= wanted.length, typed = mine ? p : names && names[keyOf(p)];
+        if (typed && (mine || typed.name || typed.notes)) {
           var o = {};
-          o[PROMOTED + "." + n + ".name"] = p.name;
-          o[PROMOTED + "." + n + ".notes"] = p.notes;
+          o[PROMOTED + "." + n + ".name"] = typed.name || "";
+          o[PROMOTED + "." + n + ".notes"] = typed.notes || "";
           attempt(function () { api.set(comp, o); });
         }
         n++;
@@ -405,14 +411,23 @@ var GeoControlPanel = (function () {
     }
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
     var components = { main: made.id, overlay: null, data: null, extract: null };
-    rebuild(made.id, V, wanted.main);
+    // Names and notes typed on any row of any of the map's Controls, so a row that moves keeps them.
+    var typed = {};
+    GROUP_ORDER.forEach(function (g) {
+      var existing = g === "main" ? made.id : (findGroupIn(containerOf(map).id, map, g, false) || findAnywhere(map, g, cache));
+      if (!existing) return;
+      readPromotions(existing).forEach(function (p) { if (p.name || p.notes) typed[keyOf(p)] = { name: p.name, notes: p.notes }; });
+    });
+    rebuild(made.id, V, wanted.main, typed);
     GROUP_ORDER.forEach(function (g) {
       if (g === "main") return;
       var comp = findOrCreateGroup(map, g, wanted[g].length > 0, cache);
       if (!comp) return;
-      rebuild(comp, V, wanted[g]);
-      // A group component the plugin no longer needs (nothing promoted, nothing inside) is removed.
-      if (!wanted[g].length && !readPromotions(comp).length && !api.getChildren(comp).length) { attempt(function () { api.deleteLayer(comp); }); return; }
+      rebuild(comp, V, wanted[g], typed);
+      // A group component the plugin no longer needs is removed: nothing wanted, nothing inside, and
+      // a promotions list that was read successfully and is empty (an unreadable one is left alone).
+      var after = { ok: true };
+      if (!wanted[g].length && !readPromotions(comp, after).length && after.ok && !api.getChildren(comp).length) { attempt(function () { api.deleteLayer(comp); }); return; }
       components[g] = comp;
     });
     var total = 0;

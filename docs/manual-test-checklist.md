@@ -235,7 +235,7 @@ adding street layers.
 
 ## Map controls
 
-- [ ] C1. Make a new map (Search, or Create map here) → "<map> Controls" sits just above the map
+- [ ] C1. Make a new map (Search, or Create map here) → "Map Controls" (the map's name plus " Controls") sits just above the map
       group, not inside it, and is selected, so the Attribute Editor opens on it; its Controls tab
       lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names. Add a
       pin → the selection stays where it was.

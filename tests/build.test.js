@@ -5040,23 +5040,64 @@ test("controls split: a plain map has only the main component", () => {
   assert.equal(controlsOf(api, map, "overlay"), undefined);
 });
 
+// What the previous version left: every row in main, the group components gone. Returns the
+// direct rows (not from the values utility) that had been in a group component.
+function combineIntoMain(api, r) {
+  const direct = [];
+  ["overlay", "data", "extract"].forEach((g) => {
+    const comp = r.components[g];
+    if (!comp) return;
+    api._promoted(comp).forEach((a) => {
+      const d = a.indexOf(".");
+      if (a.slice(0, d) !== r.valuesId) direct.push(a);
+      api.connect(a.slice(0, d), a.slice(d + 1), r.componentId, "promotedAttributes");
+    });
+    api.deleteLayer(comp);
+  });
+  api.setUserData(r.componentId, "geoPromoted", plain(api._promoted(r.componentId)));
+  return direct;
+}
+
 test("controls split: an old combined Controls is split by one sync, keeping the user's own promotion in main", () => {
   const { context, api } = buildSandbox();
-  const map = controlsMap(context), G = context.GeoScene;
-  const pin = G.addPin(map, "Here", 1, 1);
+  const map = fullControlsMap(context);
   const r1 = context.GeoControlPanel.sync(map);
-  // Make it look like the previous version: every row in main, nothing else.
-  const overlay = r1.components.overlay;
-  api._promoted(overlay).forEach((a) => { const d = a.indexOf("."); api.connect(a.slice(0, d), a.slice(d + 1), r1.componentId, "promotedAttributes"); });
-  api.setUserData(r1.componentId, "geoPromoted", plain(api._promoted(r1.componentId)));
-  api.deleteLayer(overlay);
+  const direct = combineIntoMain(api, r1);
+  const has = (suffix) => direct.some((a) => a.endsWith("." + suffix));
+  assert.ok(has("stroke.trimEnd") && has("hidden") && has("material.materialColor") && has("opacity"), "the fixture holds direct rows: draw on %, scale bar, extract layer");
   const mine = api.create("basicShape", "Mine");
   api.connect(mine, "opacity", r1.componentId, "promotedAttributes");
+  api.set(r1.componentId, { ["promotedAttributes." + (api._promoted(r1.componentId).length - 1) + ".name"]: "My opacity" });
   const r2 = context.GeoControlPanel.sync(map);
   const main = plain(api._promoted(r2.componentId));
   assert.ok(main.includes(mine + ".opacity"), "the user's own promotion stays in main");
-  assert.ok(!main.some((a) => a.indexOf(pin + ".") === 0) && !plain(promotedNames(api, r2.componentId)).includes("Pins · Colour"), "pin rows left main");
-  assert.ok(plain(promotedNames(api, r2.components.overlay)).includes("Pins · Colour"), "and are in the new Overlay controls");
+  assert.equal(api.get(r2.componentId, "promotedAttributes." + main.indexOf(mine + ".opacity") + ".name"), "My opacity", "with its name");
+  const groups = ["overlay", "data", "extract"].map((g) => plain(api._promoted(r2.components[g])));
+  direct.forEach((a) => {
+    assert.ok(!main.includes(a), a + " left main");
+    assert.equal(groups.reduce((n, list) => n + list.filter((x) => x === a).length, 0), 1, a + " is in exactly one new component");
+  });
+  assert.ok(plain(promotedNames(api, r2.components.overlay)).includes("Pins · Colour"), "values rows are in the new Overlay controls");
+  assert.ok(plain(promotedNames(api, r2.components.extract)).includes("France · Hide"));
+});
+
+test("controls split: a name typed on a plugin row in the old Controls survives the move into its new component", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  combineIntoMain(api, r1);
+  const slot = r1.valuesId + "." + slotsOf(api, r1.valuesId)["pins:color"];
+  const at = plain(api._promoted(r1.componentId)).indexOf(slot);
+  assert.ok(at >= 0);
+  api.set(r1.componentId, { ["promotedAttributes." + at + ".name"]: "My pins", ["promotedAttributes." + at + ".notes"]: "brand green" });
+  const r2 = context.GeoControlPanel.sync(map);
+  const to = plain(api._promoted(r2.components.overlay)).indexOf(slot);
+  assert.ok(to >= 0, "moved into Overlay controls");
+  assert.equal(api.get(r2.components.overlay, "promotedAttributes." + to + ".name"), "My pins");
+  assert.equal(api.get(r2.components.overlay, "promotedAttributes." + to + ".notes"), "brand green");
+  const other = plain(api._promoted(r2.components.overlay)).indexOf(r1.valuesId + "." + slotsOf(api, r1.valuesId)["pins:hidden"]);
+  assert.equal(api.get(r2.components.overlay, "promotedAttributes." + other + ".name"), "", "a row nobody renamed stays unnamed");
 });
 
 test("controls split: an overlay component left empty is removed; one holding a user promotion stays", () => {
@@ -5117,6 +5158,57 @@ test("controls split: an untagged component named like the Overlay controls is a
   assert.equal(api.getUserDataKey(mine, "geoControlsGroup"), "overlay");
   assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component" && api.getNiceName(id) === "Map Overlay controls").length, 1);
   assert.ok(plain(promotedNames(api, mine)).includes("Pins · Colour"));
+});
+
+test("controls split: an untagged component named like a group is left alone when that group isn't needed", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const mine = api.create("component", "Map Data controls");
+  context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(mine), true, "not adopted and deleted as empty");
+  assert.equal(api.hasUserDataKey(mine, "geoControls"), false, "untouched");
+});
+
+test("controls split: when the promotions can't be read, a group component with nothing wanted is not deleted", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.deleteLayer(pin);
+  const real = api.getInConnectedAttributes;
+  api.getInConnectedAttributes = (id) => { if (id === r1.components.overlay) throw new Error("boom"); return real.call(api, id); };
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(r1.components.overlay), true, "kept: its list couldn't be read");
+  assert.equal(r2.components.overlay, r1.components.overlay);
+  api.getInConnectedAttributes = real;
+  const r3 = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(r1.components.overlay), false, "removed once it reads as empty");
+  assert.equal(r3.components.overlay, null);
+});
+
+test("controls split: a renamed Overlay component is still found by its tag, not duplicated", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  const realName = api.getNiceName;
+  api.getNiceName = (id) => id === r1.components.overlay ? "My pin settings" : realName.call(api, id);
+  G.addPin(map, "Again", 2, 2);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.components.overlay, r1.components.overlay);
+  assert.deepEqual(overlaysOf(api, map), [r1.components.overlay], "exactly one Overlay component");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 2, "main and Overlay only");
+});
+
+test("controls split: a group holding the Overlay controls counts as part of the map", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin(map, "Here", 1, 1);
+  const r = context.GeoControlPanel.sync(map);
+  const home = api.create("group", "My controls");
+  api.parent(r.components.overlay, home);
+  assert.equal(context.GeoScene.isMapPart(map, home), true);
+  assert.equal(context.GeoScene.isMapPart(map, api.create("group", "Unrelated")), false);
 });
 
 test("controls: a sync puts \"<Map> Controls\" just above the map group with the camera and Ocean", () => {
@@ -5567,6 +5659,10 @@ test("controls: Refresh controls lives on the Layers tab and (re)builds the Cont
   const comp = controlsOf(api, map);
   assert.equal(api.getLayerType(comp), "component");
   assert.equal(context.statusLabel.getText(), "Controls updated: " + api._promoted(comp).length + " setting(s) in \"Map Controls\". Select it to see them.");
+  context.GeoScene.addPin(map, "Here", 1, 1);
+  context.refreshControlsBtn.onClick();
+  const total = api._promoted(comp).length + api._promoted(controlsOf(api, map, "overlay")).length;
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + total + " setting(s) in \"Map Controls\" and its Overlay controls. Select them to see them.");
 });
 
 // ---- Map controls: where the component sits, selection, readable names ------------------

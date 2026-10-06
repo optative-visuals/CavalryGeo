@@ -665,7 +665,9 @@ bakeBtn.onClick = guard(function () {
 
 refreshControlsBtn.onClick = guard(function () {
   var map = currentMap(), r = GeoControlPanel.sync(map);
-  say("Controls updated: " + r.controls + " setting(s) in \"" + map.name + " Controls\". Select it to see them.");
+  // N spans the main Controls and any Overlay / Data / Extract controls that exist.
+  var extra = [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"]].filter(function (g) { return r.components[g[0]]; }).map(function (g) { return g[1]; });
+  say("Controls updated: " + r.controls + " setting(s) in \"" + map.name + " Controls\"" + (extra.length ? " and its " + extra.join(" / ") + " controls. Select them to see them." : ". Select it to see them."));
 });
 
 // Layers holds the layer categories, then Extract and Bake.

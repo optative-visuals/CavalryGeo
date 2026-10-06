@@ -67,7 +67,7 @@ Each map remembers its style, so pins, routes, labels and layers you add later m
 
 ## Map controls
 
-Every map has a **<map> Controls** layer, just above the map's group in the Scene Window (not
+Every map has a **Controls** layer (named after the map, for example "Map Controls"), just above the map's group in the Scene Window (not
 inside it). The plugin selects it when you make a map, so the Attribute Editor opens on it. Open
 the **Controls** tab there to find the map's settings in one place:
 
@@ -94,8 +94,9 @@ kept, after the plugin's — including settings of the map's own layers, such as
 
 - **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
   you like (another group, further down the stack); the plugin still finds it and keeps it up to date.
-- **Deleting a map:** deleting a map's group does not delete its Controls layer, because it sits
-  outside the group. Delete that layer too.
+- **Deleting a map:** deleting a map's group does not delete its Controls layers (the main one
+  and, if the map has them, the Overlay, Data and Extract ones: up to four), because they sit
+  outside the group. Delete those layers too.
 - **Maps made before this change:** their Controls layer sat inside the map's group. Press
   **Refresh controls** once and it moves out to just above the group, keeping its settings.
 
