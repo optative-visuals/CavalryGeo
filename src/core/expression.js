@@ -178,6 +178,32 @@ var GeoExpression = (function () {
   // Route travellers: a leg's copy sits at the tip of its draw-on (Cavalry wraps 100 % back
   // to the start, so stop just short) and only shows on the leg currently drawing.
   var TRAVELLER_TIP_INPUTS = [["drawOn", 100]];
+  // Callouts: label box edge, optional elbow bend, and a two-line draw-on (label -> bend -> place).
+  // All three share one input list so the helpers can be wired identically.
+  var CALLOUT_GEOM_INPUTS = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
+  var CALLOUT_DRAW_INPUTS = CALLOUT_GEOM_INPUTS.concat([["draw", 100], ["index", 0]]);
+  // Expects the prelude's _i0.._i7 (place xy, box centre xy, box size, style, elbow); defines _cs (side), _ce (edge), _cb (bend).
+  var CALLOUT_GEOM_SRC = "var _cs = _i0 < _i2 ? -1 : 1;\n" +
+    "var _ce = [_i2 + _cs * _i4 / 2, _i3];\n" +
+    "var _cb = _i6 >= 0.5 ? [_ce[0] + _cs * _i7, _ce[1]] : _ce;\n";
+  function calloutEdgeExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_GEOM_INPUTS) + CALLOUT_GEOM_SRC + "_ce;\n";
+  }
+  function calloutBendExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_GEOM_INPUTS) + CALLOUT_GEOM_SRC + "_cb;\n";
+  }
+  // Trim end (0-100) for line index: 0 = label to bend, 1 = bend to place; Draw % covers both lengths in order.
+  function calloutDrawExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_DRAW_INPUTS) + CALLOUT_GEOM_SRC +
+      "var _cl1 = Math.sqrt(Math.pow(_cb[0] - _ce[0], 2) + Math.pow(_cb[1] - _ce[1], 2));\n" +
+      "var _cl2 = Math.sqrt(Math.pow(_i0 - _cb[0], 2) + Math.pow(_i1 - _cb[1], 2));\n" +
+      "var _cd = Math.max(0, Math.min(100, _i8));\n" +
+      "var _ct = _cd / 100 * (_cl1 + _cl2);\n" +
+      "(_cl1 + _cl2 <= 1e-9) ? _cd : (_i9 < 0.5\n" +
+      "  ? (_cl1 > 1e-9 ? Math.max(0, Math.min(1, _ct / _cl1)) * 100 : 100)\n" +
+      "  : (_cl2 > 1e-9 ? Math.max(0, Math.min(1, (_ct - _cl1) / _cl2)) * 100 : (_i8 >= 100 ? 100 : 0)));\n";
+  }
+
   function travellerTipExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(TRAVELLER_TIP_INPUTS) + "Math.max(0, Math.min(_i0, 99.9));\n";
   }
@@ -228,6 +254,7 @@ var GeoExpression = (function () {
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
     routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
+    CALLOUT_GEOM_INPUTS: CALLOUT_GEOM_INPUTS, CALLOUT_DRAW_INPUTS: CALLOUT_DRAW_INPUTS, calloutEdgeExpression: calloutEdgeExpression, calloutBendExpression: calloutBendExpression, calloutDrawExpression: calloutDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,
     legendExpression: legendExpression, bubbleLegendExpression: bubbleLegendExpression, replaceData: replaceData
