@@ -22,6 +22,7 @@ function guard(fn) {
 // Attribute Editor opens on it.
 function syncControls(map, select) {
   try {
+    try { GeoScene.fitFurniture(map); } catch (e) { /* cosmetic */ }
     var r = GeoControlPanel.sync(map);
     if (select && r && r.componentId && typeof api.select === "function") {
       try { api.select([r.componentId]); } catch (e) { /* cosmetic */ }
@@ -455,6 +456,8 @@ modePicker.addEntry("Everything");
 var creditCheck = new ui.Checkbox(true);
 var addLayersBtn = GeoStyle.primaryButton("Add layers");
 var clearCacheBtn = GeoStyle.quietButton("Clear download cache");
+var addScaleBarBtn = GeoStyle.button("Add scale bar");
+var addNorthArrowBtn = GeoStyle.button("Add north arrow");
 
 addLayersBtn.onClick = guard(function () {
   var map = currentMap();
@@ -508,6 +511,17 @@ addLayersBtn.onClick = guard(function () {
   say("Added " + added + " layer(s), " + GeoUtil.formatBytes(bytes) + "." + (empty.length ? " Nothing found for: " + empty.join(", ") + "." : "") + syncControls(map));
 });
 
+addScaleBarBtn.onClick = guard(function () {
+  var map = currentMap();
+  GeoScene.addScaleBar(map);
+  say("Scale bar added to " + map.name + "." + syncControls(map));
+});
+addNorthArrowBtn.onClick = guard(function () {
+  var map = currentMap();
+  GeoScene.addNorthArrow(map);
+  say("North arrow added to " + map.name + "." + syncControls(map));
+});
+
 clearCacheBtn.onClick = guard(function () {
   if (imageryState.timer) throw new Error("The download cache can't be cleared while imagery is downloading or building — wait, or press Cancel first.");
   var r = GeoNet.clearCache();
@@ -517,7 +531,7 @@ clearCacheBtn.onClick = guard(function () {
 });
 
 // ---- Extract and Bake (in the Layers section) ---------------------------------
-var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data"];
+var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
 var refreshLayersBtn = GeoStyle.button("Refresh");
@@ -598,7 +612,7 @@ extractBtn.onClick = guard(function () {
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, skippedRoute = 0, other = 0;
+  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, other = 0;
   // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
   // so its parts are skipped with a message of their own rather than counted as "other".
   var routeParts = {};
@@ -622,12 +636,15 @@ bakeBtn.onClick = guard(function () {
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "data") { skippedData++; return; }
+    if (meta.category === "scaleBar" || meta.category === "northArrow") { skippedFurniture++; return; }
     GeoScene.bake(id);
     baked++;
   });
 
   if (baked === 0) {
-    if (skippedRoute) {
+    if (skippedFurniture && !skippedRoute && !skippedData && !other) {
+      throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
+    } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
       throw new Error("Data layers can't be baked yet. Select map layers such as \"world: Countries\" instead.");
@@ -639,6 +656,7 @@ bakeBtn.onClick = guard(function () {
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
   if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
+  if (skippedFurniture) msg += " Skipped the scale bar / north arrow (they follow the camera).";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
   if (!newMapSelected()) msg += syncControls(currentMap());
@@ -673,7 +691,9 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Controls"),
     GeoStyle.note("Each map's settings in one place: select \"<map> Controls\" in the Scene Window."),
     refreshControlsBtn,
-    clearCacheBtn
+    clearCacheBtn,
+    GeoStyle.heading("Map furniture"),
+    row(addScaleBarBtn, addNorthArrowBtn)
   ]));
 });
 

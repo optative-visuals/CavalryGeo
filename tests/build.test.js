@@ -3709,7 +3709,7 @@ test("each section has grey headings in order", () => {
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
@@ -6853,4 +6853,47 @@ test("controls: a map with a scale bar and north arrow gets their rows, choice l
   assert.deepEqual(plain(api._overrides[r.valuesId][slot]), { hardMin: 0, hardMax: 2, step: 1 });
   const f = context.GeoScene.findFurniture(map);
   assert.equal(api.getInConnection(f.fade, "array.1"), r.valuesId + "." + slotsOf(api, r.valuesId)["furn:scale:hide"]);
+});
+
+test("Layers tab: Map furniture buttons add a scale bar and a north arrow, once each", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  assert.ok(holds(context.sectionPages.pages[1], context.addScaleBarBtn) && holds(context.sectionPages.pages[1], context.addNorthArrowBtn));
+  context.addScaleBarBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Scale bar added to Map.");
+  context.addScaleBarBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: This map already has a scale bar.");
+  context.addNorthArrowBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "North arrow added to Map.");
+  const f = context.GeoScene.findFurniture(context.currentMap());
+  assert.ok(f.scaleBar && f.northArrow && f.fade);
+});
+
+test("Bake skips the scale bar and north arrow; only furniture selected says why", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const sb = G.addScaleBar(map), na = G.addNorthArrow(map);
+  api.select([sb, na]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked.");
+  const C = require("../src/core/codec.js");
+  const c = G.createMapLayer(map, "Map: Countries", C.encodeLayer({ kind: "polygon", features: [{ name: "X", rings: [[[0, 0], [5, 0], [5, 5], [0, 0]]] }] }), { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  api.select([sb, c]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped the scale bar \/ north arrow \(they follow the camera\)\./);
+});
+
+test("Extract never lists the scale bar or north arrow; any panel action fits them to a resized comp", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  const sb = context.GeoScene.addScaleBar(map);
+  context.refreshSourceLayers();
+  assert.ok(!context.sourceLayers.some((l) => l.id === sb));
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1920 }; return realGet.apply(this, arguments); };
+  context.syncControls(map);
+  const at = "generator.array." + context.GeoExpression.inputIndex(context.GeoExpression.SCALE_BAR_INPUTS, "compH");
+  assert.equal(api.get(sb, at), 1920);
 });

@@ -114,6 +114,10 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 - Keep the **© OpenStreetMap contributors** credit (added for you) in any scene that uses street
   data.
 
+### Map furniture
+
+**Add scale bar** and **Add north arrow** (Layers tab) put them on the picked map, pinned to a corner of the frame. The scale bar always shows a round distance (metric, imperial or both) that's right at the centre of the frame as the camera moves, and fades out when you zoom out past **Hide below zoom**; the north arrow always points north. Change Units, Style (Line / Segmented; Arrow / Compass / N), Corner, Margin, Max width and Size in the map's Controls. They take the map style's text colour.
+
 ## Imagery
 
 Put satellite photos, styled maps or terrain under a Web Mercator map.
