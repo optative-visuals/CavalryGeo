@@ -633,15 +633,25 @@ highlightBtn.onClick = guard(function () {
   var duration = Math.max(1, Math.round(Number(highlightLengthField.getValue()) || 1));
   // A feature already extracted on this map (same name, same source layer) is reused.
   var extracts = GeoScene.findMapLayers(map).filter(function (l) { return l.meta.category === "extract" && l.meta.source === groupsLayer.meta.category; });
+  // One feature failing doesn't undo the others: each is tried on its own.
+  var done = 0, failed = 0, firstError = null;
   sel.forEach(function (uuid) {
-    var g = groups[parseInt(String(uuid).slice(1), 10)], name = g.name || "Feature";
-    var have = extracts.filter(function (l) { return l.name === name; })[0];
-    var id = have ? have.id : GeoScene.extract(map, groupsLayer, groupsEnc, g);
-    if (!have) extracts.push({ id: id, name: name, meta: { category: "extract", source: groupsLayer.meta.category } });
-    GeoScene.createHighlight(map, id, effect.id, { start: start, duration: duration });
+    try {
+      var g = groups[parseInt(String(uuid).slice(1), 10)], name = g.name || "Feature";
+      var have = extracts.filter(function (l) { return l.name === name; })[0];
+      var id = have ? have.id : GeoScene.extract(map, groupsLayer, groupsEnc, g);
+      if (!have) extracts.push({ id: id, name: name, meta: { category: "extract", source: groupsLayer.meta.category } });
+      GeoScene.createHighlight(map, id, effect.id, { start: start, duration: duration });
+      done++;
+    } catch (e) {
+      failed++;
+      if (!firstError) firstError = e;
+    }
   });
+  if (!done) throw firstError;
   highlightStartField.setValue(start + duration);
-  say("Highlighted " + sel.length + " feature(s) with " + effect.name + ". Animate or re-time its Amount % keys on the timeline." + syncControls(map));
+  say("Highlighted " + done + " feature(s) with " + effect.name + ". Animate or re-time its Amount % keys on the timeline." +
+    (failed ? " Couldn't highlight " + failed + ": " + (firstError && firstError.message ? firstError.message : String(firstError)) : "") + syncControls(map));
 });
 
 bakeBtn.onClick = guard(function () {
@@ -675,6 +685,7 @@ bakeBtn.onClick = guard(function () {
     if (hlParts[id]) { skippedHighlight++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
+    if (meta.category === "highlight") { skippedHighlight++; return; }
     if (meta.category === "data") { skippedData++; return; }
     if (meta.category === "scaleBar" || meta.category === "northArrow") { skippedFurniture++; return; }
     GeoScene.bake(id);
