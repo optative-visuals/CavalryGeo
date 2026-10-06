@@ -6840,3 +6840,17 @@ test("fitFurniture follows a resized composition; Apply style recolours the furn
   assert.equal(api.get(sb, "material.materialColor"), "#ffffff");
   assert.equal(api.get(na, "material.materialColor"), "#ffffff");
 });
+
+test("controls: a map with a scale bar and north arrow gets their rows, choice limits on the values inputs", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addScaleBar(map);
+  context.GeoScene.addNorthArrow(map);
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.componentId));
+  ["Scale bar · Hide", "Scale bar · Units (0 metric · 1 imperial · 2 both)", "Scale bar · Hide below zoom", "North arrow · Size"].forEach((n) => assert.ok(names.includes(n), n));
+  const slot = slotsOf(api, r.valuesId)["furn:scale:units"];
+  assert.deepEqual(plain(api._overrides[r.valuesId][slot]), { hardMin: 0, hardMax: 2, step: 1 });
+  const f = context.GeoScene.findFurniture(map);
+  assert.equal(api.getInConnection(f.fade, "array.1"), r.valuesId + "." + slotsOf(api, r.valuesId)["furn:scale:hide"]);
+});

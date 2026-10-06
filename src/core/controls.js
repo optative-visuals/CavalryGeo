@@ -20,13 +20,17 @@ var GeoControls = (function () {
   var BASE = ["countries", "states", "lakes", "coastlines", "rivers", "cities", "buildings", "water", "parks", "roads", "railways"];
   var NAMES = { countries: "Countries", states: "States", lakes: "Lakes", coastlines: "Coastlines", rivers: "Rivers", cities: "Cities",
     buildings: "Buildings", water: "Water", parks: "Parks", roads: "Roads", railways: "Railways" };
+  var SB = function (n) { return IN + E.inputIndex(E.SCALE_BAR_INPUTS, n); }, NA = function (n) { return IN + E.inputIndex(E.NORTH_ARROW_INPUTS, n); };
+  function choice(max) { return { hardMin: 0, hardMax: max, step: 1 }; }
+  var CORNERS = " (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)";
   // The attributes a values input may drive on each kind of member: the glue reads their
   // link state (incoming connection, keyframes, geoLinks record) into model.*.state.
   var STATE_ATTRS = {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
     stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
-    dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"]
+    dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"],
+    scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"]
   };
   var SEP = " · ";
 
@@ -42,7 +46,7 @@ var GeoControls = (function () {
     }
     // One values input driving each target ({ m: member, attr }) it may: already ours → linked;
     // wired elsewhere, animated, or unlinked by the user on purpose → left alone; otherwise → link.
-    function valueTargets(key, type, label, targets) {
+    function valueTargets(key, type, label, targets, overrides) {
       var rec = recordFor(V, key), link = [], linked = [];
       targets.forEach(function (t) {
         var s = (t.m.state && t.m.state[t.attr]) || {};
@@ -53,11 +57,15 @@ var GeoControls = (function () {
         if (s.keyed || s.record === rec) return;
         link.push({ layer: t.m.id, attr: t.attr });
       });
-      if (link.length || linked.length) out.rows.push({ kind: "value", key: key, type: type, label: label, link: link, linked: linked });
+      if (link.length || linked.length) {
+        var row = { kind: "value", key: key, type: type, label: label, link: link, linked: linked };
+        if (overrides) row.overrides = overrides;
+        out.rows.push(row);
+      }
     }
     // The same attribute on each of several members.
-    function value(key, type, label, members, attr) {
-      valueTargets(key, type, label, members.map(function (m) { return { m: m, attr: attr }; }));
+    function value(key, type, label, members, attr, overrides) {
+      valueTargets(key, type, label, members.map(function (m) { return { m: m, attr: attr }; }), overrides);
     }
     // A second use of a name gets " 2", " 3"...; layers, routes and data sets are counted apart.
     function numberer() { var used = {}; return function (name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }; }
@@ -166,6 +174,27 @@ var GeoControls = (function () {
       direct(g.id, "opacity", g.name + SEP + "Opacity");
       direct(g.id, "hidden", g.name + SEP + "Hide");
     });
+    var fu = model.furniture || {};
+    if (fu.scaleBar) {
+      var sb = fu.scaleBar, sn = "Scale bar" + SEP;
+      direct(sb.id, "hidden", sn + "Hide");
+      direct(sb.id, FILL, sn + "Colour");
+      value("furn:scale:units", "double", sn + "Units (0 metric · 1 imperial · 2 both)", [sb], SB("units"), choice(2));
+      value("furn:scale:style", "double", sn + "Style (0 line · 1 segmented)", [sb], SB("style"), choice(1));
+      value("furn:scale:corner", "double", sn + "Corner" + CORNERS, [sb], SB("corner"), choice(3));
+      value("furn:scale:margin", "double", sn + "Margin", [sb], SB("margin"));
+      value("furn:scale:width", "double", sn + "Max width", [sb], SB("maxWidth"));
+      if (fu.fade) value("furn:scale:hide", "double", sn + "Hide below zoom", [fu.fade], "array.1");
+    }
+    if (fu.northArrow) {
+      var na = fu.northArrow, nn = "North arrow" + SEP;
+      direct(na.id, "hidden", nn + "Hide");
+      direct(na.id, FILL, nn + "Colour");
+      value("furn:north:style", "double", nn + "Style (0 arrow · 1 compass · 2 N with tick)", [na], NA("style"), choice(2));
+      value("furn:north:corner", "double", nn + "Corner" + CORNERS, [na], NA("corner"), choice(3));
+      value("furn:north:margin", "double", nn + "Margin", [na], NA("margin"));
+      value("furn:north:size", "double", nn + "Size", [na], NA("size"));
+    }
     return out;
   }
 
@@ -178,6 +207,8 @@ var GeoControls = (function () {
     (model.stops || []).forEach(add);
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
+    var fu = model.furniture || {};
+    add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};
     (data.year || []).forEach(add);
     (data.sets || []).forEach(function (s) { add(s.regions); add(s.bubbles); add(s.labels); });

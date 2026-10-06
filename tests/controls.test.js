@@ -254,3 +254,26 @@ test("travellers: hide, size, colour (plugin markers) and faces direction after 
   const tids = Object.keys(G.ids(model({ travellers: [{ routeId: "x", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }] }] })));
   assert.ok(tids.indexOf("d1") >= 0 && tids.indexOf("sc") >= 0);
 });
+
+test("furniture rows: hide and colour direct, settings as values with whole-number choices", () => {
+  const E = require("../src/core/expression.js");
+  const sbAt = (n) => "generator.array." + E.inputIndex(E.SCALE_BAR_INPUTS, n), naAt = (n) => "generator.array." + E.inputIndex(E.NORTH_ARROW_INPUTS, n);
+  const p = G.plan({ valuesId: "V", furniture: { scaleBar: { id: "sb" }, northArrow: { id: "na" }, fade: { id: "fd" } } });
+  const labels = p.rows.map((r) => r.label);
+  assert.deepEqual(labels, [
+    "Scale bar · Hide", "Scale bar · Colour", "Scale bar · Units (0 metric · 1 imperial · 2 both)", "Scale bar · Style (0 line · 1 segmented)",
+    "Scale bar · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)", "Scale bar · Margin", "Scale bar · Max width", "Scale bar · Hide below zoom",
+    "North arrow · Hide", "North arrow · Colour", "North arrow · Style (0 arrow · 1 compass · 2 N with tick)",
+    "North arrow · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)", "North arrow · Margin", "North arrow · Size"
+  ]);
+  const row = (l) => p.rows.find((r) => r.label === l);
+  assert.deepEqual(row("Scale bar · Hide"), { kind: "direct", layer: "sb", attr: "hidden", label: "Scale bar · Hide" });
+  assert.equal(row("Scale bar · Colour").attr, "material.materialColor");
+  assert.deepEqual(row("Scale bar · Units (0 metric · 1 imperial · 2 both)").link, [{ layer: "sb", attr: sbAt("units") }]);
+  assert.deepEqual(row("Scale bar · Units (0 metric · 1 imperial · 2 both)").overrides, { hardMin: 0, hardMax: 2, step: 1 });
+  assert.deepEqual(row("Scale bar · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)").overrides, { hardMin: 0, hardMax: 3, step: 1 });
+  assert.equal(row("Scale bar · Margin").overrides, undefined);
+  assert.deepEqual(row("Scale bar · Hide below zoom").link, [{ layer: "fd", attr: "array.1" }]);
+  assert.deepEqual(row("North arrow · Size").link, [{ layer: "na", attr: naAt("size") }]);
+  assert.deepEqual(G.plan({ valuesId: "V" }).rows, [], "no furniture, no rows");
+});

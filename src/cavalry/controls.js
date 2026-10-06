@@ -209,6 +209,8 @@ var GeoControlPanel = (function () {
       var scale = t.scale && (typeof api.layerExists !== "function" || api.layerExists(t.scale)) ? { id: t.scale, state: linkState(t.scale, S.travellerScale) } : null;
       model.travellers.push({ routeId: t.groupId, marker: marker, scale: scale, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
+    var fu = GeoScene.findFurniture(map);
+    model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
     return model;
@@ -336,6 +338,9 @@ var GeoControlPanel = (function () {
         attempt(function () {
           var slot = ensureSlot(V, slots, row), path = slot.path, rec = G.recordFor(V, row.key);
           attempt(function () { api.renameAttribute(V, path, inputLabel(path, row.label)); });
+          if (row.overrides && has("setAttributeDefinitionOverride")) {
+            Object.keys(row.overrides).forEach(function (k) { attempt(function () { api.setAttributeDefinitionOverride(V, path, k, row.overrides[k]); }); });
+          }
           row.link.forEach(function (t) {
             // A new input links only the targets already showing its value; any other target
             // was set apart on purpose, so it is marked as if the user had pressed Disconnect.
