@@ -270,6 +270,10 @@ var GeoControlPanel = (function () {
       var scale = t.scale && (typeof api.layerExists !== "function" || api.layerExists(t.scale)) ? { id: t.scale, state: linkState(t.scale, S.travellerScale) } : null;
       model.travellers.push({ routeId: t.groupId, marker: marker, scale: scale, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
+    model.highlights = GeoScene.findHighlights(map, mapLayers, order).map(function (h) {
+      return { id: h.groupId, number: h.number, name: h.name, effect: h.effect, shape: h.shape, osc: h.osc,
+        blur: h.blur ? { id: h.blur, state: linkState(h.blur, S.blur) } : null };
+    });
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -448,6 +452,13 @@ var GeoControlPanel = (function () {
     var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: GeoScene.findImagery(map) };
     found.order = mapOrder(map, found.imagery);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
+    // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
+    // again only when something was removed (readModel must not see deleted highlight shapes).
+    attempt(function () {
+      var removed = 0;
+      keepSelection(function () { removed = GeoScene.prepareHighlights(map, found.mapLayers, found.order); });
+      if (removed > 0) found.mapLayers = GeoScene.findMapLayers(map);
+    });
     var model = readModel(map, V, found), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {

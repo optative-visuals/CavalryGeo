@@ -7796,3 +7796,42 @@ test("highlights: highlightParts lists every group and member", () => {
   [g, rec.shape, rec.osc, rec.fade].forEach((id) => assert.ok(parts[id], id));
   assert.ok(!parts[extract]);
 });
+
+test("highlights in Controls: rows land in Extract controls with notes; a highlight shape is not an extract row", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "glow", { start: 0, duration: 10 }), rec = plain(api.getUserDataKey(g, "geoHighlight"));
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.components.extract));
+  ["Highlight 1 · Amount %", "Highlight 1 · Colour", "Highlight 1 · Size"].forEach((n) => assert.ok(names.includes(n), n));
+  assert.ok(names.includes("France · Hide"));
+  assert.ok(!names.some((n) => /^Highlight 1 shape/.test(n)), "the shape is not listed as an extract");
+  const promos = api._promoted(r.components.extract);
+  assert.ok(promos.includes(rec.shape + ".opacity"));
+  const notes = api.get(r.components.extract, "promotedAttributes." + promos.indexOf(rec.shape + ".opacity") + ".notes");
+  assert.equal(notes, "France");
+  // Size: one values input driving both blur axes.
+  const slot = plain(api.getUserDataKey(r.valuesId, "geoSlots"))["hl:" + g + ":size"];
+  assert.equal(api.getInConnection(rec.blur, "amount.x"), r.valuesId + "." + slot);
+  assert.equal(api.getInConnection(rec.blur, "amount.y"), r.valuesId + "." + slot);
+});
+
+test("highlights in Controls: a refresh after the extract is deleted removes the highlight and its rows", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 0, duration: 10 });
+  context.GeoControlPanel.sync(map);
+  api.deleteLayer(extract);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(g), false);
+  assert.equal(r.components.extract, null, "nothing left to show");
+});
+
+test("highlights in Controls: the Amount row points at the keyed attribute and keeps its keys", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "outline", { start: 3, duration: 7 }), rec = plain(api.getUserDataKey(g, "geoHighlight"));
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(api._promoted(r.components.extract).includes(rec.shape + ".stroke.trimEnd"));
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "stroke.trimEnd")), [3, 10]);
+});

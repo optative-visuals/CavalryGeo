@@ -334,3 +334,32 @@ test("every row knows its Controls group, in a list beside the rows", () => {
   assert.ok(p.rows.some((r) => r.label.indexOf("C → D · Traveller") === 0), "the traveller rows are in the list");
   assert.deepEqual(G.plan(model()).groups, ["main", "main", "main", "main", "main"]);
 });
+
+test("highlight rows: Amount %, Colour, and only their own effect's extra row, in the extract group with the extract's name as notes", () => {
+  const model = { valuesId: "V", highlights: [
+    { id: "g1", number: 1, name: "France", effect: "fill", shape: "s1", osc: null, blur: null },
+    { id: "g2", number: 2, name: "Spain", effect: "outline", shape: "s2", osc: null, blur: null },
+    { id: "g3", number: 3, name: "Italy", effect: "pulse", shape: "s3", osc: "o3", blur: null },
+    { id: "g4", number: 4, name: "Greece", effect: "glow", shape: "s4", osc: null, blur: { id: "b4", state: {} } }
+  ] };
+  const p = G.plan(model);
+  const rows = p.rows.map((r, i) => ({ label: r.label, group: p.groups[i], notes: r.notes, layer: r.layer, attr: r.attr, kind: r.kind }));
+  const of = (n) => rows.filter((r) => r.label.indexOf("Highlight " + n + " · ") === 0);
+  assert.deepEqual(of(1).map((r) => [r.label, r.layer, r.attr]), [["Highlight 1 · Amount %", "s1", "opacity"], ["Highlight 1 · Colour", "s1", "material.materialColor"]]);
+  assert.deepEqual(of(2).map((r) => [r.label, r.layer, r.attr]), [["Highlight 2 · Amount %", "s2", "stroke.trimEnd"], ["Highlight 2 · Colour", "s2", "stroke.strokeColor"], ["Highlight 2 · Width", "s2", "stroke.width"]]);
+  assert.deepEqual(of(3).map((r) => [r.label, r.layer, r.attr]), [["Highlight 3 · Amount %", "g3", "opacity"], ["Highlight 3 · Colour", "s3", "stroke.strokeColor"], ["Highlight 3 · Speed", "o3", "frequency"]]);
+  assert.deepEqual(of(4).map((r) => r.label), ["Highlight 4 · Amount %", "Highlight 4 · Colour", "Highlight 4 · Size"]);
+  const size = p.rows.find((r) => r.label === "Highlight 4 · Size");
+  assert.equal(size.kind, "value"); assert.equal(size.key, "hl:g4:size");
+  assert.deepEqual(size.link, [{ layer: "b4", attr: "amount.x" }, { layer: "b4", attr: "amount.y" }]);
+  rows.filter((r) => /^Highlight/.test(r.label)).forEach((r) => assert.equal(r.group, "extract"));
+  assert.equal(of(1)[0].notes, "France"); assert.equal(of(4)[2].notes, "Greece");
+  assert.deepEqual(p.rows.find((r) => r.label === "Highlight 1 · Amount %").overrides, { hardMin: 0, hardMax: 100 });
+  assert.deepEqual(G.STATE_ATTRS.blur, ["amount.x", "amount.y"]);
+  assert.ok(G.ids(model).s1 && G.ids(model).o3 && G.ids(model).b4 && G.ids(model).g3);
+});
+
+test("highlight rows: a highlight whose shape is gone shows only the rows it can", () => {
+  const p = G.plan({ valuesId: "V", highlights: [{ id: "g1", number: 1, name: "France", effect: "pulse", shape: null, osc: "o1", blur: null }] });
+  assert.deepEqual(p.rows.map((r) => r.label), ["Highlight 1 · Amount %", "Highlight 1 · Speed"]);
+});

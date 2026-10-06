@@ -30,7 +30,8 @@ var GeoControls = (function () {
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
     stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
     dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
-    scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"]
+    scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
+    blur: ["amount.x", "amount.y"]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
@@ -112,6 +113,20 @@ var GeoControls = (function () {
       if (l.stroke) { direct(l.id, STROKE, n + "Outline colour"); direct(l.id, WIDTH, n + "Outline width"); }
       value("layer:" + l.id + ":detail", "double", n + "Detail", [l], DETAIL);
       if (l.point) value("layer:" + l.id + ":dot", "double", n + "Dot size", [l], RADIUS);
+    });
+    // Highlights: their Amount % and look, after the extract rows (the keys live on ordinary
+    // attributes, so the rows point straight at them).
+    group = "extract";
+    (model.highlights || []).forEach(function (h) {
+      var n = "Highlight " + h.number + SEP, line = h.effect === "outline" || h.effect === "pulse";
+      notes = h.name || "";
+      var amount = h.effect === "pulse" ? [h.id, "opacity"] : h.shape ? [h.shape, h.effect === "outline" ? "stroke.trimEnd" : "opacity"] : null;
+      if (amount) direct(amount[0], amount[1], n + "Amount %", { hardMin: 0, hardMax: 100 });
+      if (h.shape) direct(h.shape, line ? STROKE : FILL, n + "Colour");
+      if (h.shape && h.effect === "outline") direct(h.shape, WIDTH, n + "Width");
+      if (h.osc && h.effect === "pulse") direct(h.osc, "frequency", n + "Speed", { hardMin: 0 });
+      if (h.blur && h.effect === "glow") valueTargets("hl:" + h.id + ":size", "double", n + "Size", [{ m: h.blur, attr: "amount.x" }, { m: h.blur, attr: "amount.y" }], { hardMin: 0 });
+      notes = "";
     });
     group = "overlay";
     var pins = model.pins || [];
@@ -213,6 +228,7 @@ var GeoControls = (function () {
     (model.layers || []).concat(model.pins || [], model.labels || [], model.imagery || []).forEach(add);
     (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); (r.draws || []).forEach(add); });
     (model.stops || []).forEach(add);
+    (model.highlights || []).forEach(function (h) { add(h.id); add(h.shape); add(h.osc); add(h.blur); });
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     var fu = model.furniture || {};
