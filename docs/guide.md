@@ -81,6 +81,13 @@ the **Controls** tab there to find the map's settings in one place:
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
 - **Imagery:** opacity and hide.
 
+A map's settings are split over up to four components, stacked above the map group: **<map>
+Controls** (camera, ocean, base layers, imagery), **Overlay controls** (pins, labels, routes,
+travellers, scale bar, north arrow), **Data controls** (data maps) and **Extract controls**
+(extracted features). Each appears once it has something to show. Maps made with earlier versions
+are split the next time their controls refresh (any action in the panel, or Refresh controls);
+anything you promoted yourself stays where it is.
+
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
 press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
 kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.

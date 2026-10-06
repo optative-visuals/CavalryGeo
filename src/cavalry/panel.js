@@ -689,7 +689,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
-    GeoStyle.note("Each map's settings in one place: select \"<map> Controls\" in the Scene Window."),
+    GeoStyle.note("Each map's settings in one place: select \"<map> Controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
     refreshControlsBtn,
     clearCacheBtn,
     GeoStyle.heading("Map furniture"),

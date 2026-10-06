@@ -4983,9 +4983,10 @@ function plainSpaces(name) { return String(name).split(NBSP).join(" "); }
 function promotedNames(api, comp) {
   return api._promoted(comp).map((s) => { const d = s.indexOf("."); return plainSpaces(api.getCustomAttributeName(s.slice(0, d), s.slice(d + 1))); });
 }
-// The map's Controls component: the one in the composition with user data geoControls === the camera.
-function controlsOf(api, map) {
-  return api.getCompLayers(false).find((id) => api.getLayerType(id) === "component" && api.hasUserDataKey(id, "geoControls") && api.getUserDataKey(id, "geoControls") === map.cameraId);
+// The map's Controls component for a group: main has no geoControlsGroup key.
+function controlsOf(api, map, group) {
+  return api.getCompLayers(false).find((id) => api.getLayerType(id) === "component" && api.hasUserDataKey(id, "geoControls") && api.getUserDataKey(id, "geoControls") === map.cameraId &&
+    ((group || "main") === "main" ? !api.hasUserDataKey(id, "geoControlsGroup") : api.getUserDataKey(id, "geoControlsGroup") === group));
 }
 function siblingsOfLayer(api, id) { const p = api.getParent(id); return api.getChildren(p || api.getActiveComp()); }
 // Whether `id` sits directly above `below` in the same parent.
@@ -4995,6 +4996,101 @@ function directlyAbove(api, id, below) {
 }
 function slotsOf(api, valuesId) { return plain(api.getUserDataKey(valuesId, "geoSlots")); }
 const CAMERA_NAMES = ["Camera · Zoom", "Camera · Centre latitude", "Camera · Centre longitude", "Camera · Rotation", "Camera · Projection (0 flat · 1 Equal Earth · 2 globe)"];
+
+function fullControlsMap(context) {
+  const map = controlsMap(context), G = context.GeoScene, C = require("../src/core/codec.js");
+  const poly = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]] }] });
+  G.createMapLayer(map, "Map: Countries", poly, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  G.createMapLayer(map, "France", poly, { camera: map.cameraId, category: "extract", source: "countries" }, G.layerStyle(map, "extractFill"), {});
+  G.addPin(map, "Here", 1, 1);
+  G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 5, lat: 5 }], { arc: 30 });
+  G.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context), { regions: true, bubbles: false, labels: false, legend: false });
+  G.addScaleBar(map);
+  return map;
+}
+
+test("controls split: four components stacked main, overlay, data, extract directly above the map group, each with its rows", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  const ids = ["main", "overlay", "data", "extract"].map((g) => r.components[g]);
+  ids.forEach((id) => assert.ok(id, "made"));
+  assert.equal(r.componentId, r.components.main);
+  ["main", "overlay", "data", "extract"].forEach((g) => assert.equal(controlsOf(api, map, g), r.components[g]));
+  assert.equal(api.getNiceName(r.components.overlay), "Map Overlay controls");
+  assert.equal(api.getNiceName(r.components.data), "Map Data controls");
+  assert.equal(api.getNiceName(r.components.extract), "Map Extract controls");
+  const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp()), g = sib.indexOf(map.groupId);
+  assert.deepEqual(ids.map((id) => sib.indexOf(id)), [g - 4, g - 3, g - 2, g - 1], "stacked in order right above the group");
+  const names = (id) => plain(promotedNames(api, id));
+  assert.ok(names(r.components.main).includes("Camera · Zoom") && names(r.components.main).includes("Countries · Hide"));
+  assert.ok(!names(r.components.main).some((n) => /^(Pins|Data|France|Scale bar|A → B)/.test(n)), "main holds only the base map");
+  assert.ok(names(r.components.overlay).includes("Pins · Colour") && names(r.components.overlay).includes("Scale bar · Hide") && names(r.components.overlay).some((n) => n.indexOf("A → B") === 0));
+  assert.ok(names(r.components.data).includes("Data · Year"));
+  assert.ok(names(r.components.extract).includes("France · Hide"));
+  assert.deepEqual(api.getChildren(r.components.overlay), [], "the values utility stays in main");
+  assert.ok(api.getChildren(r.components.main).includes(r.valuesId));
+});
+
+test("controls split: a plain map has only the main component", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(r.components), { main: r.componentId, overlay: null, data: null, extract: null });
+  assert.equal(controlsOf(api, map, "overlay"), undefined);
+});
+
+test("controls split: an old combined Controls is split by one sync, keeping the user's own promotion in main", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  // Make it look like the previous version: every row in main, nothing else.
+  const overlay = r1.components.overlay;
+  api._promoted(overlay).forEach((a) => { const d = a.indexOf("."); api.connect(a.slice(0, d), a.slice(d + 1), r1.componentId, "promotedAttributes"); });
+  api.setUserData(r1.componentId, "geoPromoted", plain(api._promoted(r1.componentId)));
+  api.deleteLayer(overlay);
+  const mine = api.create("basicShape", "Mine");
+  api.connect(mine, "opacity", r1.componentId, "promotedAttributes");
+  const r2 = context.GeoControlPanel.sync(map);
+  const main = plain(api._promoted(r2.componentId));
+  assert.ok(main.includes(mine + ".opacity"), "the user's own promotion stays in main");
+  assert.ok(!main.some((a) => a.indexOf(pin + ".") === 0) && !plain(promotedNames(api, r2.componentId)).includes("Pins · Colour"), "pin rows left main");
+  assert.ok(plain(promotedNames(api, r2.components.overlay)).includes("Pins · Colour"), "and are in the new Overlay controls");
+});
+
+test("controls split: an overlay component left empty is removed; one holding a user promotion stays", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  assert.ok(r1.components.overlay);
+  api.deleteLayer(pin);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.components.overlay, null);
+  assert.equal(api.layerExists(r1.components.overlay), false);
+  const pin2 = G.addPin(map, "Again", 2, 2);
+  const r3 = context.GeoControlPanel.sync(map);
+  const mine = api.create("basicShape", "Mine");
+  api.connect(mine, "opacity", r3.components.overlay, "promotedAttributes");
+  api.deleteLayer(pin2);
+  const r4 = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(r3.components.overlay), true, "kept: it has the user's promotion");
+  assert.equal(r4.components.overlay, r3.components.overlay);
+});
+
+test("controls split: overlay value rows source from the values utility inside main and still drive the layers; a renamed group component is found again", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Here", 1, 1);
+  const r = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, r.valuesId)["pins:color"];
+  assert.ok(plain(api._promoted(r.components.overlay)).includes(r.valuesId + "." + slot));
+  assert.equal(api.getInConnection(pin, "material.materialColor"), r.valuesId + "." + slot);
+  api.rename ? api.rename(r.components.overlay, "Renamed") : null;
+  const again = context.GeoControlPanel.sync(map);
+  assert.equal(again.components.overlay, r.components.overlay);
+});
 
 test("controls: a sync puts \"<Map> Controls\" just above the map group with the camera and Ocean", () => {
   const { context, api } = buildSandbox();
@@ -5040,12 +5136,12 @@ test("controls: pins share one Hide, Colour and Size, and a later pin links too"
   [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r.valuesId + "." + color));
   assert.equal(api.getCustomAttributeName(r.valuesId, color), "Pins" + NBSP + "·" + NBSP + "Colour");
   assert.equal(api.get(r.valuesId, color), "#1F8F4E", "starts with the pins' colour");
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), ["Pins · Hide", "Pins · Colour", "Pins · Size"]);
   const c = S.addPin(map, "C", 20, 20);
   r = context.GeoControlPanel.sync(map);
   assert.equal(api.getInConnection(c, "material.materialColor"), r.valuesId + "." + color);
-  assert.ok(directlyAbove(api, r.componentId, map.groupId), "the component stays where it was");
-  assert.equal(plain(api._promoted(r.componentId)).filter((s) => s === r.valuesId + "." + color).length, 1);
+  assert.ok(directlyAbove(api, r.components.overlay, map.groupId) && directlyAbove(api, r.componentId, r.components.overlay), "the components stay where they were");
+  assert.equal(plain(api._promoted(r.components.overlay)).filter((s) => s === r.valuesId + "." + color).length, 1);
 });
 
 test("controls: a pin the user disconnected stays unlinked", () => {
@@ -5106,7 +5202,8 @@ test("controls: the user's own promotions stay, after the plugin's, with their n
   const p = plain(api._promoted(r.componentId)), last = p.length - 1;
   assert.equal(p[last], other + ".position");
   assert.equal(api.get(r.componentId, "promotedAttributes." + last + ".name"), "My position");
-  assert.ok(p.indexOf(r.valuesId + "." + slotsOf(api, r.valuesId)["pins:color"]) < last);
+  assert.ok(plain(api._promoted(r.components.overlay)).includes(r.valuesId + "." + slotsOf(api, r.valuesId)["pins:color"]), "the pin rows are in Overlay controls");
+  assert.ok(p.indexOf(map.cameraId + ".array.2") >= 0 && p.indexOf(map.cameraId + ".array.2") < last, "after the plugin's own main rows");
 });
 
 test("controls: the user's promotions of this map's own layers stay too (a pin's and the Ocean's position)", () => {
@@ -5126,7 +5223,7 @@ test("controls: the user's promotions of this map's own layers stay too (a pin's
   assert.deepEqual(p.slice(n - 2), [pin + ".position", ocean + ".position"]);
   assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 2) + ".name"), "Pin position");
   assert.equal(api.get(r.componentId, "promotedAttributes." + (n - 1) + ".name"), "Ocean position");
-  assert.ok(promotedNames(api, r.componentId).indexOf("Labels · Colour") >= 0);
+  assert.ok(promotedNames(api, r.components.overlay).indexOf("Labels · Colour") >= 0);
 });
 
 test("controls: the Controls component remembers which promotions are the plugin's", () => {
@@ -5156,19 +5253,20 @@ test("controls: a plugin row that is no longer wanted is removed (a layer whose 
 test("controls: only the changed tail of the list is removed and added again", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context), S = context.GeoScene;
-  S.createLabel(map, "Paris", 2.35, 48.85);
+  S.addPin(map, "A", 0, 0);
+  S.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 5, lat: 5 }], { arc: 30, labels: false });
   let r = context.GeoControlPanel.sync(map);
-  const before = plain(api._promoted(r.componentId));
-  assert.equal(before.length, 10); // camera 5, Ocean 2, Labels 3
+  const before = plain(api._promoted(r.components.overlay)), n = before.length;
+  assert.ok(n > 3);
   const removed = [], realRemove = api.removeArrayIndex;
   api.removeArrayIndex = function (id, path) { removed.push(path); return realRemove.apply(this, arguments); };
-  S.addPin(map, "A", 0, 0); // the pins' rows go in before the labels'
+  S.createLabel(map, "Paris", 2.35, 48.85); // the labels' rows go in after the pins' and before the route's
   r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(removed, ["promotedAttributes.9", "promotedAttributes.8", "promotedAttributes.7"]);
-  const after = plain(api._promoted(r.componentId));
-  assert.deepEqual(after.slice(0, 7), before.slice(0, 7));
-  assert.deepEqual(after.slice(10), before.slice(7));
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Pins · Hide", "Pins · Colour", "Pins · Size", "Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  assert.deepEqual(removed, before.slice(3).map((x, i) => "promotedAttributes." + (n - 1 - i)));
+  const after = plain(api._promoted(r.components.overlay));
+  assert.deepEqual(after.slice(0, 3), before.slice(0, 3));
+  assert.deepEqual(after.slice(6), before.slice(3));
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)).slice(0, 6), ["Pins · Hide", "Pins · Colour", "Pins · Size", "Labels · Hide", "Labels · Colour", "Labels · Size"]);
   removed.length = 0;
   context.GeoControlPanel.sync(map);
   assert.deepEqual(removed, [], "a second sync removes nothing");
@@ -5224,7 +5322,7 @@ test("controls: a deleted Controls component is made again and relinks the pins"
   api.deleteLayer(r1.componentId);
   const r2 = context.GeoControlPanel.sync(map);
   assert.notEqual(r2.valuesId, r1.valuesId);
-  assert.ok(directlyAbove(api, r2.componentId, map.groupId), "the new component is placed above the group");
+  assert.ok(directlyAbove(api, r2.componentId, r2.components.overlay) && directlyAbove(api, r2.components.overlay, map.groupId), "the new component is placed above the rest of the stack");
   const color = slotsOf(api, r2.valuesId)["pins:color"];
   [a, b].forEach((id) => assert.equal(api.getInConnection(id, "material.materialColor"), r2.valuesId + "." + color));
 });
@@ -5235,7 +5333,7 @@ test("controls: labels share Hide, Colour and Size", () => {
   const t = context.GeoScene.createLabel(map, "Paris", 2.35, 48.85);
   assert.deepEqual(plain(context.GeoScene.findLabels(map)), [t]);
   const r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Labels · Hide", "Labels · Colour", "Labels · Size"]);
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), ["Labels · Hide", "Labels · Colour", "Labels · Size"]);
   assert.equal(api.getInConnection(t, "fontSize"), r.valuesId + "." + slotsOf(api, r.valuesId)["labels:size"]);
 });
 
@@ -5245,11 +5343,11 @@ test("controls: a route gets shared colour, width and arc height, then each leg'
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), [
     "Paris → London → Rome · Colour", "Paris → London → Rome · Width", "Paris → London → Rome · Arc height",
     "Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"
   ]);
-  assert.equal(plain(api._promoted(r.componentId))[10], route.legs[0] + ".stroke.trimEnd");
+  assert.equal(plain(api._promoted(r.components.overlay))[3], route.legs[0] + ".stroke.trimEnd");
   route.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.trim"), true));
   const lift = slotsOf(api, r.valuesId)["route:" + route.groupId + ":lift"];
   route.legs.forEach((leg) => assert.equal(api.getInConnection(leg, "generator.array.7"), r.valuesId + "." + lift));
@@ -5268,7 +5366,7 @@ test("controls: one failing control row no longer stops the rest", () => {
   const slots1 = slotsOf(api, r.valuesId);
   assert.ok(slots1["pins:hidden"] && slots1["pins:size"], "the inputs made before and after the failure are recorded");
   assert.equal(slots1["pins:color"], undefined, "the failed row has no input yet");
-  const pinRows = () => plain(promotedNames(api, r.componentId)).filter((n) => /^Pins · /.test(n));
+  const pinRows = () => plain(promotedNames(api, r.components.overlay)).filter((n) => /^Pins · /.test(n));
   assert.deepEqual(pinRows(), ["Pins · Hide", "Pins · Size"]);
   api.addDynamic = realAdd;
   const r2 = context.GeoControlPanel.sync(map);
@@ -5305,7 +5403,7 @@ test("controls: data layers share Data · Year, and each set gets its colours an
   const slots = slotsOf(api, r.valuesId), year = slots["data:year"];
   ["regions", "bubbles", "labels"].forEach((k) => assert.equal(api.getInConnection(d.layers[k], "generator.array.7"), r.valuesId + "." + year, k));
   assert.equal(api.get(r.valuesId, year), 2020, "starts at the layers' year");
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), [
+  assert.deepEqual(plain(promotedNames(api, r.components.data)), [
     "Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour",
     "Population · Bubble size", "Population · Bubble colour", "Population · Label size"
   ]);
@@ -5321,7 +5419,7 @@ test("controls: a regions layer whose Use middle can't be read still gets its ot
   api.get = function (id, attr) { if (id === d.layers.regions && attr === useMiddle) throw new Error("no"); return realGet.apply(this, arguments); };
   let r;
   assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
-  assert.deepEqual(plain(promotedNames(api, r.componentId)).slice(7), ["Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour"]);
+  assert.deepEqual(plain(promotedNames(api, r.components.data)), ["Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour"]);
 });
 
 test("controls: a label helper whose connections can't be read skips only its own label", () => {
@@ -5344,9 +5442,9 @@ test("controls: a leg whose name doesn't say its number is numbered by its place
   const realName = api.getNiceName;
   api.getNiceName = function (id) { return id === route.legs[1] ? "Last hop" : realName.apply(this, arguments); };
   const r = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, r.componentId)).filter((n) => /draw on %$/.test(n));
+  const names = plain(promotedNames(api, r.components.overlay)).filter((n) => /draw on %$/.test(n));
   assert.deepEqual(names, ["Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"]);
-  const p = plain(api._promoted(r.componentId));
+  const p = plain(api._promoted(r.components.overlay));
   assert.ok(p.indexOf(route.legs[0] + ".stroke.trimEnd") < p.indexOf(route.legs[1] + ".stroke.trimEnd"));
 });
 
@@ -5416,7 +5514,7 @@ test("controls: adding a pin updates the Controls", () => {
   context.lonField.setValue(2.35); context.latField.setValue(48.85);
   context.pinCoordBtn.onClick();
   const map = context.GeoScene.findMaps()[0];
-  const comp = controlsOf(api, map);
+  const comp = controlsOf(api, map, "overlay");
   assert.ok(promotedNames(api, comp).indexOf("Pins · Colour") >= 0);
   assert.ok(!/couldn't/.test(context.statusLabel.getText()), context.statusLabel.getText());
 });
@@ -5479,8 +5577,8 @@ test("controls: adding a pin and syncing leaves the component where it is", () =
   context.GeoScene.addPin(map, "A", 0, 0);
   const r2 = context.GeoControlPanel.sync(map);
   assert.equal(r2.componentId, r1.componentId);
-  assert.deepEqual(api.getChildren(api.getActiveComp()), before);
-  assert.ok(directlyAbove(api, r2.componentId, map.groupId));
+  assert.deepEqual(api.getChildren(api.getActiveComp()).filter((id) => id !== r2.components.overlay), before, "only the new Overlay controls was added");
+  assert.ok(directlyAbove(api, r2.components.overlay, map.groupId) && directlyAbove(api, r2.componentId, r2.components.overlay));
 });
 
 test("controls: a Controls component made inside the group by the earlier build is moved out, keeping its id and promotions", () => {
@@ -5515,8 +5613,8 @@ test("controls: a Controls component the user moved into another group is found 
   const r2 = context.GeoControlPanel.sync(map);
   assert.equal(r2.componentId, r1.componentId);
   assert.equal(api.getParent(r2.componentId), home, "not moved");
-  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 1, "no second component");
-  assert.ok(promotedNames(api, r2.componentId).indexOf("Pins · Colour") >= 0, "still kept up to date");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component" && !api.hasUserDataKey(id, "geoControlsGroup")).length, 1, "no second main component");
+  assert.ok(promotedNames(api, r2.components.overlay).indexOf("Pins · Colour") >= 0, "still kept up to date");
 });
 
 test("controls: a Controls component the user nudged elsewhere in the top level is left where it is", () => {
@@ -5819,7 +5917,7 @@ test("controls: a new route gets stop, curve and hand rows; values drive every h
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: true });
   const s = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, s.componentId)).slice(7);
+  const names = plain(promotedNames(api, s.components.overlay));
   assert.deepEqual(names.slice(0, 6), ["Labels · Hide", "Labels · Colour", "Labels · Size", "Stops · Hide", "Stops · Colour", "Stops · Size"]);
   assert.deepEqual(names.slice(6, 11), ["A → B → C · Colour", "A → B → C · Width", "A → B → C · Arc height", "A → B → C · Lean", "A → B → C · Flip side"]);
   assert.equal(names[11], "A → B → C · Leg 1 draw on %");
@@ -6180,7 +6278,7 @@ test("controls: a traveller gets its rows and one Size drives the scale helper",
   const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
   context.GeoScene.addTraveller(map, r.groupId, "plane");
   const s = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, s.componentId));
+  const names = plain(promotedNames(api, s.components.overlay));
   ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller colour", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   const size = slotsOf(api, s.valuesId)["trav:" + r.groupId + ":size"];
   assert.equal(api.getInConnection(travData(api, r.groupId).scale, "array.0"), s.valuesId + "." + size);
@@ -6334,7 +6432,7 @@ test("Add to route: a replace that fails part-way leaves the Controls without th
   context.travellerPicker.setValue(1);
   context.addTravellerBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Traveller added to/);
-  const comp = controlsOf(api, map);
+  const comp = controlsOf(api, map, "overlay");
   assert.ok(plain(promotedNames(api, comp)).some((n) => / · Traveller size$/.test(n)), "the Plane's rows are there");
   const real = api.setGenerator;
   api.setGenerator = function () { throw new Error("boom"); };
@@ -6343,7 +6441,7 @@ test("Add to route: a replace that fails part-way leaves the Controls without th
   api.setGenerator = real;
   assert.equal(context.statusLabel.getText(), "Error: boom");
   assert.equal(travData(api, r.groupId), null, "the old traveller was replaced away");
-  assert.ok(!plain(promotedNames(api, controlsOf(api, map))).some((n) => / · Traveller /.test(n)), "no rows left pointing at deleted layers");
+  assert.ok(!plain(promotedNames(api, controlsOf(api, map, "overlay"))).some((n) => / · Traveller /.test(n)), "no rows left pointing at deleted layers");
 });
 
 test("Bake: a traveller's copies, helpers and plugin marker are skipped as route parts", () => {
@@ -6367,7 +6465,7 @@ test("controls: a deleted plugin marker keeps the traveller's other rows", () =>
   context.GeoScene.addTraveller(map, r.groupId, "plane");
   api.deleteLayer(travData(api, r.groupId).source);
   const s = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, s.componentId));
+  const names = plain(promotedNames(api, s.components.overlay));
   ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   assert.ok(names.indexOf("A → B → C · Traveller colour") < 0, "nothing left to recolour");
 });
@@ -6379,7 +6477,7 @@ test("controls: a traveller without a scale helper (older record) gets no size r
   context.GeoScene.addTraveller(map, r.groupId, "plane");
   const rec = travData(api, r.groupId); delete rec.scale;
   api.setUserData(r.groupId, "geoTraveller", rec);
-  const names = plain(promotedNames(api, context.GeoControlPanel.sync(map).componentId));
+  const names = plain(promotedNames(api, context.GeoControlPanel.sync(map).components.overlay));
   assert.ok(names.indexOf("A → B → C · Traveller size") < 0);
   assert.ok(names.indexOf("A → B → C · Traveller hide") >= 0);
 });
@@ -6847,7 +6945,7 @@ test("controls: a map with a scale bar and north arrow gets their rows, choice l
   context.GeoScene.addScaleBar(map);
   context.GeoScene.addNorthArrow(map);
   const r = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, r.componentId));
+  const names = plain(promotedNames(api, r.components.overlay));
   ["Scale bar · Hide", "Scale bar · Units (0 metric · 1 imperial · 2 both)", "Scale bar · Hide below zoom", "North arrow · Size"].forEach((n) => assert.ok(names.includes(n), n));
   const slot = slotsOf(api, r.valuesId)["furn:scale:units"];
   assert.deepEqual(plain(api._overrides[r.valuesId][slot]), { hardMin: 0, hardMax: 2, step: 1 });
@@ -6953,6 +7051,6 @@ test("a panel action scans the comp's layers no more often than before the furni
   };
   const plainMap = measure(false), furnished = measure(true);
   assert.ok(furnished.finds <= 2, "findMapLayers calls: " + furnished.finds);
-  assert.ok(plainMap.scans <= 8, "before the furniture branch one sync made 8 comp scans, now " + plainMap.scans);
+  assert.ok(plainMap.scans <= 9, "before the furniture branch one sync made 8 comp scans (9 with the group-controls lookup), now " + plainMap.scans);
   assert.equal(furnished.scans, plainMap.scans, "comp scans: " + furnished.scans + " vs " + plainMap.scans);
 });

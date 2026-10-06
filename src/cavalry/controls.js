@@ -7,6 +7,8 @@ var GeoControlPanel = (function () {
   var A = GeoAttrs, G = GeoControls;
   var PROMOTED = "promotedAttributes";
   var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
+  var GROUP_KEY = "geoControlsGroup", GROUP_ORDER = G.GROUPS;
+  var GROUP_SUFFIX = { main: " Controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
   var INPUT_TYPES = { double: "double", bool: "bool", color: A.COLOR_INPUT_TYPE };
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var DATA_KINDS = { regions: "regions", bubbles: "bubbles", labels: "valueLabels" };
@@ -63,21 +65,50 @@ var GeoControlPanel = (function () {
     return { parent: String(parent), id: parent ? String(parent) : api.getActiveComp() };
   }
 
-  // Any component in the composition tagged as this map's Controls (the user may have moved it).
-  function findAnywhere(map) {
-    var layers = [];
-    try { layers = api.getCompLayers(false) || []; } catch (e) { /* not available */ }
-    for (var i = 0; i < layers.length; i++) {
-      if (layerType(layers[i]) === "component" && userData(layers[i], CONTROLS_KEY) === map.cameraId) return layers[i];
+  function groupTag(id) { var g = userData(id, GROUP_KEY); return typeof g === "string" && g ? g : "main"; }
+
+  // A component tagged for this map and group (main = no group key); else an untagged one with the group's name.
+  function findGroupIn(parentId, map, group) {
+    var kids = api.getChildren(parentId), byName = null, name = map.name + GROUP_SUFFIX[group];
+    for (var i = 0; i < kids.length; i++) {
+      if (layerType(kids[i]) !== "component") continue;
+      var cam = userData(kids[i], CONTROLS_KEY);
+      if (cam === map.cameraId && groupTag(kids[i]) === group) return kids[i];
+      if (!byName && cam === null && api.getNiceName(kids[i]) === name) byName = kids[i];
     }
-    return null;
+    return byName;
+  }
+
+  // Any component in the composition tagged as this map's Controls for a group (the user may
+  // have moved it). With a `cache` object one scan of the composition serves every group.
+  function findAnywhere(map, group, cache) {
+    var found = cache && cache.found;
+    if (!found) {
+      var layers = [];
+      found = {};
+      try { layers = api.getCompLayers(false) || []; } catch (e) { /* not available */ }
+      for (var i = 0; i < layers.length; i++) {
+        if (layerType(layers[i]) !== "component" || userData(layers[i], CONTROLS_KEY) !== map.cameraId) continue;
+        var tag = groupTag(layers[i]);
+        if (!found[tag]) found[tag] = layers[i];
+      }
+      if (cache) cache.found = found;
+    }
+    return found[group] || null;
   }
 
   // Puts a new (or just moved out) component in the map group's container, directly above the
-  // group. After that the plugin never moves it again. Without the optional calls it stays
+  // first existing component of a later group, or above the map group when there is none.
+  // After that the plugin never moves it again. Without the optional calls it stays
   // wherever it landed.
-  function place(comp, map) {
-    var where = containerOf(map);
+  function place(comp, map, group) {
+    var where = containerOf(map), target = map.groupId;
+    attempt(function () {
+      for (var j = GROUP_ORDER.indexOf(group) + 1; j < GROUP_ORDER.length; j++) {
+        var later = findGroupIn(where.id, map, GROUP_ORDER[j]);
+        if (later) { target = later; return; }
+      }
+    });
     attempt(function () {
       if (where.parent) api.parent(comp, where.parent);
       else if (has("unParent") && api.getParent(comp)) api.unParent(comp);
@@ -87,7 +118,7 @@ var GeoControlPanel = (function () {
       var guard = api.getChildren(where.id).length + 1;
       api.select([comp]);
       for (var i = 0; i < guard; i++) {
-        var kids = api.getChildren(where.id), at = kids.indexOf(comp), g = kids.indexOf(map.groupId);
+        var kids = api.getChildren(where.id), at = kids.indexOf(comp), g = kids.indexOf(target);
         if (at < 0 || g < 0 || at === g - 1) return;
         if (at < g - 1) api.moveBackward(); else api.bringForward();
       }
@@ -97,13 +128,13 @@ var GeoControlPanel = (function () {
   // The component (just above the map group) and the values utility inside it.
   function findOrCreate(map) {
     return keepSelection(function () {
-      var compName = map.name + " Controls", valuesName = map.name + " control values";
-      var comp = findChild(containerOf(map).id, "component", CONTROLS_KEY, map.cameraId, compName), move = false;
-      if (!comp) { comp = findChild(map.groupId, "component", CONTROLS_KEY, map.cameraId, compName); move = !!comp; } // an earlier build kept it inside the group
-      if (!comp) comp = findAnywhere(map);
+      var compName = map.name + GROUP_SUFFIX.main, valuesName = map.name + " control values";
+      var comp = findGroupIn(containerOf(map).id, map, "main"), move = false;
+      if (!comp) { comp = findGroupIn(map.groupId, map, "main"); move = !!comp; } // an earlier build kept it inside the group
+      if (!comp) comp = findAnywhere(map, "main");
       if (!comp) { comp = api.create("component", compName); move = true; }
       setUserData(comp, CONTROLS_KEY, map.cameraId);
-      if (move) place(comp, map);
+      if (move) place(comp, map, "main");
       var values = findChild(comp, A.CAMERA_LAYER_TYPE, VALUES_KEY, map.cameraId, valuesName);
       if (!values) {
         values = api.create(A.CAMERA_LAYER_TYPE, valuesName);
@@ -112,6 +143,19 @@ var GeoControlPanel = (function () {
       }
       setUserData(values, VALUES_KEY, map.cameraId);
       return { id: comp, valuesId: values };
+    });
+  }
+
+  // The overlay / data / extract component: found again, or made when `create` says it is needed.
+  function findOrCreateGroup(map, group, create, cache) {
+    return keepSelection(function () {
+      var comp = findGroupIn(containerOf(map).id, map, group) || findAnywhere(map, group, cache), move = false;
+      if (!comp && create) { comp = api.create("component", map.name + GROUP_SUFFIX[group]); move = true; }
+      if (!comp) return null;
+      setUserData(comp, CONTROLS_KEY, map.cameraId);
+      setUserData(comp, GROUP_KEY, group);
+      if (move) place(comp, map, group);
+      return comp;
     });
   }
 
@@ -327,10 +371,10 @@ var GeoControlPanel = (function () {
       var fu = model.furniture;
       GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null });
     });
-    var slots = userData(V, SLOTS_KEY) || {}, wanted = [];
+    var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [] };
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
-      p.rows.forEach(function (row) {
+      p.rows.forEach(function (row, i) {
         if (row.kind === "direct") {
           attempt(function () { api.renameAttribute(row.layer, row.attr, inputLabel(row.attr, row.label)); });
           if (row.overrides && has("setAttributeDefinitionOverride")) {
@@ -338,7 +382,7 @@ var GeoControlPanel = (function () {
               attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
             });
           }
-          wanted.push({ layer: row.layer, attr: row.attr });
+          wanted[p.groups[i]].push({ layer: row.layer, attr: row.attr });
           return;
         }
         attempt(function () {
@@ -353,15 +397,28 @@ var GeoControlPanel = (function () {
             if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
             if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
-          wanted.push({ layer: V, attr: path });
+          wanted[p.groups[i]].push({ layer: V, attr: path });
         });
       });
     } finally {
       attempt(function () { setUserData(V, SLOTS_KEY, slots); });
     }
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
-    rebuild(made.id, V, wanted);
-    return { componentId: made.id, valuesId: V, controls: wanted.length };
+    var components = { main: made.id, overlay: null, data: null, extract: null };
+    rebuild(made.id, V, wanted.main);
+    var cache = {};
+    GROUP_ORDER.forEach(function (g) {
+      if (g === "main") return;
+      var comp = findOrCreateGroup(map, g, wanted[g].length > 0, cache);
+      if (!comp) return;
+      rebuild(comp, V, wanted[g]);
+      // A group component the plugin no longer needs (nothing promoted, nothing inside) is removed.
+      if (!wanted[g].length && !readPromotions(comp).length && !api.getChildren(comp).length) { attempt(function () { api.deleteLayer(comp); }); return; }
+      components[g] = comp;
+    });
+    var total = 0;
+    GROUP_ORDER.forEach(function (g) { total += wanted[g].length; });
+    return { componentId: made.id, valuesId: V, controls: total, components: components };
   }
 
   return { sync: sync };
