@@ -22,14 +22,14 @@ function guard(fn) {
 // Attribute Editor opens on it.
 function syncControls(map, select) {
   try {
-    try { GeoScene.fitFurniture(map); } catch (e) { /* cosmetic */ }
-    var r = GeoControlPanel.sync(map);
+    var r = GeoControlPanel.sync(map); // also keeps the furniture's comp size in step
     if (select && r && r.componentId && typeof api.select === "function") {
       try { api.select([r.componentId]); } catch (e) { /* cosmetic */ }
     }
     try { refreshPreviews(); } catch (e) { /* cosmetic */ }
     return "";
   } catch (e) {
+    try { GeoScene.fitFurniture(map); } catch (e3) { /* cosmetic */ }
     try { refreshPreviews(); } catch (e2) { /* cosmetic */ }
     return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Layers tab) to try again.";
   }
