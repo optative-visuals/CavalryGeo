@@ -22,13 +22,14 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 
 The first time you open the panel, a **Start here** box at the top of this tab gives four quick steps
 (make a map, add layers, mark places, animate). Press **Got it** to hide it; it stays hidden next time.
-The small **Tips** button at the bottom of the panel, above the status line, brings it back.
+The small **Tips** button at the bottom of the Map tab brings it back.
 
 - **Making a map:** with **New map** picked in the Map list (the only entry in a scene without
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press
   **Search**. The map is made centred on the first result and named after the place (or your
-  name). If that name is taken, a number is added. The name and projection fields only show
+  name). If that name is taken, a number is added. With **Create map here** and no name typed, maps are
+  called **Map 1**, **Map 2** and so on: the lowest number not already used by another map. Maps you already have are never renamed. The name and projection fields only show
   while **New map** is picked. New maps start with **Countries** and **Coastlines** (and the
   **Ocean** layer) already added; add more on **Layers**.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
@@ -122,7 +123,9 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
-  the camera's current view — zoom in before adding them.
+  the camera's current view — zoom in before adding them. Add one street layer at a time: once a
+  street layer is added, its box unticks by itself. (If nothing was found for a layer, or the add
+  was cancelled or failed, the box stays ticked so you can try again.)
 - Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
   minor features, and keyframe it for a "map filling in" effect.
 - Keep the **© OpenStreetMap contributors** credit (added for you) in any scene that uses street

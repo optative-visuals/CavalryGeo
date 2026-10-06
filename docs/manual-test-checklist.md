@@ -329,7 +329,9 @@ adding street layers.
 
 - [ ] On a first open (no `showTips` in settings.json) the Map tab starts with a **Start here** box: four numbered steps and a line about the Map controls in the Scene Window, then a **Got it** button. Nothing in it is cut off (no `<` in any text).
 - [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
-- [ ] Press **Tips** (bottom of the panel, above the status line) from any tab → the Map tab shows with the box again. Close and reopen → it is still shown.
+- [ ] **Got it** is a green button (like Search). The **Tips** button sits at the bottom of the Map tab only (nothing above the status line on the other tabs); press it → the box shows again. Close and reopen → it is still shown.
+- [ ] Create map here with the name blank twice → "Map 1", then "Map 2" (and "Map 1 Map controls" in the Scene Window). Delete Map 1, press again → the new one is "Map 1". A typed name is used as typed; the name box hint reads "Map name (blank = the place's name, or Map 1, Map 2…)".
+- [ ] Layers tab: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
 - [ ] Layers tab: the note under the Controls buttons reads "Each map's settings in one place: select "(map name) Map controls" (or its Overlay, Data and Extract controls) in the Scene Window." in full.
 
 ## Previews
@@ -340,6 +342,7 @@ adding street layers.
 - [ ] Routes: clicking three places adds three named stops and a dashed draft route; Create route makes it; the previews then show it.
 - [ ] Double-clicking on the Routes preview adds one stop and doesn't zoom; − / + still zoom; dragging moves without adding.
 - [ ] On all three previews, press the scroll wheel and drag up: it zooms in around the press point; drag down: it zooms out. A middle click with no drag changes nothing and picks nothing; left-drag still pans; a quick double middle-click doesn't jump a zoom level.
+- [ ] Moving the mouse over a preview with no button held changes nothing: no pan, no zoom, no flicker. Then middle-drag up and down: it really zooms (Cavalry only reports middle-button moves while hover events are on).
 - [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
 
 ## Scene persistence and install

@@ -60,7 +60,7 @@ var NEW_MAP = "New map";
 var maps = [], results = [];
 var mapPicker = new ui.DropDown();
 var refreshMapsBtn = GeoStyle.button("Refresh");
-var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name)");
+var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name, or Map 1, Map 2…)");
 var projPicker = new ui.DropDown(); PROJECTIONS.forEach(function (p) { projPicker.addEntry(p); });
 var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place, e.g. Notre-Dame, Paris");
 var searchBtn = GeoStyle.primaryButton("Search");
@@ -207,6 +207,12 @@ function uniqueMapName(name) {
   if (!taken[name]) return name;
   for (var n = 2; ; n++) { if (!taken[name + " " + n]) return name + " " + n; }
 }
+// "Map 1", "Map 2"... the lowest number not already used by a map. Existing maps are never renamed.
+function numberedMapName() {
+  var taken = {};
+  GeoScene.findMaps().forEach(function (m) { taken[m.name] = true; });
+  for (var n = 1; ; n++) { if (!taken["Map " + n]) return "Map " + n; }
+}
 // Index 0 of resultPicker is always the fixed "World view" entry, so there is always
 // a way back to a world view even after searches have run.
 // A real search result is results[i - 1] for picker index i.
@@ -343,7 +349,7 @@ flyBtn.onClick = guard(function () {
 
 createHereBtn.onClick = guard(function () {
   if (!preview.available()) throw new Error("The map preview isn't available — search for a place to make a map instead.");
-  var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
+  var f = preview.frameCamera(), typed = nameField.getText().trim(), name = typed ? uniqueMapName(typed) : numberedMapName();
   var made = makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
   var starter = addStarterLayers(made);
   var note = syncControls(made, true);
@@ -398,9 +404,9 @@ deleteStyleBtn.onClick = guard(function () {
 });
 
 // ---- Start here tips -------------------------------------------------------
-// Shown on the Map tab until "Got it"; the Tips button (above the status line) brings them back.
+// Shown on the Map tab until "Got it"; the Tips button (bottom of the Map tab) brings them back.
 // A missing showTips setting means a first run, so the box shows.
-var tipsGotItBtn = GeoStyle.button("Got it");
+var tipsGotItBtn = GeoStyle.primaryButton("Got it");
 var tipsBtn = GeoStyle.quietButton("Tips");
 // The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
 var tipsTitle = new ui.Label("Start here");
@@ -434,6 +440,8 @@ tipsBtn.onClick = guard(function () {
 })();
 
 TAB_BUILDERS.push(function (tabs) {
+  var tipsRow = row(tipsBtn);
+  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
   tabs.add("Map", column(tipsBox.concat([
     row(mapPicker, refreshMapsBtn),
     row(nameField, projPicker),
@@ -448,7 +456,8 @@ TAB_BUILDERS.push(function (tabs) {
     createHereBtn,
     GeoStyle.heading("Style"),
     row(mapStylePicker, applyStyleBtn),
-    row(styleNameField, saveStyleBtn, deleteStyleBtn)
+    row(styleNameField, saveStyleBtn, deleteStyleBtn),
+    tipsRow
   ])));
 });
 
@@ -541,6 +550,7 @@ addLayersBtn.onClick = guard(function () {
     GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
       { camera: map.cameraId, category: r.category }, GeoScene.layerStyle(map, r.category), {});
     added++;
+    if (isOsm(r.category)) checks[r.category].setValue(false); // one street layer at a time: its box unticks once it's added
   });
   if (selected.some(isOsm) && creditCheck.getValue() && !GeoScene.hasAttribution(map)) GeoScene.createAttribution(map);
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
@@ -783,7 +793,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.toggleGrid(toggles(NE_CATS), 3),
     row(new ui.Label("Detail"), scalePicker),
     GeoStyle.heading("Streets · OpenStreetMap"),
-    GeoStyle.note("Downloads the area the camera shows."),
+    GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."),
     GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
     modePicker,
     row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
@@ -1651,9 +1661,6 @@ function buildUi() {
   root.add(sectionPages.widget);
   // The stretch keeps the status line at the bottom when the page is shorter than the window.
   if (typeof root.addStretch === "function") root.addStretch();
-  var tipsRow = row(tipsBtn);
-  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
-  root.add(tipsRow);
   root.add(statusLabel);
   ui.add(root);
   ui.show();

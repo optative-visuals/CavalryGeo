@@ -283,6 +283,9 @@ var GeoPreviewPanel = (function () {
       if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(colors.water);
+      // Without hover events Cavalry reports no mouse moves for the middle button, so a middle-drag zoom
+      // would see none. A move with no button held does nothing (no drag, no zoomDrag).
+      if (typeof draw.useHoverEvents === "function") draw.useHoverEvents(true);
       draw.onMousePress = guarded(function (pos, button) {
         press = null; drag = null; panning = false; zoomDrag = null; // a release that never came must not leave its press behind
         if (button === "middle") { zoomDrag = { x: pos.x, y: sy(pos.y), view: view }; return; }

@@ -275,7 +275,7 @@ function makeFakeUi() {
   Button.prototype.setImageSize = function (w, h) { this._imageSize = [w, h]; };
 
   function LineEdit() { this._text = ""; }
-  LineEdit.prototype.setPlaceholder = function () {};
+  LineEdit.prototype.setPlaceholder = function (t) { this._placeholder = t; };
   LineEdit.prototype.getText = function () { return this._text; };
   LineEdit.prototype.setText = function (t) { this._text = t; };
 
@@ -341,7 +341,7 @@ function makeFakeUi() {
   Draw.prototype.addPath = function (p, paint) { this._paths.push({ path: p, paint: paint }); };
   Draw.prototype.clearPaths = function () { this._paths = []; };
   Draw.prototype.redraw = function () { this._redraws++; };
-  Draw.prototype.useHoverEvents = function () {};
+  Draw.prototype.useHoverEvents = function (on) { this._hover = !!on; }; // like Cavalry: moves with no button held only fire when on
   Container.prototype.geometry = function () { return { x: 0, y: 0, width: this._width || 320, height: 24 }; };
 
   // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
@@ -463,10 +463,10 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
-  // Tab bar, the shown page only as tall as itself, a stretch, the Tips button, then the status line at the bottom.
-  assert.equal(root._items.length, 4);
-  assert.deepEqual(root._items.filter((n) => n !== root._items[2]), [context.sectionTabs.widget, pages.widget, context.statusLabel]);
-  assert.ok(holds(root._items[2], context.tipsBtn), "Tips sits above the status line");
+  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips lives on the Map tab).
+  assert.equal(root._items.length, 3);
+  assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
+  assert.ok(holds(pages.pages[0], context.tipsBtn), "Tips is held by the Map page");
   assert.equal(root._stretch, 1);
   pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout, layout, "page " + i));
   context.showSection("Imagery");
@@ -579,7 +579,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -636,9 +636,9 @@ test("Map tab: Create map here also adds Countries and Coastlines", () => {
   context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
   context.createHereBtn.onClick();
   const names = api.getChildren(context.currentMap().groupId).map((id) => api.getNiceName(id));
-  assert.ok(names.includes("Map: Countries"), names.join(", "));
-  assert.ok(names.includes("Map: Coastlines"), names.join(", "));
-  assert.equal(context.statusLabel.getText(), "Created map \"Map\" with countries and coastlines at the preview frame.");
+  assert.ok(names.includes("Map 1: Countries"), names.join(", "));
+  assert.ok(names.includes("Map 1: Coastlines"), names.join(", "));
+  assert.equal(context.statusLabel.getText(), "Created map \"Map 1\" with countries and coastlines at the preview frame.");
 });
 
 test("Map tab: without bundled data the map is still created and the message says why there are no starter layers", () => {
@@ -651,7 +651,7 @@ test("Map tab: without bundled data the map is still created and the message say
   context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
   context.createHereBtn.onClick();
   assert.equal(context.GeoScene.findMaps().length, 2);
-  assert.match(context.statusLabel.getText(), /^Created map "Map" at the preview frame\. \(Countries and coastlines couldn't be added: .+\)$/);
+  assert.match(context.statusLabel.getText(), /^Created map "Map 1" at the preview frame\. \(Countries and coastlines couldn't be added: .+\)$/);
 });
 
 test("Map tab: Search with a map selected only finds places", () => {
@@ -3679,10 +3679,10 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 // ---- Restyled sections -------------------------------------------------------------
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
-  const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
+  const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
-  const plainBtns = ["jumpBtn", "tipsGotItBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -4721,7 +4721,7 @@ test("Map tab: Create map here appears only for New map and makes a map at the f
   context.createHereBtn.onClick();
   const map = context.currentMap(), cam = context.GeoScene.readCamera(map.cameraId);
   assert.ok(Math.abs(cam.lat - 35) < 1e-6 && Math.abs(cam.lon - 139) < 1e-6 && Math.abs(cam.zoom - 8) < 1e-6);
-  assert.equal(map.name, "Map");
+  assert.equal(map.name, "Map 1");
   assert.equal(context.createHereBtn.isHidden(), true, "a map is picked now");
   assert.equal(context.jumpBtn.isHidden(), false);
 });
@@ -4918,7 +4918,7 @@ test("Map tab Style: the section sits at the bottom of the Map tab, built-ins li
   assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
   assert.equal(context.mapStylePicker.getValue(), 0);
   const items = context.sectionPages.pages[0]._items;
-  const last = items.slice(-3);
+  const last = items.slice(-4, -1); // the Tips row closes the tab
   assert.ok(context.GeoStyle.isHeading(last[0]));
   assert.ok(holds(last[1], context.mapStylePicker) && holds(last[1], context.applyStyleBtn));
   assert.ok(holds(last[2], context.styleNameField) && holds(last[2], context.saveStyleBtn) && holds(last[2], context.deleteStyleBtn));
@@ -8177,11 +8177,15 @@ test("Start here: a first run shows the box at the top of the Map tab with the a
   assert.equal(context.tipsBtn.getText(), "Tips");
   assert.equal(context.tipsTitle._fontSize, 11, "the title is a small heading");
   assert.equal(context.tipsTitle._fixedHeight, 16);
-  assert.ok(holds(ui._root(), context.tipsBtn), "the Tips button is in the panel");
-  const tipsRow = ui._root()._items[ui._root()._items.length - 2];
+  const pageItems = mapPage._items, tipsRow = pageItems[pageItems.length - 1];
+  assert.ok(holds(tipsRow, context.tipsBtn), "the Tips button closes the Map tab");
   assert.equal(tipsRow._stretch, 1, "a stretch after the button keeps it small");
+  assert.equal(holds(ui._root(), context.tipsBtn), true, "the Map page is inside the panel");
   const items = ui._root()._items;
-  assert.ok(holds(items[items.length - 2], context.tipsBtn) && items[items.length - 1] === context.statusLabel, "Tips sits just above the status line");
+  assert.equal(items.some((n) => n === context.statusLabel), true);
+  assert.equal(items[items.length - 1], context.statusLabel, "the status line is still last");
+  items.slice(0, -1).forEach((n) => assert.ok(n !== tipsRow && !(n._items || []).includes(context.tipsBtn), "root does not hold Tips directly"));
+  assert.equal(context.tipsGotItBtn._background, "#1F8F4E", "Got it is the green primary button");
 });
 
 test("Start here: Got it hides the box and remembers it, keeping other settings", () => {
@@ -8440,4 +8444,149 @@ test("Change effect: the Controls rows follow the new effect", () => {
   assert.ok(names.includes("Highlight 1 · Speed"));
   assert.ok(!names.includes("Highlight 1 · Width"));
   assert.ok(api._promoted(r.components.extract).includes(g + ".opacity"), "the Amount row is on the group");
+});
+
+// ---- Follow-up: hover events, numbered maps, one street layer at a time ----
+test("preview: hover events are switched on so Cavalry reports middle-button moves", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  assert.equal(p._draw._hover, true);
+  const noHover = buildSandbox({ setup: installNe });
+  delete noHover.ui.Draw.prototype.useHoverEvents;
+  assert.doesNotThrow(() => makePreview(noHover.context), "a Draw without useHoverEvents is fine");
+});
+
+test("preview: a hover move with no button held changes nothing and triggers no redraw", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._render();
+  runTimersOnce(api); // settle the redraw the showCamera call queued
+  const view = JSON.stringify(plain(p._view())), redraws = p._draw._redraws, paths = p._draw._paths.length;
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  p._draw.onMouseMove({ x: 150, y: 90 });
+  runTimersOnce(api);
+  assert.equal(JSON.stringify(plain(p._view())), view, "the view is untouched");
+  assert.equal(p.source(), "camera", "still the camera's frame");
+  assert.equal(p._draw._redraws, redraws, "no redraw");
+  assert.equal(p._draw._paths.length, paths);
+  // after a drag has finished, hovering is still a no-op
+  p._draw.onMousePress({ x: 100, y: 100 }, "left");
+  p._draw.onMouseMove({ x: 140, y: 100 });
+  p._draw.onMouseRelease({ x: 140, y: 100 }, "left");
+  runTimersOnce(api);
+  const after = JSON.stringify(plain(p._view())), n = p._draw._redraws;
+  p._draw.onMouseMove({ x: 200, y: 100 });
+  runTimersOnce(api);
+  assert.equal(JSON.stringify(plain(p._view())), after);
+  assert.equal(p._draw._redraws, n);
+});
+
+function blankCreateHere(context) {
+  context.mapPicker.setValue(context.maps.length); // New map
+  context.nameField.setText("");
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+}
+
+test("Create map here: a blank name numbers the maps Map 1, Map 2…", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  blankCreateHere(context);
+  assert.equal(context.currentMap().name, "Map 1");
+  blankCreateHere(context);
+  assert.equal(context.currentMap().name, "Map 2");
+  assert.deepEqual(plain(context.GeoScene.findMaps().map((m) => m.name).sort()), ["Map 1", "Map 2"]);
+  assert.match(context.statusLabel.getText(), /^Created map "Map 2" /);
+});
+
+test("Create map here: the lowest free number is used, and existing maps are never renamed", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  blankCreateHere(context);
+  blankCreateHere(context);
+  api.deleteLayer(context.GeoScene.findMaps().find((m) => m.name === "Map 1").groupId);
+  assert.deepEqual(plain(context.GeoScene.findMaps().map((m) => m.name)), ["Map 2"]);
+  blankCreateHere(context);
+  assert.deepEqual(plain(context.GeoScene.findMaps().map((m) => m.name).sort()), ["Map 1", "Map 2"]);
+  assert.equal(context.currentMap().name, "Map 1");
+});
+
+test("Create map here: a typed name is unchanged (and made unique), and the Controls component reads Map 1 Map controls", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  context.mapPicker.setValue(context.maps.length);
+  context.nameField.setText("Paris");
+  context.preview.showCamera({ lat: 35, lon: 139, zoom: 8 }, "camera");
+  context.createHereBtn.onClick();
+  assert.equal(context.currentMap().name, "Paris");
+  context.mapPicker.setValue(context.maps.length);
+  context.nameField.setText("Paris");
+  context.createHereBtn.onClick();
+  assert.equal(context.currentMap().name, "Paris 2");
+  blankCreateHere(context);
+  const map = context.currentMap();
+  assert.equal(map.name, "Map 1");
+  assert.equal(api.getNiceName(controlsOf(api, map)), "Map 1 Map controls");
+});
+
+test("the name box placeholder explains the numbering", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.nameField._placeholder, "Map name (blank = the place's name, or Map 1, Map 2…)");
+});
+
+function streetsSetup(context, opts) {
+  const map = context.makeMap("Map", { lat: 35, lon: 139, zoom: 15, rotation: 0, projection: 0 });
+  const C = context.GeoCodec;
+  const line = C.encodeLayer({ kind: "line", features: [{ name: "Road", rings: [[[139, 35], [139.001, 35.001]]] }] });
+  const none = C.encodeLayer({ kind: "line", features: [] });
+  context.GeoNet.osmLayer = (cat) => (opts.empty && opts.empty.indexOf(cat) >= 0 ? none : line);
+  context.GeoNet.neLayer = () => C.encodeLayer({ kind: "polygon", features: [{ name: "Here", rings: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }] });
+  return map;
+}
+
+test("Streets note says to add one street layer at a time", () => {
+  const { context, ui } = buildSandbox();
+  const texts = [];
+  walkUi(context.sectionPages.pages[1], (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
+  assert.ok(texts.includes("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."), texts.join(" | "));
+});
+
+test("Add layers: a street box unticks once its layer is added; World boxes stay ticked", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const map = streetsSetup(context, {});
+  context.checks.roads.setValue(true);
+  context.checks.countries.setValue(true);
+  context.addLayersBtn.onClick();
+  const cats = context.GeoScene.findMapLayers(map).map((l) => l.meta.category);
+  assert.ok(cats.includes("roads") && cats.includes("countries"), context.statusLabel.getText());
+  assert.equal(context.checks.roads.getValue(), false, "Roads unticked");
+  assert.equal(context.checks.countries.getValue(), true, "Countries stays ticked");
+});
+
+test("Add layers: a street layer that came back empty stays ticked", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  streetsSetup(context, { empty: ["parks"] });
+  context.checks.roads.setValue(true);
+  context.checks.parks.setValue(true);
+  context.addLayersBtn.onClick();
+  assert.equal(context.checks.roads.getValue(), false);
+  assert.equal(context.checks.parks.getValue(), true, "nothing was added for Parks");
+  assert.match(context.statusLabel.getText(), /Nothing found for: Parks/);
+});
+
+test("Add layers: a failed or cancelled add unticks nothing", () => {
+  const failed = buildSandbox({ setup: installNe });
+  streetsSetup(failed.context, {});
+  failed.context.GeoNet.osmLayer = () => { throw new Error("Overpass is busy"); };
+  failed.context.checks.roads.setValue(true);
+  failed.context.addLayersBtn.onClick();
+  assert.match(failed.context.statusLabel.getText(), /Overpass is busy/);
+  assert.equal(failed.context.checks.roads.getValue(), true);
+  const cancelled = buildSandbox({ setup: installNe });
+  streetsSetup(cancelled.context, {});
+  cancelled.context.checks.roads.setValue(true);
+  cancelled.ui.Modal = function () { this.showQuestion = () => false; };
+  cancelled.context.GeoUtil.checkArea = () => ({ refuse: false, needsConfirm: true, areaKm2: 999 });
+  cancelled.context.addLayersBtn.onClick();
+  assert.match(cancelled.context.statusLabel.getText(), /^Cancelled/);
+  assert.equal(cancelled.context.checks.roads.getValue(), true);
 });
