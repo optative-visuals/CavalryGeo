@@ -67,7 +67,7 @@ Each map remembers its style, so pins, routes, labels and layers you add later m
 
 ## Map controls
 
-Every map has a **<map> Controls** layer, just above the map's group in the Scene Window (not
+Every map has a **Map controls** layer (named after the map, for example "Paris Map controls"), just above the map's group in the Scene Window (not
 inside it). The plugin selects it when you make a map, so the Attribute Editor opens on it. Open
 the **Controls** tab there to find the map's settings in one place:
 
@@ -81,14 +81,23 @@ the **Controls** tab there to find the map's settings in one place:
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
 - **Imagery:** opacity and hide.
 
+A map's settings are split over up to four components, stacked above the map group: **Map controls**
+(named after the map: camera, ocean, base layers, imagery), **Overlay controls** (pins, labels, routes,
+travellers, scale bar, north arrow), **Data controls** (data maps) and **Extract controls**
+(extracted features). Each appears once it has something to show. Maps made with earlier versions
+are split the next time their controls refresh (any action in the panel, or Refresh controls);
+anything you promoted yourself stays where it is. A main component still called "Map name Controls"
+is renamed to "Map name Map controls" then; a name you gave it yourself is kept.
+
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
 press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
 kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.
 
 - **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
   you like (another group, further down the stack); the plugin still finds it and keeps it up to date.
-- **Deleting a map:** deleting a map's group does not delete its Controls layer, because it sits
-  outside the group. Delete that layer too.
+- **Deleting a map:** deleting a map's group does not delete its Controls layers (the main one
+  and, if the map has them, the Overlay, Data and Extract ones: up to four), because they sit
+  outside the group. Delete those layers too.
 - **Maps made before this change:** their Controls layer sat inside the map's group. Press
   **Refresh controls** once and it moves out to just above the group, keeping its settings.
 

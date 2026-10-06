@@ -235,7 +235,7 @@ adding street layers.
 
 ## Map controls
 
-- [ ] C1. Make a new map (Search, or Create map here) → "<map> Controls" sits just above the map
+- [ ] C1. Make a new map (Search, or Create map here) → "Map Map controls" (the map's name plus " Map controls") sits just above the map
       group, not inside it, and is selected, so the Attribute Editor opens on it; its Controls tab
       lists Camera, Ocean, Countries and Coastlines settings with "Layer · setting" names. Add a
       pin → the selection stays where it was.
@@ -251,9 +251,29 @@ adding street layers.
       then add a layer → your settings are still there, at the end, with their names.
 - [ ] C7. Save, reopen the scene, add a pin → no duplicate controls; the pin links to Pins · Colour.
 - [ ] C8. Open a map made before this change (Controls inside the map group) → press Refresh
-      controls → the Controls layer moves out to just above the group, with its promotions intact.
+      controls → the Map controls layer moves out to just above the group, with its promotions intact.
 - [ ] C9. Drag a Controls layer into another group, then add a pin → the layer stays there and
       still gets the new Pins settings; no second Controls layer appears.
+
+## Controls split
+
+- [ ] CS1. On a map with a base layer, a pin, a route, a data set and an extracted feature, press
+      Refresh controls → four components sit in this order directly above the map group: Map controls,
+      Overlay controls, Data controls, Extract controls, each with its own settings (camera and
+      base layers in Controls; pins, routes and scale bar in Overlay; Data · Year in Data; the
+      feature in Extract).
+- [ ] CS2. A plain map (no pins, routes, data or extracts) has just its Map controls component.
+- [ ] CS3. Open a scene saved before the split (every setting in one Controls), with one setting
+      you promoted yourself, and press Refresh controls → the pin, route and data settings move to
+      their new components; your own promoted setting stays in Map controls.
+- [ ] CS4. Delete all the pins, routes and scale bar / north arrow, then Refresh controls →
+      Overlay controls disappears (unless you promoted something onto it).
+- [ ] CS5. Change a setting in each component (Overlay: Pins · Colour; Data: Data · Year; Extract:
+      a feature's Hide) → the map follows.
+- [ ] CS6. Open a scene whose main component is still called "Map Controls" → Refresh controls →
+      it is renamed "Map Map controls" and the status line reads "Controls updated: N settings
+      across Map Map controls, Overlay controls ..."; a main component you renamed yourself keeps
+      its name.
 
 ## Map styles
 

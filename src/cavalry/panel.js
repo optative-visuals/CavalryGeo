@@ -665,7 +665,11 @@ bakeBtn.onClick = guard(function () {
 
 refreshControlsBtn.onClick = guard(function () {
   var map = currentMap(), r = GeoControlPanel.sync(map);
-  say("Controls updated: " + r.controls + " setting(s) in \"" + map.name + " Controls\". Select it to see them.");
+  // N spans the Map controls and any Overlay / Data / Extract controls that exist.
+  var names = [map.name + " Map controls"];
+  [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
+  var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+  say("Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".");
 });
 
 // Layers holds the layer categories, then Extract and Bake.
@@ -689,7 +693,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
-    GeoStyle.note("Each map's settings in one place: select \"<map> Controls\" in the Scene Window."),
+    GeoStyle.note("Each map's settings in one place: select \"<map> Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
     refreshControlsBtn,
     clearCacheBtn,
     GeoStyle.heading("Map furniture"),
