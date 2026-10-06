@@ -1267,14 +1267,7 @@ var GeoScene = (function () {
   }
 
   // The route's own line colour as "#rrggbb" (the default route green when it can't be read).
-  function routeColour(legs) {
-    var v = null;
-    try { v = api.get(legs[0].line, A.STROKE_COLOR_ATTR); } catch (e) { v = null; }
-    if (v && typeof v === "object" && v.r !== undefined) {
-      v = "#" + [v.r, v.g, v.b].map(function (n) { var s = Math.round(Number(n) || 0).toString(16); return s.length < 2 ? "0" + s : s; }).join("");
-    }
-    return typeof v === "string" && v ? v : STYLE.route.stroke;
-  }
+  function routeColour(legs) { return readColour(legs[0].line, A.STROKE_COLOR_ATTR, STYLE.route.stroke); }
 
   function makeMarker(kind, colour, track) {
     var id;
@@ -1483,12 +1476,64 @@ var GeoScene = (function () {
     return anchor;
   }
 
+  // Builds a highlight's own layers inside group g: the shape (the extract's outline, styled for
+  // the effect in `colour`), plus the Pulse oscillator and fade helper or the Glow blur, all wired
+  // up. Every layer made goes through track(). Returns the record fields (no keys are made).
+  function buildHighlightMembers(map, g, extractId, effect, label, colour, track) {
+    var enc = readLayerData(extractId);
+    var shape = track(api.create(A.MAP_LAYER_TYPE, label + " shape"));
+    addInputs(shape, A.MAP_ARRAY_ATTR, GeoExpression.HIGHLIGHT_SHAPE_INPUTS, {});
+    setOne(shape, A.MAP_EXPR_ATTR, GeoExpression.highlightLayerExpression(GEO_RUNTIME_SRC, enc, { camera: map.cameraId, category: "highlight", effect: effect }, { ellipseScale: A.ELLIPSE_SCALE }));
+    connectCamera(map.cameraId, shape, A.MAP_ARRAY_ATTR);
+    // The extract's own detail and dot size, followed live (Detail in its Controls moves the
+    // highlight too); if the link can't be made the current value is copied instead.
+    ["detail", "pointRadius"].forEach(function (n) {
+      var at = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.MAP_INPUTS, n);
+      try { api.connect(extractId, at, shape, at, true); return; } catch (e) { /* copy the value */ }
+      try { var v = api.get(extractId, at); if (v !== undefined && v !== null) setOne(shape, at, v); } catch (e2) { /* default */ }
+    });
+    var line = effect === "outline" || effect === "pulse";
+    applyStyle(shape, line ? { stroke: colour, width: HIGHLIGHT_WIDTH } : { fill: colour });
+    api.parent(shape, g);
+    var rec = { extract: extractId, effect: effect, shape: shape };
+    if (effect === "outline") setOne(shape, "stroke.trim", true);
+    if (effect === "pulse") {
+      rec.osc = track(api.create("oscillator", label + " pulse"));
+      api.set(rec.osc, { waveType: 3, minimum: 0, maximum: 1, strengthToZero: false, frequency: HIGHLIGHT_SPEED });
+      api.parent(rec.osc, g);
+      api.connect(rec.osc, "id", shape, A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.HIGHLIGHT_SHAPE_INPUTS, "phase"), true);
+      rec.fade = track(api.create(A.CAMERA_LAYER_TYPE, label + " fade"));
+      addInputs(rec.fade, A.CAMERA_ARRAY_ATTR, GeoExpression.HIGHLIGHT_FADE_INPUTS, {});
+      setOne(rec.fade, A.CAMERA_EXPR_ATTR, GeoExpression.highlightFadeExpression({ camera: map.cameraId, category: "highlightFade" }));
+      api.parent(rec.fade, g);
+      api.connect(rec.osc, "id", rec.fade, A.CAMERA_ARRAY_ATTR + ".0", true);
+      api.connect(rec.fade, A.DRIVER_OUTPUT_ATTR, shape, "opacity", true);
+    }
+    if (effect === "glow") {
+      rec.blur = track(api.create("blurFilter", label + " glow"));
+      setOne(rec.blur, "amount", { x: HIGHLIGHT_SIZE, y: HIGHLIGHT_SIZE });
+      api.connect(rec.blur, "id", shape, "filters");
+      api.parent(rec.blur, g);
+    }
+    return rec;
+  }
+  function knownEffect(effect) {
+    var e = HIGHLIGHT_EFFECTS.filter(function (x) { return x.id === effect; })[0];
+    if (!e) throw new Error("Unknown highlight effect: " + effect);
+    return e;
+  }
+  // Keys the Amount attribute 0 at start and 100 at start + duration, eased on the first key.
+  function keyAmount(t, keys) {
+    keys.forEach(function (k) { var o = {}; o[t[1]] = k[1]; api.keyframe(t[0], k[0], o); });
+    if (keys.length && typeof api.magicEasing === "function") { try { api.magicEasing(t[0], t[1], keys[0][0], "SlowInSlowOut"); } catch (e) { /* linear */ } }
+  }
+
   function createHighlight(map, extractId, effect, opts) {
     opts = opts || {};
-    if (!HIGHLIGHT_EFFECTS.some(function (e) { return e.id === effect; })) throw new Error("Unknown highlight effect: " + effect);
+    knownEffect(effect);
     var meta = layerMeta(extractId);
     if (!meta || meta.category !== "extract" || meta.camera !== map.cameraId) throw new Error("Pick an extracted feature of this map to highlight.");
-    var enc = readLayerData(extractId), made = [], previous = null;
+    var made = [], previous = null;
     function track(id) { made.push(id); return id; }
     var number = numberGroups(highlightGroups(map), HIGHLIGHT_NUMBER_KEY, "Highlight") + 1;
     var name = String(api.getNiceName(extractId)), parent = api.getParent(extractId) || map.groupId, label = "Highlight " + number;
@@ -1496,48 +1541,11 @@ var GeoScene = (function () {
     try {
       var g = track(api.create("group", capTitle(label + ": " + name)));
       api.parent(g, parent);
-      var shape = track(api.create(A.MAP_LAYER_TYPE, label + " shape"));
-      addInputs(shape, A.MAP_ARRAY_ATTR, GeoExpression.HIGHLIGHT_SHAPE_INPUTS, {});
-      setOne(shape, A.MAP_EXPR_ATTR, GeoExpression.highlightLayerExpression(GEO_RUNTIME_SRC, enc, { camera: map.cameraId, category: "highlight", effect: effect }, { ellipseScale: A.ELLIPSE_SCALE }));
-      connectCamera(map.cameraId, shape, A.MAP_ARRAY_ATTR);
-      // The extract's own detail and dot size, followed live (Detail in its Controls moves the
-      // highlight too); if the link can't be made the current value is copied instead.
-      ["detail", "pointRadius"].forEach(function (n) {
-        var at = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.MAP_INPUTS, n);
-        try { api.connect(extractId, at, shape, at, true); return; } catch (e) { /* copy the value */ }
-        try { var v = api.get(extractId, at); if (v !== undefined && v !== null) setOne(shape, at, v); } catch (e2) { /* default */ }
-      });
-      var line = effect === "outline" || effect === "pulse";
-      applyStyle(shape, line ? { stroke: HIGHLIGHT_COLOUR, width: HIGHLIGHT_WIDTH } : { fill: HIGHLIGHT_COLOUR });
-      api.parent(shape, g);
-      var rec = { extract: extractId, effect: effect, shape: shape };
-      if (effect === "outline") setOne(shape, "stroke.trim", true);
-      if (effect === "pulse") {
-        rec.osc = track(api.create("oscillator", label + " pulse"));
-        api.set(rec.osc, { waveType: 3, minimum: 0, maximum: 1, strengthToZero: false, frequency: HIGHLIGHT_SPEED });
-        api.parent(rec.osc, g);
-        api.connect(rec.osc, "id", shape, A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.HIGHLIGHT_SHAPE_INPUTS, "phase"), true);
-        rec.fade = track(api.create(A.CAMERA_LAYER_TYPE, label + " fade"));
-        addInputs(rec.fade, A.CAMERA_ARRAY_ATTR, GeoExpression.HIGHLIGHT_FADE_INPUTS, {});
-        setOne(rec.fade, A.CAMERA_EXPR_ATTR, GeoExpression.highlightFadeExpression({ camera: map.cameraId, category: "highlightFade" }));
-        api.parent(rec.fade, g);
-        api.connect(rec.osc, "id", rec.fade, A.CAMERA_ARRAY_ATTR + ".0", true);
-        api.connect(rec.fade, A.DRIVER_OUTPUT_ATTR, shape, "opacity", true);
-      }
-      if (effect === "glow") {
-        rec.blur = track(api.create("blurFilter", label + " glow"));
-        setOne(rec.blur, "amount", { x: HIGHLIGHT_SIZE, y: HIGHLIGHT_SIZE });
-        api.connect(rec.blur, "id", shape, "filters");
-        api.parent(rec.blur, g);
-      }
+      var rec = buildHighlightMembers(map, g, extractId, effect, label, HIGHLIGHT_COLOUR, track);
       api.setUserData(g, HIGHLIGHT_KEY, rec);
       api.setUserData(g, HIGHLIGHT_NUMBER_KEY, number);
       var start = Math.max(0, Math.round(Number(opts.start) || 0)), duration = Math.max(1, Math.round(Number(opts.duration) || 25));
-      var t = amountTarget(rec, g), k0 = {}, k1 = {};
-      k0[t[1]] = 0; k1[t[1]] = 100;
-      api.keyframe(t[0], start, k0);
-      api.keyframe(t[0], start + duration, k1);
-      if (typeof api.magicEasing === "function") { try { api.magicEasing(t[0], t[1], start, "SlowInSlowOut"); } catch (e) { /* linear */ } }
+      keyAmount(amountTarget(rec, g), [[start, 0], [start + duration, 100]]);
       if (effect === "glow") placeBelow(g, extractId); else placeAbove(g, topHighlightAbove(parent, extractId, g));
       return g;
     } catch (e) {
@@ -1545,6 +1553,99 @@ var GeoScene = (function () {
       throw e;
     } finally {
       if (previous && typeof api.select === "function") { try { api.select(previous); } catch (e4) { /* cosmetic */ } }
+    }
+  }
+
+  // The highlight group (of this map) that owns the first of `ids` that is a highlight's group
+  // or one of its layers; null when none is.
+  function highlightOfSelection(map, ids) {
+    var owner = {};
+    findHighlights(map).forEach(function (h) { [h.groupId, h.shape, h.osc, h.fade, h.blur].forEach(function (id) { if (id && !owner[id]) owner[id] = h.groupId; }); });
+    for (var i = 0; i < (ids || []).length; i++) { if (owner[ids[i]]) return owner[ids[i]]; }
+    return null;
+  }
+
+  // Moves a layer to sit directly above (or, with `below`, directly below) `other` in their
+  // shared group, stepping up or down as needed. Best effort: needs select and both step calls.
+  function stackNextTo(id, other, below) {
+    if (typeof api.select !== "function" || typeof api.bringForward !== "function" || typeof api.moveBackward !== "function") return;
+    var parent = api.getParent(id);
+    api.select([id]);
+    for (var guard = api.getChildren(parent).length + 1; guard > 0; guard--) {
+      var kids = api.getChildren(parent), at = kids.indexOf(id), o = kids.indexOf(other);
+      if (at < 0 || o < 0) return;
+      var want = below ? o + 1 : o - 1;
+      if (at === want) return;
+      if (at < want) api.moveBackward(); else api.bringForward();
+    }
+  }
+
+  // "#rrggbb" from a colour attribute (Cavalry may hand back { r, g, b }); `fallback` when unreadable.
+  function readColour(id, attr, fallback) {
+    var v = null;
+    try { v = api.get(id, attr); } catch (e) { v = null; }
+    if (v && typeof v === "object" && v.r !== undefined) {
+      v = "#" + [v.r, v.g, v.b].map(function (n) { var s = Math.max(0, Math.min(255, Math.round(Number(n) || 0))).toString(16); return s.length < 2 ? "0" + s : s; }).join("");
+    }
+    return typeof v === "string" && v ? v : fallback;
+  }
+
+  // Rebuilds a highlight with another effect, in place: same group, number, name and colour, and
+  // the Amount % keys (times and values) moved onto the new effect's Amount attribute. The new
+  // layers are built first, so a failure there leaves the old highlight untouched.
+  function changeHighlightEffect(map, groupId, effect) {
+    var target = knownEffect(effect);
+    var h = findHighlights(map).filter(function (x) { return x.groupId === groupId; })[0];
+    if (!h) throw new Error("Select a highlight in the Scene Window first.");
+    numberGroups(highlightGroups(map), HIGHLIGHT_NUMBER_KEY, "Highlight");
+    var number = highlightNumber(groupId), label = "Highlight " + number, m = highlightMembers(groupId), rec = m.rec;
+    if (rec.effect === effect) throw new Error(label + " already uses " + target.name + ".");
+    if (!m.extract || !m.shape) throw new Error(label + "'s place is gone. Press Refresh controls (Layers tab) to tidy it away.");
+    var oldLine = rec.effect === "outline" || rec.effect === "pulse";
+    var colour = readColour(m.shape, oldLine ? A.STROKE_COLOR_ATTR : A.FILL_COLOR_ATTR, HIGHLIGHT_COLOUR);
+    // The old Amount keys: times and values (read by moving the playhead, then putting it back).
+    var oldT = amountTarget({ effect: rec.effect, shape: m.shape }, groupId), keys = [], playhead = 0;
+    try { playhead = api.getFrame(); } catch (e0) { playhead = 0; }
+    try {
+      (api.getKeyframeTimes(oldT[0], oldT[1]) || []).forEach(function (f, i) {
+        api.setFrame(f);
+        var v = Number(api.get(oldT[0], oldT[1]));
+        keys.push([f, isFinite(v) ? v : (i ? 100 : 0)]);
+      });
+    } finally { try { api.setFrame(playhead); } catch (e1) { /* cosmetic */ } }
+    if (!keys.length) { var at = Math.max(0, Math.round(Number(playhead) || 0)); keys = [[at, 0], [at + 25, 100]]; }
+
+    var made = [], previous = null, olds = [m.shape, m.osc, m.fade, m.blur].filter(Boolean), fresh;
+    function track(id) { made.push(id); return id; }
+    try { previous = api.getSelection(); } catch (e2) { previous = null; }
+    try {
+      try { fresh = buildHighlightMembers(map, groupId, m.extract, effect, label, colour, track); } catch (e3) {
+        made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e4) { /* gone */ } });
+        throw e3;
+      }
+      // Swap: the old layers and the old Amount keys go, the new record and keys come in.
+      olds.forEach(function (id) { if (layerThere(id)) api.deleteLayer(id); });
+      if (oldT[0] === groupId) {
+        keys.forEach(function (k) { try { api.deleteKeyframe(groupId, oldT[1], k[0]); } catch (e5) { /* already gone */ } });
+        setOne(groupId, "opacity", 100);
+      }
+      api.setUserData(groupId, HIGHLIGHT_KEY, fresh);
+      keyAmount(amountTarget(fresh, groupId), keys);
+      var parent = api.getParent(groupId);
+      if (parent === api.getParent(m.extract)) {
+        if (effect === "glow") stackNextTo(groupId, m.extract, true);
+        else stackNextTo(groupId, topHighlightAbove(parent, m.extract, groupId), false);
+      }
+      return { number: number, changed: true };
+    } finally {
+      if (previous && typeof api.select === "function") {
+        // The user's selection, with a removed old layer swapped for the new shape (or the group).
+        var swap = {};
+        olds.forEach(function (id) { swap[id] = fresh ? (id === m.shape ? fresh.shape : groupId) : id; });
+        var keep = [];
+        previous.forEach(function (id) { var x = swap[id] || id; if (layerThere(x) && keep.indexOf(x) < 0) keep.push(x); });
+        try { api.select(keep); } catch (e6) { /* cosmetic */ }
+      }
     }
   }
 
@@ -1807,7 +1908,7 @@ var GeoScene = (function () {
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
-    HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
+    HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };

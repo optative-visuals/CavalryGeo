@@ -208,6 +208,12 @@ The map's **Extract controls** get a row for each highlight: **Highlight n · Am
 **Colour**, plus **Width** (Outline draw-on), **Speed** (Pulse) or **Size** (Glow). Hover a row to
 see which place it belongs to.
 
+To try another effect on a highlight you already have, select its group (or any layer inside it)
+in the Scene Window, pick the new **Effect** and press **Change effect** (next to **Highlight
+selected**). The highlight is rebuilt in place: it keeps its number, name and colour, and its
+Amount % keys stay at the same frames with the same values. A Glow moves just below the
+extracted place; the other effects sit above it.
+
 To remove a highlight, delete its group. If you delete the extracted place instead, its
 highlights go away the next time the Controls refresh (press **Refresh controls**). Highlights
 can't be baked: Bake skips them.

@@ -522,7 +522,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "refreshControlsBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -3682,7 +3682,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
-  const plainBtns = ["jumpBtn", "tipsGotItBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "tipsGotItBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -8213,4 +8213,165 @@ test("no panel text contains < (Cavalry reads it as a tag), and the Controls not
   assert.ok(texts.length > 30, "labels were found");
   texts.forEach((t) => assert.ok(!/</.test(t), "text with <: " + t));
   assert.ok(texts.indexOf("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window.") >= 0);
+});
+
+// ---- Highlights: change effect in place ----------------------------------------------
+const valueAt = (api, id, attr, f) => { api.setFrame(f); return api.get(id, attr); };
+
+test("change effect: Fill in -> Pulse keeps the group, number, name, colour and Amount timing", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 10, duration: 25 }), old = hlRec(api, g);
+  api.setFrame(4);
+  const r = G.changeHighlightEffect(map, g, "pulse");
+  assert.equal(r.number, 1); assert.equal(r.changed, true);
+  assert.equal(api.getFrame(), 4, "the playhead goes back where it was");
+  assert.equal(api.getNiceName(g), "Highlight 1: France");
+  assert.equal(api.getUserDataKey(g, "geoHighlightNumber"), 1);
+  const rec = hlRec(api, g);
+  assert.equal(rec.effect, "pulse"); assert.equal(rec.extract, extract);
+  assert.equal(api.layerExists(old.shape), false, "the old shape is gone");
+  [rec.shape, rec.osc, rec.fade].forEach((id) => assert.equal(api.getParent(id), g, id));
+  assert.equal(api.getNiceName(rec.shape), "Highlight 1 shape");
+  assert.deepEqual(plain(G.readLayerMeta(rec.shape)), { camera: map.cameraId, category: "highlight", effect: "pulse" });
+  assert.deepEqual(plain(api.getKeyframeTimes(g, "opacity")), [10, 35]);
+  assert.equal(valueAt(api, g, "opacity", 10), 0); assert.equal(valueAt(api, g, "opacity", 35), 100);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [], "the fade drives the shape's opacity");
+  assert.equal(api.getInConnection(rec.shape, "opacity"), rec.fade + ".id");
+  assert.ok(api.hasStroke(rec.shape) && !api.hasFill(rec.shape));
+  assert.equal(api.get(rec.shape, "stroke.strokeColor"), "#1F8F4E", "the fill colour is now the stroke colour");
+  assert.equal(G.findHighlights(map).length, 1);
+});
+
+test("change effect: Pulse -> Glow removes the oscillator and fade, adds a blur, moves the keys and the group below the extract", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 5, duration: 10 }), old = hlRec(api, g);
+  assert.ok(directlyAbove(api, g, extract));
+  G.changeHighlightEffect(map, g, "glow");
+  const rec = hlRec(api, g);
+  [old.osc, old.fade, old.shape].forEach((id) => assert.equal(api.layerExists(id), false, id));
+  assert.equal(rec.osc, undefined); assert.equal(rec.fade, undefined);
+  assert.equal(api.getParent(rec.blur), g);
+  assert.equal(api.getInConnection(rec.shape, "filters"), rec.blur + ".id");
+  assert.deepEqual(plain(api.getKeyframeTimes(g, "opacity")), [], "the group's Amount keys are gone");
+  assert.equal(api.get(g, "opacity"), 100);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [5, 15]);
+  assert.equal(valueAt(api, rec.shape, "opacity", 5), 0); assert.equal(valueAt(api, rec.shape, "opacity", 15), 100);
+  assert.ok(directlyAbove(api, extract, g), "Glow sits directly below the extract");
+});
+
+test("change effect: Glow -> Fill in moves back above the extract", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "glow", { start: 0, duration: 5 });
+  G.changeHighlightEffect(map, g, "fill");
+  assert.ok(directlyAbove(api, g, extract));
+});
+
+test("change effect: Outline -> Fill in keys the shape's opacity and keeps a changed colour", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "outline", { start: 2, duration: 8 });
+  api.set(hlRec(api, g).shape, { "stroke.strokeColor": "#ff0000" });
+  G.changeHighlightEffect(map, g, "fill");
+  const rec = hlRec(api, g);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [2, 10]);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "stroke.trimEnd")), []);
+  assert.ok(api.hasFill(rec.shape) && !api.hasStroke(rec.shape));
+  assert.equal(api.get(rec.shape, "material.materialColor"), "#ff0000");
+});
+
+test("change effect: re-timed keys and values move across; no keys means a new 0 -> 100 at the playhead", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 10 }), shape = hlRec(api, g).shape;
+  api.deleteKeyframe(shape, "opacity", 10);
+  api.keyframe(shape, 20, { opacity: 60 });
+  G.changeHighlightEffect(map, g, "outline");
+  let rec = hlRec(api, g);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "stroke.trimEnd")), [0, 20]);
+  assert.equal(valueAt(api, rec.shape, "stroke.trimEnd", 20), 60);
+  api.getKeyframeTimes(rec.shape, "stroke.trimEnd").forEach((f) => api.deleteKeyframe(rec.shape, "stroke.trimEnd", f));
+  api.setFrame(7);
+  G.changeHighlightEffect(map, g, "glow");
+  rec = hlRec(api, g);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [7, 32]);
+});
+
+test("change effect: the same effect, an unknown effect or a non-highlight are refused and nothing changes", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 }), before = hlRec(api, g);
+  assert.throws(() => G.changeHighlightEffect(map, g, "fill"), (e) => e.message === "Highlight 1 already uses Fill in.");
+  assert.throws(() => G.changeHighlightEffect(map, g, "sparkle"), /Unknown highlight effect/);
+  assert.throws(() => G.changeHighlightEffect(map, extract, "glow"), /Select a highlight/);
+  assert.deepEqual(hlRec(api, g), before);
+});
+
+test("change effect: the user's selection is kept, with the old shape swapped for the new one", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 });
+  api.select([hlRec(api, g).shape, extract]);
+  G.changeHighlightEffect(map, g, "glow");
+  assert.deepEqual(plain(api.getSelection()), [hlRec(api, g).shape, extract]);
+});
+
+test("change effect: a failure while building leaves the old highlight as it was", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 }), before = hlRec(api, g), count = api.getCompLayers(false).length;
+  const real = api.create;
+  api.create = function (type) { if (type === "oscillator") throw new Error("no oscillators"); return real.apply(this, arguments); };
+  try { assert.throws(() => G.changeHighlightEffect(map, g, "pulse"), /no oscillators/); } finally { api.create = real; }
+  assert.deepEqual(hlRec(api, g), before);
+  assert.equal(api.layerExists(before.shape), true);
+  assert.equal(api.getCompLayers(false).length, count, "nothing left behind");
+  assert.deepEqual(plain(api.getKeyframeTimes(before.shape, "opacity")), [0, 5]);
+});
+
+test("highlightOfSelection: finds the group from the group, its shape or its oscillator; null otherwise", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 0, duration: 5 }), rec = hlRec(api, g);
+  const other = api.create("group", "Mine");
+  assert.equal(G.highlightOfSelection(map, [g]), g);
+  assert.equal(G.highlightOfSelection(map, [rec.shape]), g);
+  assert.equal(G.highlightOfSelection(map, [other, rec.osc]), g, "the first id that is a highlight part");
+  assert.equal(G.highlightOfSelection(map, [extract]), null);
+  assert.equal(G.highlightOfSelection(map, [other]), null);
+  assert.equal(G.highlightOfSelection(map, []), null);
+});
+
+test("Change effect button: changes the selected highlight, or says what is missing", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  assert.ok(holds(context.sectionPages.pages[1], context.changeEffectBtn), "Layers page");
+  assert.equal(context.changeEffectBtn.getText(), "Change effect");
+  context.highlightBtn.onClick();                       // Fill in
+  api.select([]);
+  context.changeEffectBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select a highlight in the Scene Window first.");
+  api.select([G.findHighlights(map)[0].shape]);
+  context.changeEffectBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlight 1 already uses Fill in.");
+  context.highlightEffectPicker.setValue(3);            // Glow
+  context.changeEffectBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Highlight 1 now uses Glow.");
+  assert.equal(G.findHighlights(map)[0].effect, "glow");
+});
+
+test("Change effect: the Controls rows follow the new effect", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "outline", { start: 0, duration: 5 });
+  let names = plain(promotedNames(api, context.GeoControlPanel.sync(map).components.extract));
+  assert.ok(names.includes("Highlight 1 · Width"));
+  G.changeHighlightEffect(map, g, "pulse");
+  const r = context.GeoControlPanel.sync(map);
+  names = plain(promotedNames(api, r.components.extract));
+  assert.ok(names.includes("Highlight 1 · Speed"));
+  assert.ok(!names.includes("Highlight 1 · Width"));
+  assert.ok(api._promoted(r.components.extract).includes(g + ".opacity"), "the Amount row is on the group");
 });

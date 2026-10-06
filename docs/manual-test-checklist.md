@@ -112,6 +112,8 @@ adding street layers.
 - [ ] 16h6. Highlight the same place twice → one extract, two highlights, numbered 1 and 2.
 - [ ] 16h7. Delete the extracted place, press Refresh controls → its highlight group and rows are gone. Delete a highlight group on its own → no leftover oscillator, helper or blur layers.
 - [ ] 16h8. Select a highlight's shape or group → Bake says "Highlights can't be baked."; Find's layer list doesn't offer highlights.
+- [ ] 16h9. Make a Fill in highlight, change its Colour row, move its Amount % keys. Select the highlight's group (or its shape), pick Pulse and press Change effect → "Highlight n now uses Pulse."; same group, number and name, the same colour on the ring, and the Amount % keys at the same frames (now on the group). The Extract controls now have a Speed row for it. Pick Fill in and press Change effect again → back to a fill with the same colour and timing. Press it once more with Fill in still picked → "Highlight n already uses Fill in."
+- [ ] 16h10. Change a highlight to Glow → its group moves just below the extracted place; change it back → above again. With nothing highlighted selected, Change effect says "Select a highlight in the Scene Window first."
 
 ## Label → Pins
 

@@ -589,6 +589,8 @@ var highlightLengthField = new ui.NumericField(compFps());
 });
 highlightStartField.setMin(0); highlightLengthField.setMin(1);
 var highlightBtn = GeoStyle.button("Highlight selected");
+// Change effect: rebuilds the highlight selected in the Scene Window with the picked effect.
+var changeEffectBtn = GeoStyle.button("Change effect");
 var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
 var refreshControlsBtn = GeoStyle.button("Refresh controls");
 
@@ -688,6 +690,14 @@ highlightBtn.onClick = guard(function () {
     (failed ? " Couldn't highlight " + failed + ": " + (firstError && firstError.message ? firstError.message : String(firstError)) : "") + syncControls(map));
 });
 
+changeEffectBtn.onClick = guard(function () {
+  var map = currentMap(), g = GeoScene.highlightOfSelection(map, api.getSelection());
+  if (!g) throw new Error("Select a highlight in the Scene Window first.");
+  var effects = GeoScene.HIGHLIGHT_EFFECTS, effect = effects[highlightEffectPicker.getValue()] || effects[0];
+  var r = GeoScene.changeHighlightEffect(map, g, effect.id);
+  say("Highlight " + r.number + " now uses " + effect.name + "." + syncControls(map));
+});
+
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
@@ -779,7 +789,7 @@ TAB_BUILDERS.push(function (tabs) {
     featureList,
     extractBtn,
     row(highlightEffectPicker, new ui.Label("Start:"), GeoStyle.frameField(highlightStartField), new ui.Label("Frames:"), GeoStyle.frameField(highlightLengthField)),
-    highlightBtn,
+    row(highlightBtn, changeEffectBtn),
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
