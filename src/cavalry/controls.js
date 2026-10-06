@@ -126,12 +126,12 @@ var GeoControlPanel = (function () {
   }
 
   // The component (just above the map group) and the values utility inside it.
-  function findOrCreate(map) {
+  function findOrCreate(map, cache) {
     return keepSelection(function () {
       var compName = map.name + GROUP_SUFFIX.main, valuesName = map.name + " control values";
       var comp = findGroupIn(containerOf(map).id, map, "main"), move = false;
       if (!comp) { comp = findGroupIn(map.groupId, map, "main"); move = !!comp; } // an earlier build kept it inside the group
-      if (!comp) comp = findAnywhere(map, "main");
+      if (!comp) comp = findAnywhere(map, "main", cache);
       if (!comp) { comp = api.create("component", compName); move = true; }
       setUserData(comp, CONTROLS_KEY, map.cameraId);
       if (move) place(comp, map, "main");
@@ -364,7 +364,7 @@ var GeoControlPanel = (function () {
 
   function sync(map) {
     requireApis();
-    var made = findOrCreate(map), V = made.valuesId;
+    var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
     var model = readModel(map, V), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {
@@ -406,7 +406,6 @@ var GeoControlPanel = (function () {
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
     var components = { main: made.id, overlay: null, data: null, extract: null };
     rebuild(made.id, V, wanted.main);
-    var cache = {};
     GROUP_ORDER.forEach(function (g) {
       if (g === "main") return;
       var comp = findOrCreateGroup(map, g, wanted[g].length > 0, cache);

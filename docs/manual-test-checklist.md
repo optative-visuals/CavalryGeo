@@ -266,7 +266,7 @@ adding street layers.
 - [ ] CS3. Open a scene saved before the split (every setting in one Controls), with one setting
       you promoted yourself, and press Refresh controls → the pin, route and data settings move to
       their new components; your own promoted setting stays in Controls.
-- [ ] CS4. Delete all the pins, routes and scale bar / north arrow, then Refresh controls ->
+- [ ] CS4. Delete all the pins, routes and scale bar / north arrow, then Refresh controls →
       Overlay controls disappears (unless you promoted something onto it).
 - [ ] CS5. Change a setting in each component (Overlay: Pins · Colour; Data: Data · Year; Extract:
       a feature's Hide) → the map follows.

@@ -5079,7 +5079,7 @@ test("controls split: an overlay component left empty is removed; one holding a 
   assert.equal(r4.components.overlay, r3.components.overlay);
 });
 
-test("controls split: overlay value rows source from the values utility inside main and still drive the layers; a renamed group component is found again", () => {
+test("controls split: overlay value rows source from the values utility inside main and still drive the layers", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context), G = context.GeoScene;
   const pin = G.addPin(map, "Here", 1, 1);
@@ -5087,9 +5087,36 @@ test("controls split: overlay value rows source from the values utility inside m
   const slot = slotsOf(api, r.valuesId)["pins:color"];
   assert.ok(plain(api._promoted(r.components.overlay)).includes(r.valuesId + "." + slot));
   assert.equal(api.getInConnection(pin, "material.materialColor"), r.valuesId + "." + slot);
-  api.rename ? api.rename(r.components.overlay, "Renamed") : null;
-  const again = context.GeoControlPanel.sync(map);
-  assert.equal(again.components.overlay, r.components.overlay);
+});
+
+const overlaysOf = (api, map) => api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component" && api.hasUserDataKey(id, "geoControls") && api.getUserDataKey(id, "geoControls") === map.cameraId && api.hasUserDataKey(id, "geoControlsGroup") && api.getUserDataKey(id, "geoControlsGroup") === "overlay");
+
+test("controls split: an Overlay component the user moved into another group is found again, not duplicated", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.addPin(map, "Here", 1, 1);
+  const r1 = context.GeoControlPanel.sync(map);
+  const home = api.create("group", "My controls");
+  api.parent(r1.components.overlay, home);
+  G.addPin(map, "Again", 2, 2);
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.components.overlay, r1.components.overlay, "the same component");
+  assert.equal(api.getParent(r2.components.overlay), home, "not moved");
+  assert.deepEqual(overlaysOf(api, map), [r1.components.overlay], "exactly one Overlay component");
+  assert.ok(plain(promotedNames(api, r2.components.overlay)).includes("Pins · Colour"), "still kept up to date");
+});
+
+test("controls split: an untagged component named like the Overlay controls is adopted and tagged", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const mine = api.create("component", "Map Overlay controls");
+  G.addPin(map, "Here", 1, 1);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.components.overlay, mine, "adopted, not a second one made");
+  assert.equal(api.getUserDataKey(mine, "geoControls"), map.cameraId);
+  assert.equal(api.getUserDataKey(mine, "geoControlsGroup"), "overlay");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component" && api.getNiceName(id) === "Map Overlay controls").length, 1);
+  assert.ok(plain(promotedNames(api, mine)).includes("Pins · Colour"));
 });
 
 test("controls: a sync puts \"<Map> Controls\" just above the map group with the camera and Ocean", () => {
@@ -5614,6 +5641,7 @@ test("controls: a Controls component the user moved into another group is found 
   assert.equal(r2.componentId, r1.componentId);
   assert.equal(api.getParent(r2.componentId), home, "not moved");
   assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component" && !api.hasUserDataKey(id, "geoControlsGroup")).length, 1, "no second main component");
+  assert.equal(overlaysOf(api, map).length, 1, "and no duplicate Overlay component");
   assert.ok(promotedNames(api, r2.components.overlay).indexOf("Pins · Colour") >= 0, "still kept up to date");
 });
 
