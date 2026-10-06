@@ -463,8 +463,10 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
-  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom.
-  assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
+  // Tab bar, the shown page only as tall as itself, a stretch, the Tips button, then the status line at the bottom.
+  assert.equal(root._items.length, 4);
+  assert.deepEqual(root._items.filter((n) => n !== root._items[2]), [context.sectionTabs.widget, pages.widget, context.statusLabel]);
+  assert.ok(holds(root._items[2], context.tipsBtn), "Tips sits above the status line");
   assert.equal(root._stretch, 1);
   pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout, layout, "page " + i));
   context.showSection("Imagery");
@@ -518,7 +520,7 @@ test("Label has a Pins / Routes tab bar; old section names still land in the rig
 test("every button's onClick can be invoked against an empty scene without an error escaping guard()", () => {
   const { context } = buildSandbox();
   const buttonNames = [
-    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
+    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
@@ -577,7 +579,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -3679,8 +3681,8 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
-  const quiet = ["clearCacheBtn", "clearTilesBtn"];
-  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
+  const plainBtns = ["jumpBtn", "tipsGotItBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -8134,4 +8136,81 @@ test("Highlight selected: when every feature fails the first error is shown and 
   G.createHighlight = real;
   assert.equal(context.statusLabel.getText(), "Error: Boom 1");
   assert.equal(context.highlightStartField.getValue(), 5);
+});
+
+// ---- Start here tips ---------------------------------------------------------
+const TIPS_LINES = [
+  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
+  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
+  "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
+];
+function tipsWidgets(context) { return context.tipsBox.slice(); }
+
+test("Start here: a first run shows the box at the top of the Map tab with the approved text", () => {
+  const { context, ui } = buildSandbox();
+  const mapPage = context.sectionPages.pages[0];
+  tipsWidgets(context).forEach((w, i) => assert.ok(holds(mapPage, w), "tips widget " + i + " is on the Map page"));
+  tipsWidgets(context).forEach((w, i) => assert.equal(w.isHidden(), false, "tips widget " + i + " is shown"));
+  assert.equal(mapPage._items[0].getText(), "Start here", "the title comes first");
+  const notes = context.tipsBox.filter((w) => w instanceof ui.Label).map((w) => w.getText());
+  assert.deepEqual(plain(notes), ["Start here"].concat(TIPS_LINES));
+  assert.equal(mapPage._items[context.tipsBox.length - 1], context.tipsGotItBtn, "Got it ends the box");
+  assert.equal(context.tipsGotItBtn.getText(), "Got it");
+  assert.equal(context.tipsBtn.getText(), "Tips");
+  assert.ok(holds(ui._root(), context.tipsBtn), "the Tips button is in the panel");
+  const items = ui._root()._items;
+  assert.ok(holds(items[items.length - 2], context.tipsBtn) && items[items.length - 1] === context.statusLabel, "Tips sits just above the status line");
+});
+
+test("Start here: Got it hides the box and remembers it, keeping other settings", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono", source: "eox" }); } });
+  context.tipsGotItBtn.onClick();
+  tipsWidgets(context).forEach((w, i) => assert.equal(w.isHidden(), true, "tips widget " + i + " is hidden"));
+  const s = settingsOf(api);
+  assert.equal(s.showTips, false);
+  assert.equal(s.mapStyle, "Mono");
+  assert.equal(s.source, "eox");
+});
+
+test("Start here: a saved showTips false starts hidden; any other saved settings still show it", () => {
+  const hidden = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ showTips: false }); } });
+  tipsWidgets(hidden.context).forEach((w, i) => assert.equal(w.isHidden(), true, "tips widget " + i));
+  const shown = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  tipsWidgets(shown.context).forEach((w, i) => assert.equal(w.isHidden(), false, "tips widget " + i));
+});
+
+test("Start here: the Tips button shows the Map tab and the box again, and remembers it", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ showTips: false, mapStyle: "Mono" }); } });
+  context.showSection("Imagery");
+  context.tipsBtn.onClick();
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(context.sectionPages.currentPage(), 0);
+  tipsWidgets(context).forEach((w, i) => assert.equal(w.isHidden(), false, "tips widget " + i));
+  assert.equal(settingsOf(api).showTips, true);
+  assert.equal(settingsOf(api).mapStyle, "Mono");
+});
+
+test("Start here: widgets without setHidden don't break the panel", () => {
+  // A Cavalry that documents setHidden on Button only.
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Label.prototype.setHidden;
+  api._files[SETTINGS_FILE] = JSON.stringify({ showTips: false });
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  assert.doesNotThrow(() => context.tipsBtn.onClick());
+  assert.equal(settingsOf(api).showTips, true);
+  assert.doesNotThrow(() => context.tipsGotItBtn.onClick());
+  assert.equal(settingsOf(api).showTips, false);
+});
+
+test("no panel text contains < (Cavalry reads it as a tag), and the Controls note has the new wording", () => {
+  const { context, ui } = buildSandbox();
+  const texts = [];
+  walkUi(ui._root(), (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
+  walkUi(ui._root(), (n) => { if (n instanceof ui.Button) texts.push(n.getText()); });
+  assert.ok(texts.length > 30, "labels were found");
+  texts.forEach((t) => assert.ok(!/</.test(t), "text with <: " + t));
+  assert.ok(texts.indexOf("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window.") >= 0);
 });

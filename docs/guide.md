@@ -20,6 +20,10 @@ Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch
 
 A map is a group with a **Camera** layer. Everything you add to the map follows that camera.
 
+The first time you open the panel, a **Start here** box at the top of this tab gives four quick steps
+(make a map, add layers, mark places, animate). Press **Got it** to hide it; it stays hidden next time.
+The small **Tips** button at the bottom of the panel, above the status line, brings it back.
+
 - **Making a map:** with **New map** picked in the Map list (the only entry in a scene without
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press

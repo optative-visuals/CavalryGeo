@@ -397,8 +397,42 @@ deleteStyleBtn.onClick = guard(function () {
   say("Deleted style \"" + style.name + "\".");
 });
 
+// ---- Start here tips -------------------------------------------------------
+// Shown on the Map tab until "Got it"; the Tips button (above the status line) brings them back.
+// A missing showTips setting means a first run, so the box shows.
+var tipsGotItBtn = GeoStyle.button("Got it");
+var tipsBtn = GeoStyle.quietButton("Tips");
+// The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
+var tipsTitle = new ui.Label("Start here");
+if (typeof tipsTitle.setTextColor === "function") tipsTitle.setTextColor(GeoStyle.HEADING_COLOR);
+var tipsBox = [tipsTitle].concat([
+  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
+  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
+  "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
+].map(function (t) { return GeoStyle.note(t); }), [tipsGotItBtn]);
+// Hides or shows the whole box. Cavalry only documents setHidden on some widgets, so check first.
+function showTips(show) {
+  tipsBox.forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(!show); });
+}
+function rememberTips(show) {
+  showTips(show);
+  GeoNet.updateSettings({ showTips: show });
+}
+tipsGotItBtn.onClick = guard(function () { rememberTips(false); });
+tipsBtn.onClick = guard(function () {
+  showSection("Map");
+  rememberTips(true);
+});
+(function () {
+  var s = {};
+  try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
+  showTips(s.showTips !== false);
+})();
+
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Map", column([
+  tabs.add("Map", column(tipsBox.concat([
     row(mapPicker, refreshMapsBtn),
     row(nameField, projPicker),
     GeoStyle.heading("Search"),
@@ -413,7 +447,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Style"),
     row(mapStylePicker, applyStyleBtn),
     row(styleNameField, saveStyleBtn, deleteStyleBtn)
-  ]));
+  ])));
 });
 
 // ---- Layers tab ------------------------------------------------------------
@@ -749,7 +783,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
-    GeoStyle.note("Each map's settings in one place: select \"<map> Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
+    GeoStyle.note("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
     refreshControlsBtn,
     clearCacheBtn,
     GeoStyle.heading("Map furniture"),
@@ -1602,6 +1636,7 @@ function buildUi() {
   root.add(sectionPages.widget);
   // The stretch keeps the status line at the bottom when the page is shorter than the window.
   if (typeof root.addStretch === "function") root.addStretch();
+  root.add(row(tipsBtn));
   root.add(statusLabel);
   ui.add(root);
   ui.show();

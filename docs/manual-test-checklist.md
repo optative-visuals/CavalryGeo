@@ -323,6 +323,13 @@ adding street layers.
 - [ ] In a scene saved before this change, a leg whose Trim end you keyframed by hand, connected, or set below 100 is left alone (no helper added, still animates / keeps its value).
 - [ ] An old-style route (made where Bézier lines are not available, or by v0.5.0) gets the same four rows and a working Travel %.
 
+## Start here box
+
+- [ ] On a first open (no `showTips` in settings.json) the Map tab starts with a **Start here** box: four numbered steps and a line about the Map controls in the Scene Window, then a **Got it** button. Nothing in it is cut off (no `<` in any text).
+- [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
+- [ ] Press **Tips** (bottom of the panel, above the status line) from any tab → the Map tab shows with the box again. Close and reopen → it is still shown.
+- [ ] Layers tab: the note under the Controls buttons reads "Each map's settings in one place: select "(map name) Map controls" (or its Overlay, Data and Extract controls) in the Scene Window." in full.
+
 ## Previews
 
 - [ ] Map, Pins and Routes previews show the picked map's pins, labels and routes (curved like the real legs) in the map's style colours.
