@@ -42,7 +42,7 @@ The small **Tips** button at the bottom of the panel, above the status line, bri
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.
 - **Preview:** a flat map under the search results. Drag it to move and use the **+** / **−**
-  squares in its bottom right corner (or double-click) to zoom; the zoom level reads out in its
+  squares in its bottom right corner (or double-click) to zoom — or press the scroll wheel and drag up / down to zoom around the point you pressed; the zoom level reads out in its
   bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
   exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
@@ -212,7 +212,9 @@ To try another effect on a highlight you already have, select its group (or any 
 in the Scene Window, pick the new **Effect** and press **Change effect** (next to **Highlight
 selected**). The highlight is rebuilt in place: it keeps its number, name and colour, and its
 Amount % keys stay at the same frames with the same values. A Glow moves just below the
-extracted place; the other effects sit above it.
+extracted place; the other effects sit above it. Width, Speed and Size go back to their
+defaults when the effect changes (the stroke width stays when you switch between Outline
+draw-on and Pulse). The highlight has to belong to the map picked in the Map tab.
 
 To remove a highlight, delete its group. If you delete the extracted place instead, its
 highlights go away the next time the Controls refresh (press **Refresh controls**). Highlights
@@ -222,7 +224,7 @@ can't be baked: Bake skips them.
 
 - Search for a place under **Label → Pins** (a Map search fills it in for you) and press
   **Pin here** or **Label here**, or place them at exact coordinates.
-- **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom.
+- **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom, or press the scroll wheel and drag up / down to zoom around the point you pressed.
 - Labels hide automatically when their place turns to the far side of a globe.
 
 ## Label: routes
@@ -231,7 +233,7 @@ can't be baked: Bake skips them.
   stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
   with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
   the stop), and press **Create route**.
-- **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it.
+- **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it. Zoom the preview with − / + or by pressing the scroll wheel and dragging up / down (around the point you pressed).
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
   camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
   with it. Until you press **Pin here**, a dragged stop is a fixed offset on screen, so it slides

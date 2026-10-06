@@ -339,6 +339,7 @@ adding street layers.
 - [ ] Pins: a click fills Lat / Lon, shows a white ring and the place name; Pin at coordinates puts the pin there. Typed text is kept.
 - [ ] Routes: clicking three places adds three named stops and a dashed draft route; Create route makes it; the previews then show it.
 - [ ] Double-clicking on the Routes preview adds one stop and doesn't zoom; − / + still zoom; dragging moves without adding.
+- [ ] On all three previews, press the scroll wheel and drag up: it zooms in around the press point; drag down: it zooms out. A middle click with no drag changes nothing and picks nothing; left-drag still pans; a quick double middle-click doesn't jump a zoom level.
 - [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
 
 ## Scene persistence and install

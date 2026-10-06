@@ -324,7 +324,9 @@ var GeoPreviewPanel = (function () {
         }
         if (was) changed();
       });
-      draw.onMouseDoubleClick = guarded(function (pos) {
+      draw.onMouseDoubleClick = guarded(function (pos, button) {
+        // The second press of a quick double middle-click is a zoom drag too, not a zoom step.
+        if (button === "middle") { press = null; drag = null; panning = false; zoomDrag = { x: pos.x, y: sy(pos.y), view: view }; return; }
         if (opts.doubleClickZoom === false) return;
         var c = comp(), o = overlayRects();
         if (inside(o.minus, pos.x, sy(pos.y)) || inside(o.plus, pos.x, sy(pos.y)) || inside(o.readout, pos.x, sy(pos.y))) return; // the presses already zoomed

@@ -1603,11 +1603,16 @@ var GeoScene = (function () {
     if (!m.extract || !m.shape) throw new Error(label + "'s place is gone. Press Refresh controls (Layers tab) to tidy it away.");
     var oldLine = rec.effect === "outline" || rec.effect === "pulse";
     var colour = readColour(m.shape, oldLine ? A.STROKE_COLOR_ATTR : A.FILL_COLOR_ATTR, HIGHLIGHT_COLOUR);
+    // Outline draw-on and Pulse both have a width; it carries over between them (everything else starts at its default).
+    var width = null;
+    if (oldLine && (effect === "outline" || effect === "pulse")) {
+      try { var w = Number(api.get(m.shape, A.STROKE_WIDTH_ATTR)); if (isFinite(w) && w > 0) width = w; } catch (e7) { width = null; }
+    }
     // The old Amount keys: times and values (read by moving the playhead, then putting it back).
     var oldT = amountTarget({ effect: rec.effect, shape: m.shape }, groupId), keys = [], playhead = 0;
     try { playhead = api.getFrame(); } catch (e0) { playhead = 0; }
     try {
-      (api.getKeyframeTimes(oldT[0], oldT[1]) || []).forEach(function (f, i) {
+      (api.getKeyframeTimes(oldT[0], oldT[1]) || []).slice().sort(function (a, b) { return a - b; }).forEach(function (f, i) {
         api.setFrame(f);
         var v = Number(api.get(oldT[0], oldT[1]));
         keys.push([f, isFinite(v) ? v : (i ? 100 : 0)]);
@@ -1619,24 +1624,28 @@ var GeoScene = (function () {
     function track(id) { made.push(id); return id; }
     try { previous = api.getSelection(); } catch (e2) { previous = null; }
     try {
-      try { fresh = buildHighlightMembers(map, groupId, m.extract, effect, label, colour, track); } catch (e3) {
+      try {
+        fresh = buildHighlightMembers(map, groupId, m.extract, effect, label, colour, track);
+        if (width !== null) setOne(fresh.shape, A.STROKE_WIDTH_ATTR, width);
+      } catch (e3) {
         made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e4) { /* gone */ } });
         throw e3;
       }
-      // Swap: the old layers and the old Amount keys go, the new record and keys come in.
+      // Swap: the new record goes in first (so a later failure never leaves one naming the old
+      // effect), then the old layers and the old Amount keys go and the new keys come in.
+      api.setUserData(groupId, HIGHLIGHT_KEY, fresh);
       olds.forEach(function (id) { if (layerThere(id)) api.deleteLayer(id); });
       if (oldT[0] === groupId) {
         keys.forEach(function (k) { try { api.deleteKeyframe(groupId, oldT[1], k[0]); } catch (e5) { /* already gone */ } });
         setOne(groupId, "opacity", 100);
       }
-      api.setUserData(groupId, HIGHLIGHT_KEY, fresh);
       keyAmount(amountTarget(fresh, groupId), keys);
       var parent = api.getParent(groupId);
       if (parent === api.getParent(m.extract)) {
         if (effect === "glow") stackNextTo(groupId, m.extract, true);
         else stackNextTo(groupId, topHighlightAbove(parent, m.extract, groupId), false);
       }
-      return { number: number, changed: true };
+      return { number: number };
     } finally {
       if (previous && typeof api.select === "function") {
         // The user's selection, with a removed old layer swapped for the new shape (or the group).

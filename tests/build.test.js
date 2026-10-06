@@ -3711,7 +3711,7 @@ test("each section has grey headings in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
+  assert.deepEqual(headings(pages[0]), ["Start here", "Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
@@ -4346,6 +4346,22 @@ test("preview overlay: a double-click on a button or the readout is ignored", ()
     p._draw.onMouseRelease(at(40 + 100), "middle");
     assert.deepEqual(picks, [], "never picks a place");
   });
+});
+
+test("preview: a middle double-click leaves the zoom alone and a following move zooms from there", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const { p } = makePreview(context);
+  p.setWidth(320);
+  p.showCamera({ lat: 45, lon: 2, zoom: 5 }, "camera");
+  p._draw.onMousePress({ x: 250, y: 40 }, "middle");
+  p._draw.onMouseRelease({ x: 250, y: 40 }, "middle");
+  p._draw.onMouseDoubleClick({ x: 250, y: 40 }, "middle");
+  assert.ok(Math.abs(p.frameCamera().zoom - 5) < 1e-9, "no zoom step");
+  p._draw.onMouseMove({ x: 250, y: 40 - 100 });
+  assert.ok(Math.abs(p.frameCamera().zoom - 6) < 1e-9, "the drag that follows zooms");
+  p._draw.onMouseRelease({ x: 250, y: 40 - 100 }, "middle");
+  p._draw.onMouseDoubleClick({ x: 250, y: 40 }, "left");
+  assert.ok(Math.abs(p.frameCamera().zoom - 7) < 1e-9, "a left double-click still zooms in");
 });
 
 test("preview: a middle press never pans or picks, and without movement changes nothing; left-drag still pans", () => {
@@ -8159,7 +8175,11 @@ test("Start here: a first run shows the box at the top of the Map tab with the a
   assert.equal(mapPage._items[context.tipsBox.length - 1], context.tipsGotItBtn, "Got it ends the box");
   assert.equal(context.tipsGotItBtn.getText(), "Got it");
   assert.equal(context.tipsBtn.getText(), "Tips");
+  assert.equal(context.tipsTitle._fontSize, 11, "the title is a small heading");
+  assert.equal(context.tipsTitle._fixedHeight, 16);
   assert.ok(holds(ui._root(), context.tipsBtn), "the Tips button is in the panel");
+  const tipsRow = ui._root()._items[ui._root()._items.length - 2];
+  assert.equal(tipsRow._stretch, 1, "a stretch after the button keeps it small");
   const items = ui._root()._items;
   assert.ok(holds(items[items.length - 2], context.tipsBtn) && items[items.length - 1] === context.statusLabel, "Tips sits just above the status line");
 });
@@ -8224,7 +8244,7 @@ test("change effect: Fill in -> Pulse keeps the group, number, name, colour and 
   const g = G.createHighlight(map, extract, "fill", { start: 10, duration: 25 }), old = hlRec(api, g);
   api.setFrame(4);
   const r = G.changeHighlightEffect(map, g, "pulse");
-  assert.equal(r.number, 1); assert.equal(r.changed, true);
+  assert.deepEqual(plain(r), { number: 1 });
   assert.equal(api.getFrame(), 4, "the playhead goes back where it was");
   assert.equal(api.getNiceName(g), "Highlight 1: France");
   assert.equal(api.getUserDataKey(g, "geoHighlightNumber"), 1);
@@ -8329,6 +8349,52 @@ test("change effect: a failure while building leaves the old highlight as it was
   assert.equal(api.layerExists(before.shape), true);
   assert.equal(api.getCompLayers(false).length, count, "nothing left behind");
   assert.deepEqual(plain(api.getKeyframeTimes(before.shape, "opacity")), [0, 5]);
+});
+
+test("change effect: Outline width carries to Pulse (and back); other changes use the default width", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "outline", { start: 0, duration: 5 });
+  api.set(hlRec(api, g).shape, { "stroke.width": 7 });
+  G.changeHighlightEffect(map, g, "pulse");
+  assert.equal(api.get(hlRec(api, g).shape, "stroke.width"), 7, "Outline -> Pulse keeps the width");
+  G.changeHighlightEffect(map, g, "outline");
+  assert.equal(api.get(hlRec(api, g).shape, "stroke.width"), 7, "and back");
+  G.changeHighlightEffect(map, g, "fill");
+  G.changeHighlightEffect(map, g, "outline");
+  assert.equal(api.get(hlRec(api, g).shape, "stroke.width"), 3, "through Fill in the width starts again");
+});
+
+test("change effect: the new record is written before the old layers go, and keys are re-keyed in time order", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 3, duration: 10 }), old = hlRec(api, g);
+  const realDelete = api.deleteLayer, realTimes = api.getKeyframeTimes;
+  api.deleteLayer = function () { throw new Error("boom"); };
+  try { assert.throws(() => G.changeHighlightEffect(map, g, "outline"), /boom/); } finally { api.deleteLayer = realDelete; }
+  assert.equal(hlRec(api, g).effect, "outline", "never a record naming the old effect");
+  assert.notEqual(hlRec(api, g).shape, old.shape);
+  const g2 = G.createHighlight(map, extract, "fill", { start: 3, duration: 10 });
+  api.getKeyframeTimes = function () { return realTimes.apply(this, arguments).slice().reverse(); };
+  try { G.changeHighlightEffect(map, g2, "glow"); } finally { api.getKeyframeTimes = realTimes; }
+  assert.deepEqual(plain(realTimes.call(api, hlRec(api, g2).shape, "opacity")), [3, 13]);
+  assert.equal(valueAt(api, hlRec(api, g2).shape, "opacity", 3), 0);
+  assert.equal(valueAt(api, hlRec(api, g2).shape, "opacity", 13), 100);
+});
+
+test("Change effect button: a highlight of another map is named as such", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 });
+  context.makeMap("Other", context.worldViewCamera(0)); // the picker now shows the other map
+  assert.equal(G.findMaps().length, 2);
+  api.select([hlRec(api, g).shape]);
+  context.changeEffectBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: That highlight belongs to another map. Pick that map first.");
+  api.select([]);
+  context.changeEffectBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select a highlight in the Scene Window first.");
+  assert.equal(hlRec(api, g).effect, "fill", "nothing changed");
 });
 
 test("highlightOfSelection: finds the group from the group, its shape or its oscillator; null otherwise", () => {

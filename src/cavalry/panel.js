@@ -404,7 +404,9 @@ var tipsGotItBtn = GeoStyle.button("Got it");
 var tipsBtn = GeoStyle.quietButton("Tips");
 // The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
 var tipsTitle = new ui.Label("Start here");
+if (typeof tipsTitle.setFontSize === "function") tipsTitle.setFontSize(11);
 if (typeof tipsTitle.setTextColor === "function") tipsTitle.setTextColor(GeoStyle.HEADING_COLOR);
+if (typeof tipsTitle.setFixedHeight === "function") tipsTitle.setFixedHeight(16);
 var tipsBox = [tipsTitle].concat([
   "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
   "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
@@ -691,8 +693,11 @@ highlightBtn.onClick = guard(function () {
 });
 
 changeEffectBtn.onClick = guard(function () {
-  var map = currentMap(), g = GeoScene.highlightOfSelection(map, api.getSelection());
-  if (!g) throw new Error("Select a highlight in the Scene Window first.");
+  var map = currentMap(), sel = api.getSelection(), g = GeoScene.highlightOfSelection(map, sel);
+  if (!g) {
+    var elsewhere = GeoScene.findMaps().some(function (m) { return m.cameraId !== map.cameraId && GeoScene.highlightOfSelection(m, sel); });
+    throw new Error(elsewhere ? "That highlight belongs to another map. Pick that map first." : "Select a highlight in the Scene Window first.");
+  }
   var effects = GeoScene.HIGHLIGHT_EFFECTS, effect = effects[highlightEffectPicker.getValue()] || effects[0];
   var r = GeoScene.changeHighlightEffect(map, g, effect.id);
   say("Highlight " + r.number + " now uses " + effect.name + "." + syncControls(map));
@@ -1646,7 +1651,9 @@ function buildUi() {
   root.add(sectionPages.widget);
   // The stretch keeps the status line at the bottom when the page is shorter than the window.
   if (typeof root.addStretch === "function") root.addStretch();
-  root.add(row(tipsBtn));
+  var tipsRow = row(tipsBtn);
+  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
+  root.add(tipsRow);
   root.add(statusLabel);
   ui.add(root);
   ui.show();
