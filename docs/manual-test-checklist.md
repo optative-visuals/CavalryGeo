@@ -125,12 +125,12 @@ adding street layers.
 ## Label → Routes
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
-      → a "Route: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each
+      → a "Route 1: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each
       leg attached to its two stops.
 - [ ] 22b. Select a stop circle, then Create route again → the new route's stops sit on their
       places and its legs stay attached.
 - [ ] 23. Drag a stop in the viewer → its legs follow it. In the map's Controls, animate
-      Paris → Lyon → Marseille · Leg 1 draw on % 0 → 100 → leg 1 draws on from Paris to Lyon.
+      Route 1 · Travel % 0 → 100 → leg 1 draws on from Paris to Lyon, then leg 2 to Marseille.
 - [ ] 24. Play a Fly here with the route in view → the stops ride along with the map and the curves
       keep their shape.
 - [ ] 25. Drag a stop and play a Fly here → the dragged stop slides against the map (it is a fixed
@@ -139,10 +139,16 @@ adding street layers.
       outside a flat map, says it is past the map's edge and keeps its place. With **Labels at
       stops** ticked, each label sits beside its circle and follows when you drag the stop. If a
       stop's place is keyframed, Pin here sets a key at the current frame.
-- [ ] 25b. In Controls, change Arc height, Lean and Flip side → every leg of the route changes.
-- [ ] 25c. Tick Leg 1 shape by hand and change its start / end handle X / Y numbers → only Leg 1
-      changes; untick it → it goes back to the plugin's shape. Stops · Hide / Colour / Size
+- [ ] 25b. In Controls, change Route 1 · Arc height → every leg of the route changes.
+- [ ] 25c. Select a leg's handle helper and change Lean, Flip side or shape by hand there → only
+      that leg changes (those values live on the handle helpers). Open a map made by v0.6.0 with
+      Lean / Flip side / shape by hand set in its Controls → Refresh controls: the rows are gone,
+      the curves look the same and the values are on the handle helpers; one you had animated
+      (keyed) stays on "<Map> control values" and still animates. Stops · Hide / Colour / Size
       change every circle.
+- [ ] 25c2. On a new route every leg's Trim end is driven by its "Leg k draw" helper: to animate
+      one leg by hand, disconnect its helper first, then key its Trim end → Refresh controls
+      leaves that leg alone.
 - [ ] 25d. Set the camera projection to 2 (globe) and rotate so a stop goes behind the Earth →
       the stop and its legs fade out.
 - [ ] 26. Bake an old-style leg (a route from v0.5.0, or one made where Bézier lines aren't
@@ -152,15 +158,15 @@ adding street layers.
       already Cavalry shapes, so there's nothing to bake." New legs are native Bézier lines that
       Bake skips; with a map layer selected as well, the layer bakes and the status says how many
       route parts were skipped.
-- [ ] 26b. An old-style route made by v0.5.0 still draws, and its Controls rows (Arc height,
-      Leg N draw on %) still work.
+- [ ] 26b. An old-style route made by v0.5.0 still draws, and its Controls rows (Travel %, Arc
+      height, Colour, Width) work.
 - [ ] 27. Create route with one stop → "Add at least 2 stops to make a route.", nothing created.
 - [ ] 27b. Label → Routes: add 3 stops, select #2, **Remove selected** → list renumbers to
       1. A, 2. C; **Clear** empties it.
 - [ ] 27c. Adding the same place twice in a row is refused (status: "That's already the
       last stop."), and the stop is not added again.
 - [ ] 27d. Label → Routes: Traveller = Plane, add 2 or 3 stops, Create route → a plane sits at the
-      destination. In Controls key Leg 1 draw on % 0 → 100, then Leg 2 0 → 100 → the plane rides
+      destination. In Controls key Route 1 · Travel % 0 → 100 → the plane rides
       leg 1 then leg 2, facing forward.
 - [ ] 27e. Select a text layer and a route part, Traveller = Selected layer, **Add to route** →
       the text rides the route. Traveller = None, **Add to route** → the route has no traveller
@@ -245,7 +251,7 @@ adding street layers.
 - [ ] C3b. Open a scene saved before the Controls existed, with two pins where one was recoloured
       by hand → Refresh controls → the other pin follows Pins · Colour, the recoloured one keeps
       its colour (and stays separate on later refreshes).
-- [ ] C4. Make a route → Leg 1 draw on % animates the first leg drawing on.
+- [ ] C4. Make a route → Route 1 · Travel % animates the whole route drawing on.
 - [ ] C5. Add a data set → Data · Year changes regions, bubbles and labels together.
 - [ ] C6. Promote any other setting onto the Controls layer yourself (also try a pin's Position),
       then add a layer → your settings are still there, at the end, with their names.
@@ -296,6 +302,15 @@ adding street layers.
 - [ ] Apply style recolours both (they take the style's text colour).
 - [ ] Resize the comp, then press any panel action: both move to the new corners.
 - [ ] Bake with only the bar / arrow selected says they can't be baked; Extract's layer list doesn't show them.
+
+## Simpler route controls
+
+- [ ] Create two routes → they are named "Route 1: …" and "Route 2: …", and the Overlay controls show only Route n · Travel %, Arc height, Colour and Width for each (plus the traveller rows when it has one). No Lean, Flip side, per-leg draw on % or handle rows.
+- [ ] Open a scene saved before this change → press Refresh controls: its routes are numbered oldest first (the bottom of the Scene Window = 1), a route still named "Route: …" is renamed "Route n: …", a name you gave it is kept, and every leg gets a "Leg k draw" helper. Duplicate a route group and press Refresh controls → the copy takes the next free number.
+- [ ] Keyframe Route 1 · Travel % 0 → 100 on a 3-leg route → the legs draw on one after another; with a traveller, it rides all three legs.
+- [ ] Hover a route row and a Data n row in the Controls → the notes tooltip shows the route's stops / the data set's name. Type your own note on a row, press Refresh controls → your note stays.
+- [ ] In a scene saved before this change, a leg whose Trim end you keyframed by hand, connected, or set below 100 is left alone (no helper added, still animates / keeps its value).
+- [ ] An old-style route (made where Bézier lines are not available, or by v0.5.0) gets the same four rows and a working Travel %.
 
 ## Previews
 

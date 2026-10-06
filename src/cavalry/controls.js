@@ -7,6 +7,7 @@ var GeoControlPanel = (function () {
   var A = GeoAttrs, G = GeoControls;
   var PROMOTED = "promotedAttributes";
   var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
+  var NOTES_KEY = "geoNotes";
   var GROUP_KEY = "geoControlsGroup", GROUP_ORDER = G.GROUPS;
   var GROUP_SUFFIX = { main: " Map controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
   var OLD_MAIN_SUFFIX = " Controls"; // the main component's name before it became "<Map> Map controls"
@@ -164,15 +165,11 @@ var GeoControlPanel = (function () {
     });
   }
 
-  // Sorts layers (ids or { id }) in Scene Window order under the map group: top first, a
-  // group's children right after it; layers outside the group go last. The groups in `skip`
-  // (imagery, which holds thousands of tiles) are ranked but not looked inside.
-  function sceneOrder(groupId, skip) {
-    var order = {}, n = 0;
-    function visit(id) { api.getChildren(id).forEach(function (k) { order[k] = n++; if (!skip[k]) visit(k); }); }
-    function at(x) { var id = typeof x === "string" ? x : x.id; return order[id] === undefined ? 1e9 : order[id]; }
-    visit(groupId);
-    return function (a, b) { return at(a) - at(b); };
+  // The map's layers in Scene Window order (GeoScene.sceneOrder), never looking inside imagery groups.
+  function mapOrder(map, imagery) {
+    var skip = {};
+    imagery.forEach(function (im) { skip[im.groupId] = true; });
+    return GeoScene.sceneOrder(map.groupId, skip);
   }
 
   function linkState(id, attrs) {
@@ -210,12 +207,20 @@ var GeoControlPanel = (function () {
     try { return !!Number(api.get(id, attr)); } catch (e) { return false; }
   }
 
-  function readModel(map, valuesId) {
-    var S = G.STATE_ATTRS, imagery = GeoScene.findImagery(map), skip = {}, routes = {}, sets = {};
-    imagery.forEach(function (im) { skip[im.groupId] = true; });
-    var order = sceneOrder(map.groupId, skip);
+  // A route's existing draw helpers (leg order), each with its link state on the travel input.
+  function drawsOf(groupId) {
+    return GeoScene.routeDraws(groupId).map(function (d) { return { id: d, state: linkState(d, G.STATE_ATTRS.draw) }; });
+  }
+
+  // found: { mapLayers, routes, imagery, order }. The lists default to a fresh read; sync passes the
+  // ones it already read (no extra comp scans).
+  function readModel(map, valuesId, found) {
+    found = found || {};
+    var S = G.STATE_ATTRS, imagery = found.imagery || GeoScene.findImagery(map), routes = {}, sets = {};
+    var order = found.order || mapOrder(map, imagery);
     var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], travellers: [], data: { year: [], sets: [] }, imagery: [] };
-    var mapLayers = GeoScene.findMapLayers(map);
+    var mapLayers = found.mapLayers || GeoScene.findMapLayers(map);
+    var foundRoutes = found.routes || GeoScene.findRoutes(map);
     mapLayers.slice().sort(order).forEach(function (l, i) {
       var c = l.meta.category;
       if (G.BASE.indexOf(c) >= 0 || c === "extract") {
@@ -226,7 +231,11 @@ var GeoControlPanel = (function () {
         model.pins.push({ id: l.id, state: linkState(l.id, S.pin) });
       } else if (c === "route") {
         var g = api.getParent(l.id);
-        if (!routes[g]) { routes[g] = { id: g, name: stripPrefix(api.getNiceName(g), "Route: "), legs: [] }; model.routes.push(routes[g]); }
+        if (!routes[g]) {
+          var title = GeoScene.stripRoute(api.getNiceName(g));
+          routes[g] = { id: g, name: title, title: title, number: GeoScene.routeNumber(g), legs: [], draws: drawsOf(g) };
+          model.routes.push(routes[g]);
+        }
         routes[g].legs.push({ id: l.id, number: legNumber(l.name), place: i, state: linkState(l.id, S.leg) });
       } else if (c === "data" && DATA_KINDS[l.meta.display]) {
         var d = l.meta.display, p = api.getParent(l.id);
@@ -239,9 +248,11 @@ var GeoControlPanel = (function () {
     });
     model.routes.forEach(function (r) { sortLegs(r.legs); });
     var routeLabels = [];
-    GeoScene.findRoutes(map).sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
+    foundRoutes.slice().sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
+      // The notes list every stop from the route's record; the name (a fallback label) is the group's.
+      var name = GeoScene.stripRoute(api.getNiceName(r.groupId));
       model.newRoutes.push({
-        id: r.groupId, name: stripPrefix(r.name, "Route: "),
+        id: r.groupId, name: name, title: r.title || name, number: GeoScene.routeNumber(r.groupId), draws: drawsOf(r.groupId),
         legs: r.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) {
           return { id: l.line, number: l.number, state: linkState(l.line, S.newLeg),
             start: { id: l.startHandle, state: linkState(l.startHandle, S.handle) }, end: { id: l.endHandle, state: linkState(l.endHandle, S.handle) } };
@@ -372,10 +383,72 @@ var GeoControlPanel = (function () {
     attempt(function () { setUserData(comp, PROMOTED_KEY, wanted.map(keyOf)); });
   }
 
+  // Plugin notes on promotions: (re)set only where the notes are empty or still the plugin's own.
+  // Each row's promotion slot is looked up by its key (a row whose promotion failed has none, and
+  // the rows after it sit one slot higher).
+  function applyNotes(comp, wanted) {
+    var stored = userData(comp, NOTES_KEY) || {}, next = {}, at = {};
+    readPromotions(comp).forEach(function (p, i) { var k = keyOf(p); if (at[k] === undefined) at[k] = i; });
+    wanted.forEach(function (w) {
+      var key = keyOf(w), cur = "";
+      if (w.notes) next[key] = w.notes;
+      if (at[key] === undefined) return;
+      var path = PROMOTED + "." + at[key] + ".notes";
+      try { cur = String(api.get(comp, path) || ""); } catch (e) { cur = ""; }
+      if (w.notes && cur !== w.notes && (cur === "" || cur === stored[key])) attempt(function () { api.set(comp, one(path, w.notes)); });
+    });
+    attempt(function () { setUserData(comp, NOTES_KEY, next); });
+  }
+
+  // Rows an older version showed for a new-style route's handles (Lean, Flip side, a leg's shape
+  // by hand and handle X / Y) are no longer in the Controls. A values input still driving them
+  // that isn't animated hands its value to the handle helper inputs it drives, lets go of them
+  // and its key is forgotten (the input itself stays, so the other inputs keep their places).
+  // An animated one stays connected and keeps its key.
+  function handleInput(name) { return A.CAMERA_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.HANDLE_INPUTS, name); }
+  function retireHandleSlots(V, slots, routes) {
+    if (!has("disconnect")) return;
+    var LEAN = handleInput("lean"), FLIP = handleInput("flip"), HAND = handleInput("hand"), X = handleInput("handX"), Y = handleInput("handY");
+    routes.forEach(function (r) {
+      var old = {}, both = [];
+      r.legs.forEach(function (l) {
+        both.push(l.startHandle, l.endHandle);
+        var k = "leg:" + l.line + ":";
+        old[k + "hand"] = [[l.startHandle, HAND], [l.endHandle, HAND]];
+        old[k + "startX"] = [[l.startHandle, X]];
+        old[k + "startY"] = [[l.startHandle, Y]];
+        old[k + "endX"] = [[l.endHandle, X]];
+        old[k + "endY"] = [[l.endHandle, Y]];
+      });
+      old["route:" + r.groupId + ":lean"] = both.map(function (h) { return [h, LEAN]; });
+      old["route:" + r.groupId + ":flip"] = both.map(function (h) { return [h, FLIP]; });
+      Object.keys(old).forEach(function (key) {
+        var path = slots[key], keys = [], value, letGo = true;
+        if (!path) return;
+        try { keys = api.getKeyframeTimes(V, path) || []; } catch (e) { keys = []; }
+        if (keys.length) return;
+        try { value = api.get(V, path); } catch (e) { return; }
+        old[key].forEach(function (t) {
+          var from = "";
+          try { from = String(api.getInConnection(t[0], t[1]) || ""); } catch (e) { from = ""; }
+          if (from !== V + "." + path) return;
+          if (!attempt(function () { api.disconnect(V, path, t[0], t[1]); })) { letGo = false; return; }
+          if (value !== undefined && value !== null) attempt(function () { api.set(t[0], one(t[1], value)); });
+        });
+        if (letGo) delete slots[key];
+      });
+    });
+  }
+
   function sync(map) {
     requireApis();
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
-    var model = readModel(map, V), p = G.plan(model);
+    // Routes are numbered and given their draw helpers first, from the lists and Scene Window
+    // order this sync reads once (Cavalry may select the helpers it makes: the selection is kept).
+    var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: GeoScene.findImagery(map) };
+    found.order = mapOrder(map, found.imagery);
+    attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
+    var model = readModel(map, V, found), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {
       var fu = model.furniture;
@@ -384,6 +457,7 @@ var GeoControlPanel = (function () {
     var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [] };
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
+      attempt(function () { retireHandleSlots(V, slots, found.routes); });
       p.rows.forEach(function (row, i) {
         if (row.kind === "direct") {
           attempt(function () { api.renameAttribute(row.layer, row.attr, inputLabel(row.attr, row.label)); });
@@ -392,7 +466,7 @@ var GeoControlPanel = (function () {
               attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
             });
           }
-          wanted[p.groups[i]].push({ layer: row.layer, attr: row.attr });
+          wanted[p.groups[i]].push({ layer: row.layer, attr: row.attr, notes: row.notes || "" });
           return;
         }
         attempt(function () {
@@ -407,7 +481,7 @@ var GeoControlPanel = (function () {
             if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
             if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
-          wanted[p.groups[i]].push({ layer: V, attr: path });
+          wanted[p.groups[i]].push({ layer: V, attr: path, notes: row.notes || "" });
         });
       });
     } finally {
@@ -423,11 +497,13 @@ var GeoControlPanel = (function () {
       readPromotions(existing).forEach(function (p) { if (p.name || p.notes) typed[keyOf(p)] = { name: p.name, notes: p.notes }; });
     });
     rebuild(made.id, V, wanted.main, typed);
+    applyNotes(made.id, wanted.main);
     GROUP_ORDER.forEach(function (g) {
       if (g === "main") return;
       var comp = findOrCreateGroup(map, g, wanted[g].length > 0, cache);
       if (!comp) return;
       rebuild(comp, V, wanted[g], typed);
+      applyNotes(comp, wanted[g]);
       // A group component the plugin no longer needs is removed: nothing wanted, nothing inside, and
       // a promotions list that was read successfully and is empty (an unreadable one is left alone).
       var after = { ok: true };

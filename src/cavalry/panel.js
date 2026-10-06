@@ -621,7 +621,8 @@ bakeBtn.onClick = guard(function () {
       GeoScene.findRoutes(m).forEach(function (r) {
         if (r.helpers) routeParts[r.helpers] = true;
         r.stops.forEach(function (s) { [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint].forEach(function (p) { if (p) routeParts[p] = true; }); });
-        r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        r.legs.forEach(function (l) { [l.line, l.startHandle, l.endHandle, l.fade, l.draw].forEach(function (p) { if (p) routeParts[p] = true; }); });
+        GeoScene.routeDraws(r.groupId).forEach(function (d) { routeParts[d] = true; });
       });
       // A traveller's copies, helpers and plugin marker are route parts too (your own layer is not).
       GeoScene.findTravellers(m).forEach(function (t) {
@@ -958,8 +959,8 @@ createRouteBtn.onClick = guard(function () {
     try { GeoScene.addTraveller(map, r.groupId, kind, layer); }
     catch (e) { travNote = " The traveller couldn't be added: " + (e && e.message ? e.message : e) + "."; }
   }
-  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls."
-    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate each leg's draw on % in the map's Controls.";
+  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate its Travel % in the map's Controls."
+    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate its Travel % in the map's Controls.";
   say("Route created: " + r.legs.length + " leg(s)." + how + travNote + syncControls(map));
 });
 addTravellerBtn.onClick = guard(function () {
@@ -967,7 +968,7 @@ addTravellerBtn.onClick = guard(function () {
   try { sel = api.getSelection() || []; } catch (e) { sel = []; }
   var groupId = GeoScene.routeOfSelection(map, sel);
   if (!groupId) throw new Error("Select a route (any part of it) first.");
-  var kind = TRAVELLER_KINDS[travellerPicker.getValue()], name = String(api.getNiceName(groupId)).replace(/^Route: /, "");
+  var kind = TRAVELLER_KINDS[travellerPicker.getValue()], name = GeoScene.stripRoute(api.getNiceName(groupId));
   if (!kind) {
     if (!GeoScene.removeTraveller(map, groupId)) throw new Error("This route has no traveller to remove.");
     say("Traveller removed from " + name + "." + syncControls(map));

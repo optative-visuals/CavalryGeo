@@ -75,10 +75,11 @@ the **Controls** tab there to find the map's settings in one place:
 - **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
   (for cities) dot size.
 - **Pins** and **Labels:** one hide, colour and size for all of them.
-- **Routes:** colour, width, arc height, lean and flip side for each route, and for each leg its
-  **draw on %** to animate and **shape by hand** for exact control of its curve.
+- **Routes:** each route is numbered ("Route 1: Paris → Rome") and gets four rows, **Route n · Travel %**,
+  **Arc height**, **Colour** and **Width** (plus its traveller rows). Hover a row to see the route's stops.
 - **Stops:** one **Hide**, **Colour** and **Size** for every route stop.
-- **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
+- **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size
+  (**Data 1 · …**, **Data 2 · …**; hover a row to see which set it is).
 - **Imagery:** opacity and hide.
 
 A map's settings are split over up to four components, stacked above the map group: **Map controls**
@@ -195,13 +196,23 @@ cache come after them).
   select it and press **Pin here**: the spot you dropped it on becomes its new place, so from then
   on it stays on that spot of the map as the camera moves. If a stop's place is animated
   (keyframed), Pin here sets a key at the current frame.
-- The curve is shaped from the map's Controls: per route, **Arc height**, **Lean** and
-  **Flip side** change every leg at once. For one leg, tick `<route> · Leg N shape by hand` and
-  set its start and end handle X / Y numbers (in pixels, relative to each stop) — handy for still
-  shots. Untick it to go back to the plugin's shape.
-- To draw a leg on, animate its `<route> · Leg N draw on %` row (0 → 100) in the map's Controls.
-  For a journey, stagger the legs' draw on % keys (leg 2 starts where leg 1 ends) to draw the
-  route leg by leg. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
+- Routes are numbered: "Route 1: Paris → Rome", "Route 2: …". Routes made before numbers are
+  numbered the next time the Controls refresh (or when you make a route), oldest first (from the
+  bottom of the Scene Window up), and a name that still reads "Route: …" is renamed; a name you
+  gave a route yourself is kept. A duplicated route takes the next free number.
+- The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
+  once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
+  Controls: their values live on the route's handle helpers (inside its "Route helpers" group),
+  and on a map from an older version the Controls hand their values over to those helpers. One
+  you had animated (keyed) stays on "<Map> control values", still driving the helpers.
+- To draw the route on, animate **Route n · Travel %** from 0 to 100 (two keyframes): the legs
+  draw on one after another, and a traveller rides along. Each leg's draw is a small helper
+  ("Leg k draw") driving its Trim end; a leg whose Trim end you had already animated, connected
+  or set below 100 yourself is left alone. On a new route every leg's Trim end is driven by its
+  draw helper, so to animate one leg by hand, disconnect its helper first. `Stops · Hide`,
+  `Stops · Colour` and `Stops · Size` style every circle.
+- Hover any route row in the Controls to see the route's stops (its notes). A note you type
+  there yourself is never overwritten.
 - **Travellers.** Pick a **Traveller** (Plane, Arrow, Dot or Selected layer) before **Create route**
   and it rides the route, leg by leg, sitting at the tip of each leg as it draws on and facing the
   way the leg is heading. To add one to a route you already have, pick a Traveller, select any
@@ -231,7 +242,7 @@ cache come after them).
   Each goes in its own layer inside a `Data: <column>` group and moves with the camera.
 - Keyframe **Data · Year** in the map's Controls to animate through time: it drives every data
   layer of the map, so regions, bubbles and labels stay in step. Each set's colours and sizes are
-  there too (`<set> · Low colour`, `<set> · Bubble size`…); the range is on the layers. After
+  there too (`Data 1 · Low colour`, `Data 1 · Bubble size`…); the range is on the layers. After
   editing the sheet, press **Refresh data** — your styling and keyframes are kept.
 
 ## Cache and settings
