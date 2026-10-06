@@ -102,6 +102,17 @@ adding street layers.
       camera no longer moves it.
 - [ ] 16. Bake with a non-map layer selected → a clear error, nothing created.
 
+### Highlights
+
+- [ ] 16h1. Find "France", select it, pick each Effect in turn (Fill in, Outline draw-on, Pulse, Glow) with Start at the playhead and press Highlight selected → France is extracted if needed and a "Highlight n: France" group appears; step through a few frames (before Start, mid, after the end) and each effect looks right. Start moves on to Start + Frames after each press.
+- [ ] 16h2. Pulse: the ring follows the outline (including an irregular country) and keeps looping after Amount % reaches 100.
+- [ ] 16h3. Glow: the halo is clearly visible on a light map, and the place itself stays crisp above it.
+- [ ] 16h4. Amount % keys sit on the timeline at Start and Start + Frames; drag them and the effect re-times.
+- [ ] 16h5. The map's Extract controls show Highlight n · Amount % and Colour (plus Width for Outline draw-on, Speed for Pulse, Size for Glow); hover a row → the note names the place. Changing each row changes the effect.
+- [ ] 16h6. Highlight the same place twice → one extract, two highlights, numbered 1 and 2.
+- [ ] 16h7. Delete the extracted place, press Refresh controls → its highlight group and rows are gone. Delete a highlight group on its own → no leftover oscillator, helper or blur layers.
+- [ ] 16h8. Select a highlight's shape or group → Bake says "Highlights can't be baked."; Find's layer list doesn't offer highlights.
+
 ## Label → Pins
 
 - [ ] 16b. Search results come back in English (e.g. "Tokyo, Japan"), so layer names

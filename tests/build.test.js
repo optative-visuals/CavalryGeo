@@ -520,7 +520,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -3680,7 +3680,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn"];
-  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -6228,6 +6228,66 @@ test("Extract Find box: the Find button always runs, and the text it ran counts 
   context.featureQuery.setText("Louvre");
   context.featureQuery.onValueCommitted();
   assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
+});
+
+function findFrance(context) {
+  const C = require("../src/core/codec.js"), map = controlsMap(context), G = context.GeoScene;
+  const poly = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} }] });
+  G.createMapLayer(map, "Map: Countries", poly, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  context.featureQuery.setText("France");
+  context.findBtn.onClick();
+  context.featureList.getSelection = () => ["g0"];
+  return map;
+}
+
+test("Highlight selected: extracts a feature not yet extracted, then highlights it with the picked effect and timing", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  context.highlightEffectPicker.setValue(1);          // Outline draw-on
+  context.highlightStartField.setValue(12);
+  context.highlightLengthField.setValue(8);
+  context.highlightBtn.onClick();
+  const extracts = G.findMapLayers(map).filter((l) => l.meta.category === "extract");
+  assert.equal(extracts.length, 1);
+  const hs = G.findHighlights(map);
+  assert.equal(hs.length, 1); assert.equal(hs[0].effect, "outline"); assert.equal(hs[0].extract, extracts[0].id);
+  assert.deepEqual(plain(api.getKeyframeTimes(hs[0].shape, "stroke.trimEnd")), [12, 20]);
+  assert.match(context.statusLabel.getText(), /^Highlighted 1 feature\(s\) with Outline draw-on\. Animate or re-time its Amount % keys on the timeline\./);
+  assert.equal(context.highlightStartField.getValue(), 20, "Start moves on so the next highlight follows");
+});
+
+test("Highlight selected: reuses the feature's existing extract", () => {
+  const { context } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  context.extractBtn.onClick();
+  context.highlightBtn.onClick();
+  context.highlightBtn.onClick();
+  assert.equal(G.findMapLayers(map).filter((l) => l.meta.category === "extract").length, 1);
+  assert.equal(G.findHighlights(map).length, 2);
+});
+
+test("Highlight selected: asks for Find first, then for a selection", () => {
+  const { context } = buildSandbox();
+  context.highlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Click Find first (Layers tab).");
+  findFrance(context);
+  context.featureList.getSelection = () => [];
+  context.highlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select some features in the list first.");
+});
+
+test("Highlight row sits in the Layers tab's Extract section; highlights are not Extract sources; Bake skips them", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context);
+  assert.deepEqual(plain(context.highlightEffectPicker._entries), ["Fill in", "Outline draw-on", "Pulse", "Glow"]);
+  assert.ok(holds(context.sectionPages.pages[1], context.highlightBtn), "Layers page");
+  context.highlightBtn.onClick();
+  context.findBtn.onClick();
+  assert.ok(!context.sourceLayers.some((l) => l.meta.category === "highlight"));
+  const h = context.GeoScene.findHighlights(map)[0];
+  api.select([h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
 });
 
 function stubLoad(context) {

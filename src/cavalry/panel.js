@@ -531,7 +531,7 @@ clearCacheBtn.onClick = guard(function () {
 });
 
 // ---- Extract and Bake (in the Layers section) ---------------------------------
-var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow"];
+var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow", "highlight"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
 var refreshLayersBtn = GeoStyle.button("Refresh");
@@ -540,6 +540,21 @@ var findBtn = GeoStyle.button("Find");
 var featureList = new ui.List();
 featureList.setSelectionMode("extended");
 var extractBtn = GeoStyle.button("Extract selected");
+// Highlight: an effect, Start (opens on the playhead and moves on after each highlight, like Fly
+// here) and Duration (1 second of the comp's frames).
+function compFps() {
+  try { var f = Number(api.get(api.getActiveComp(), "fps")); return isFinite(f) && f > 0 ? Math.round(f) : 25; } catch (e) { return 25; }
+}
+var highlightEffectPicker = new ui.DropDown();
+GeoScene.HIGHLIGHT_EFFECTS.forEach(function (e) { highlightEffectPicker.addEntry(e.name); });
+var highlightStartField = new ui.NumericField(playhead());
+var highlightLengthField = new ui.NumericField(compFps());
+[highlightStartField, highlightLengthField].forEach(function (f) {
+  f.setType(0);
+  if (typeof f.setFixedWidth === "function") f.setFixedWidth(48);
+});
+highlightStartField.setMin(0); highlightLengthField.setMin(1);
+var highlightBtn = GeoStyle.button("Highlight selected");
 var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
 var refreshControlsBtn = GeoStyle.button("Refresh controls");
 
@@ -609,10 +624,31 @@ extractBtn.onClick = guard(function () {
   say("Extracted " + sel.length + " feature layer(s). They follow the camera; style and animate them freely." + syncControls(map));
 });
 
+highlightBtn.onClick = guard(function () {
+  if (!groupsLayer) throw new Error("Click Find first (Layers tab).");
+  var sel = featureList.getSelection();
+  if (!sel || !sel.length) throw new Error("Select some features in the list first.");
+  var map = currentMap(), effects = GeoScene.HIGHLIGHT_EFFECTS, effect = effects[highlightEffectPicker.getValue()] || effects[0];
+  var start = Math.max(0, Math.round(Number(highlightStartField.getValue()) || 0));
+  var duration = Math.max(1, Math.round(Number(highlightLengthField.getValue()) || 1));
+  // A feature already extracted on this map (same name, same source layer) is reused.
+  var extracts = GeoScene.findMapLayers(map).filter(function (l) { return l.meta.category === "extract" && l.meta.source === groupsLayer.meta.category; });
+  sel.forEach(function (uuid) {
+    var g = groups[parseInt(String(uuid).slice(1), 10)], name = g.name || "Feature";
+    var have = extracts.filter(function (l) { return l.name === name; })[0];
+    var id = have ? have.id : GeoScene.extract(map, groupsLayer, groupsEnc, g);
+    if (!have) extracts.push({ id: id, name: name, meta: { category: "extract", source: groupsLayer.meta.category } });
+    GeoScene.createHighlight(map, id, effect.id, { start: start, duration: duration });
+  });
+  highlightStartField.setValue(start + duration);
+  say("Highlighted " + sel.length + " feature(s) with " + effect.name + ". Animate or re-time its Amount % keys on the timeline." + syncControls(map));
+});
+
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, other = 0;
+  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, skippedHighlight = 0, other = 0;
+  var hlParts = {};
   // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
   // so its parts are skipped with a message of their own rather than counted as "other".
   var routeParts = {};
@@ -630,10 +666,13 @@ bakeBtn.onClick = guard(function () {
         if (t.scale) routeParts[t.scale] = true;
         if (!t.userSource && t.source) routeParts[t.source] = true;
       });
+      var hp = GeoScene.highlightParts(m);
+      Object.keys(hp).forEach(function (k) { hlParts[k] = true; });
     });
   } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
     if (routeParts[id]) { skippedRoute++; return; }
+    if (hlParts[id]) { skippedHighlight++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "data") { skippedData++; return; }
@@ -645,6 +684,8 @@ bakeBtn.onClick = guard(function () {
   if (baked === 0) {
     if (skippedFurniture && !skippedRoute && !skippedData && !other) {
       throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
+    } else if (skippedHighlight && !skippedRoute && !skippedData && !skippedFurniture && !other) {
+      throw new Error("Highlights can't be baked.");
     } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
@@ -657,6 +698,7 @@ bakeBtn.onClick = guard(function () {
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
   if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
+  if (skippedHighlight) msg += " Skipped " + skippedHighlight + " highlight part(s).";
   if (skippedFurniture) msg += " Skipped the scale bar / north arrow (they follow the camera).";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
@@ -691,6 +733,8 @@ TAB_BUILDERS.push(function (tabs) {
     row(featureQuery, findBtn),
     featureList,
     extractBtn,
+    row(highlightEffectPicker, new ui.Label("Start:"), GeoStyle.frameField(highlightStartField), new ui.Label("Frames:"), GeoStyle.frameField(highlightLengthField)),
+    highlightBtn,
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
