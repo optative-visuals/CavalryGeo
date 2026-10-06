@@ -7305,8 +7305,9 @@ test("prepareRoutes numbers existing unnumbered routes in Scene Window order, re
   api.rename(b.groupId, "My trip");
   api.keyframe(a.legs[0], 0, { "stroke.trimEnd": 0 });
   G.prepareRoutes(map);
-  const kids = api.getChildren(map.groupId), first = kids.indexOf(a.groupId) < kids.indexOf(b.groupId) ? a : b, second = first === a ? b : a;
-  assert.equal(G.routeNumber(first.groupId), 1, "top of the Scene Window first");
+  const kids = api.getChildren(map.groupId), first = a, second = b;
+  assert.ok(kids.indexOf(b.groupId) < kids.indexOf(a.groupId), "the newer route sits higher in the Scene Window");
+  assert.equal(G.routeNumber(first.groupId), 1, "bottom of the Scene Window (the oldest) first");
   assert.equal(G.routeNumber(second.groupId), 2);
   assert.equal(api.getNiceName(a.groupId), "Route " + G.routeNumber(a.groupId) + ": A → B → C");
   assert.equal(api.getNiceName(b.groupId), "My trip", "a user name is kept");
@@ -7343,7 +7344,7 @@ test("controls: a route shows Travel %, Arc height, Colour and Width in the Over
   assert.equal(api.get(s.components.overlay, "promotedAttributes." + i + ".notes"), "A → B → C");
   const slot = slotsOf(api, s.valuesId)["route:" + r.groupId + ":travel"];
   G.routeDraws(r.groupId).forEach((d) => assert.equal(api.getInConnection(d, "array.0"), s.valuesId + "." + slot));
-  assert.ok(list.length);
+  assert.equal(list[i], s.valuesId + "." + slot, "the Travel % row is the travel input");
 });
 
 test("controls: a refresh numbers an old route and gives it Travel %; notes the user typed are kept", () => {
@@ -7364,4 +7365,316 @@ test("controls: a refresh numbers an old route and gives it Travel %; notes the 
   const s2 = context.GeoControlPanel.sync(map);
   const j = plain(promotedNames(api, s2.components.overlay)).indexOf("Route 1 · Colour");
   assert.equal(api.get(s2.components.overlay, "promotedAttributes." + j + ".notes"), "my note");
+});
+
+// ---- Simpler route controls: final review fixes ----
+const STOPS_DE = [{ name: "D", lon: 1, lat: 1 }, { name: "E", lon: 2, lat: 2 }];
+const STOPS_FG = [{ name: "F", lon: 3, lat: 3 }, { name: "G", lon: 4, lat: 4 }];
+function routeMap(context, name) { return context.GeoScene.createMap(name || "P", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 }); }
+// Makes a new-style route look like one from before route numbers: no number, no draw helpers
+// (and, when given, the old default title).
+function unnumber(api, G, r, title) {
+  G.routeDraws(r.groupId).forEach((d) => api.deleteLayer(d));
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.legs.forEach((l) => delete l.draw);
+  api.setUserData(r.groupId, "geoRoute", rec);
+  api.setUserData(r.groupId, "geoRouteNumber", null);
+  if (title) api.rename(r.groupId, title);
+}
+function handleInput(context, name) { return "array." + context.GeoExpression.inputIndex(context.GeoExpression.HANDLE_INPUTS, name); }
+function drawHelpers(api) { return api.getCompLayers(false).filter((id) => / draw$/.test(api.getNiceName(id))); }
+function notesAt(api, comp, label) {
+  const i = plain(promotedNames(api, comp)).indexOf(label);
+  assert.ok(i >= 0, label + " is promoted");
+  return api.get(comp, "promotedAttributes." + i + ".notes");
+}
+
+test("controls upgrade: an older map's leg draw on %, Lean, Flip side and shape-by-hand rows are retired on sync", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  const r1 = context.GeoControlPanel.sync(map), V = r1.valuesId;
+  unnumber(api, G, r, "Route: A → B → C");
+  const legs = plain(api.getUserDataKey(r.groupId, "geoRoute")).legs.sort((x, y) => x.number - y.number), handles = [];
+  legs.forEach((l) => handles.push(l.startHandle, l.endHandle));
+  const LEAN = handleInput(context, "lean"), FLIP = handleInput(context, "flip"), HAND = handleInput(context, "hand");
+  // The old rows: leg 1's draw on % promoted straight from its (animated) trim end...
+  api.keyframe(legs[0].line, 0, { "stroke.trimEnd": 0 });
+  api.keyframe(legs[0].line, 10, { "stroke.trimEnd": 100 });
+  api.connect(legs[0].line, "stroke.trimEnd", r1.componentId, "promotedAttributes");
+  // ...and values inputs for Lean (not animated), leg 2's shape by hand (not animated) and Flip side (animated).
+  const slots = slotsOf(api, V);
+  function oldSlot(key, value, targets) {
+    const path = api.addDynamic(V, "array");
+    api.set(V, { [path]: value });
+    targets.forEach(([h, attr]) => api.connect(V, path, h, attr, true));
+    api.connect(V, path, r1.componentId, "promotedAttributes");
+    slots[key] = path;
+    return path;
+  }
+  const lean = oldSlot("route:" + r.groupId + ":lean", 15, handles.map((h) => [h, LEAN]));
+  const hand = oldSlot("leg:" + legs[1].line + ":hand", true, [[legs[1].startHandle, HAND], [legs[1].endHandle, HAND]]);
+  const flip = oldSlot("route:" + r.groupId + ":flip", false, handles.map((h) => [h, FLIP]));
+  api.keyframe(V, 0, { [flip]: false });
+  api.keyframe(V, 10, { [flip]: true });
+  api.setUserData(V, "geoSlots", slots);
+  combineIntoMain(api, r1); // the old single Controls: every row in main, stored as the plugin's (geoPromoted)
+  const old = [legs[0].line + ".stroke.trimEnd", V + "." + lean, V + "." + hand, V + "." + flip];
+  old.forEach((a) => assert.ok(plain(api._promoted(r1.componentId)).includes(a), a + " starts promoted"));
+
+  const r2 = context.GeoControlPanel.sync(map);
+  const all = ["main", "overlay", "data", "extract"].map((g) => r2.components[g]).filter(Boolean).flatMap((c) => plain(api._promoted(c)));
+  old.forEach((a) => assert.ok(!all.includes(a), a + " is no longer promoted"));
+  const names = plain(promotedNames(api, r2.components.overlay));
+  ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"].forEach((n) => assert.ok(names.includes(n), n));
+  // The animated leg keeps its keys and gets no helper; leg 2 gets one.
+  assert.deepEqual(plain(api.getKeyframeTimes(legs[0].line, "stroke.trimEnd")), [0, 10]);
+  assert.equal(api.getInConnection(legs[0].line, "stroke.trimEnd"), "");
+  const draws = drawsOf(api, G, r.groupId);
+  assert.equal(draws.length, 1);
+  assert.equal(api.getInConnection(legs[1].line, "stroke.trimEnd"), draws[0] + ".id");
+  // Lean and shape by hand let go, their values kept on the handle helpers, their keys forgotten.
+  handles.forEach((h) => { assert.equal(api.getInConnection(h, LEAN), ""); assert.equal(api.get(h, LEAN), 15); });
+  [legs[1].startHandle, legs[1].endHandle].forEach((h) => { assert.equal(api.getInConnection(h, HAND), ""); assert.equal(api.get(h, HAND), true); });
+  const after = slotsOf(api, V);
+  assert.equal(after["route:" + r.groupId + ":lean"], undefined);
+  assert.equal(after["leg:" + legs[1].line + ":hand"], undefined);
+  // The animated Flip side stays connected and keeps its key.
+  handles.forEach((h) => assert.equal(api.getInConnection(h, FLIP), V + "." + flip));
+  assert.equal(after["route:" + r.groupId + ":flip"], flip);
+  assert.deepEqual(plain(api.getKeyframeTimes(V, flip)), [0, 10]);
+});
+
+test("prepareRoutes: a leg whose trim end is connected (not keyed) to something else gets no helper", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  unnumber(api, G, r);
+  const mine = api.create("javaScript", "My driver");
+  api.connect(mine, "id", r.legs[0], "stroke.trimEnd", true);
+  G.prepareRoutes(map);
+  assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), mine + ".id", "still driven by the user's layer");
+  const draws = drawsOf(api, G, r.groupId);
+  assert.equal(draws.length, 1);
+  assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), draws[0] + ".id");
+});
+
+test("prepareRoutes: a leg whose trim end was set by hand to 50 counts as taken and gets no helper", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  unnumber(api, G, r);
+  api.set(r.legs[1], { "stroke.trimEnd": 50 });
+  G.prepareRoutes(map);
+  const draws = drawsOf(api, G, r.groupId);
+  assert.equal(draws.length, 1);
+  assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), draws[0] + ".id");
+  assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), "");
+  assert.equal(api.get(r.legs[1], "stroke.trimEnd"), 50, "the user's value stays");
+});
+
+test("prepareRoutes: an old-style route gets helpers in geoRouteTravel; a record copied from another group keeps only the group's own legs", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const G = context.GeoScene, map = routeMap(context, "O");
+  const a = G.createRoute(map, STOPS3, { lift: 30, pins: false, labels: false });
+  const b = G.createRoute(map, STOPS_DE, { lift: 30, pins: false, labels: false });
+  // a: from before Travel % (no helpers, no record).
+  G.routeDraws(a.groupId).forEach((d) => api.deleteLayer(d));
+  api.setUserData(a.groupId, "geoRouteTravel", null);
+  G.prepareRoutes(map);
+  const ta = plain(api.getUserDataKey(a.groupId, "geoRouteTravel"));
+  assert.deepEqual(ta.legs.map((l) => l.line), plain(a.legs));
+  ta.legs.forEach((l, k) => {
+    assert.equal(api.getInConnection(l.line, "stroke.trimEnd"), l.draw + ".id");
+    assert.equal(api.getParent(l.draw), a.groupId, "an old-style helper sits in the route group");
+    assert.equal(api.get(l.draw, "array.1"), k);
+    assert.equal(api.get(l.draw, "array.2"), 2);
+  });
+  // b: like a duplicate of a (the group copies a's record); its own legs are free.
+  G.routeDraws(b.groupId).forEach((d) => api.deleteLayer(d));
+  api.setUserData(b.groupId, "geoRouteTravel", ta);
+  assert.deepEqual(drawsOf(api, G, b.groupId), [], "the copied record's helpers are not b's");
+  G.prepareRoutes(map);
+  const tb = plain(api.getUserDataKey(b.groupId, "geoRouteTravel"));
+  assert.deepEqual(tb.legs.map((l) => l.line), plain(b.legs), "only b's own legs");
+  tb.legs.forEach((l) => { assert.equal(api.getParent(l.draw), b.groupId); assert.equal(api.getInConnection(l.line, "stroke.trimEnd"), l.draw + ".id"); });
+  assert.deepEqual(plain(api.getUserDataKey(a.groupId, "geoRouteTravel")), ta, "a keeps its own record");
+});
+
+test("prepareRoutes: an already-numbered route is never renamed, even when its name reads \"Route: …\"", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, STOPS_DE, { arc: 30 });
+  api.rename(a.groupId, "Route: Custom");
+  G.prepareRoutes(map);
+  assert.equal(api.getNiceName(a.groupId), "Route: Custom");
+  assert.equal(api.getNiceName(b.groupId), "Route 2: D → E");
+  assert.deepEqual([G.routeNumber(a.groupId), G.routeNumber(b.groupId)], [1, 2]);
+});
+
+test("route numbers: older unnumbered routes are numbered bottom first (oldest first), and a new route takes the next number on its first create", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, STOPS_DE, { arc: 30 });
+  unnumber(api, G, a, "Route: A → B → C");
+  unnumber(api, G, b, "Route: D → E");
+  const c = G.createRoute(map, STOPS_FG, { arc: 30 });
+  assert.deepEqual([a, b, c].map((r) => G.routeNumber(r.groupId)), [1, 2, 3]);
+  assert.deepEqual([a, b, c].map((r) => api.getNiceName(r.groupId)), ["Route 1: A → B → C", "Route 2: D → E", "Route 3: F → G"]);
+});
+
+test("route numbers: a route inside a group within the map is ranked by its place in the Scene Window", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const folder = api.create("group", "Folder");
+  api.parent(folder, map.groupId); // at the bottom once the routes are made
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, STOPS_DE, { arc: 30 });
+  api.parent(b.groupId, folder);
+  unnumber(api, G, a, "Route: A → B → C");
+  unnumber(api, G, b, "Route: D → E");
+  G.prepareRoutes(map);
+  assert.equal(G.routeNumber(b.groupId), 1, "b sits lowest (inside the bottom group)");
+  assert.equal(G.routeNumber(a.groupId), 2);
+});
+
+test("route numbers: a route sharing its number with an older one (a duplicated group) takes the highest + 1, renamed only if it still has the plugin's name", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, STOPS_DE, { arc: 30 }), c = G.createRoute(map, STOPS_FG, { arc: 30 });
+  [b, c].forEach((r) => api.setUserData(r.groupId, "geoRouteNumber", 1));
+  api.rename(b.groupId, "My trip");
+  api.rename(c.groupId, "Route 1: F → G");
+  G.prepareRoutes(map);
+  assert.deepEqual([a, b, c].map((r) => G.routeNumber(r.groupId)), [1, 2, 3], "oldest keeps 1; the later copies count on from the highest");
+  assert.deepEqual([a, b, c].map((r) => api.getNiceName(r.groupId)), ["Route 1: A → B → C", "My trip", "Route 3: F → G"]);
+  const d = G.createRoute(map, [{ name: "H", lon: 5, lat: 5 }, { name: "I", lon: 6, lat: 6 }], { arc: 30 });
+  assert.equal(G.routeNumber(d.groupId), 4);
+});
+
+test("route numbers: renaming \"Route: …\" to \"Route n: …\" keeps the 60-character cap", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const r = G.createRoute(map, STOPS_DE, { arc: 30 });
+  const long = "Saint-Rémy-de-Provence → Aix-en-Provence → Marseille → Toulon";
+  unnumber(api, G, r, "Route: " + long);
+  G.prepareRoutes(map);
+  const name = api.getNiceName(r.groupId);
+  assert.equal(name.length, 60);
+  assert.equal(name, ("Route 1: " + long).slice(0, 59) + "…");
+});
+
+test("prepareRoutes: a helper that can't be wired is deleted, the helpers made before it are recorded, and the other routes still get theirs", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = routeMap(context);
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, STOPS3, { arc: 30 });
+  unnumber(api, G, a);
+  unnumber(api, G, b);
+  const real = api.connect;
+  api.connect = function (x, y, z, w) { if (w === "stroke.trimEnd" && z === b.legs[1]) throw new Error("no"); return real.apply(this, arguments); };
+  assert.doesNotThrow(() => G.prepareRoutes(map));
+  api.connect = real;
+  assert.equal(drawHelpers(api).length, 3, "b's leg 1 and both of a's: the failed helper is gone");
+  assert.equal(plain(api.getUserDataKey(b.groupId, "geoRoute")).legs.filter((l) => l.draw).length, 1, "b's record keeps the helper made before the failure");
+  assert.equal(drawsOf(api, G, a.groupId).length, 2, "a later route still gets its helpers");
+  G.prepareRoutes(map);
+  assert.equal(drawsOf(api, G, b.groupId).length, 2, "the next refresh finishes b");
+});
+
+test("an old-style route whose leg helper can't be wired keeps no stray helper; the next refresh adds it", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const G = context.GeoScene, map = routeMap(context, "O");
+  const real = api.connect;
+  let n = 0;
+  api.connect = function (x, y, z, w) { if (w === "stroke.trimEnd" && ++n === 2) throw new Error("no"); return real.apply(this, arguments); };
+  const r = G.createRoute(map, STOPS3, { lift: 30, pins: false, labels: false });
+  api.connect = real;
+  assert.deepEqual(plain(api.getUserDataKey(r.groupId, "geoRouteTravel")).legs.map((l) => l.line), [r.legs[0]], "the helper made is recorded");
+  assert.equal(drawHelpers(api).length, 1, "the helper that failed was deleted");
+  assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), "");
+  G.prepareRoutes(map);
+  const draws = drawsOf(api, G, r.groupId);
+  assert.equal(draws.length, 2);
+  assert.equal(api.get(draws[1], "array.1"), 1);
+  assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), draws[1] + ".id");
+});
+
+test("controls: a refresh that adds draw helpers keeps the user's selection", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  const pin = G.addPin(map, "P", 1, 1);
+  context.GeoControlPanel.sync(map);
+  unnumber(api, G, r);
+  const realCreate = api.create;
+  api.create = function () { const id = realCreate.apply(this, arguments); api.select([id]); return id; };
+  api.select([pin]);
+  context.GeoControlPanel.sync(map);
+  api.create = realCreate;
+  assert.equal(G.routeDraws(r.groupId).length, 2, "helpers were made");
+  assert.deepEqual(plain(api.getSelection()), [pin]);
+});
+
+test("controls: a route's notes list every stop from its record (not the capped name) and follow when the stops change", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const stops = [{ name: "Saint-Rémy-de-Provence", lon: 0, lat: 0 }, { name: "Aix-en-Provence", lon: 5, lat: 5 }, { name: "Marseille", lon: 6, lat: 4 }, { name: "Toulon", lon: 7, lat: 3 }];
+  const r = G.createRoute(map, stops, { arc: 30 });
+  const full = stops.map((s) => s.name).join(" → ");
+  assert.ok(api.getNiceName(r.groupId).endsWith("…"), "the group name is capped");
+  const s1 = context.GeoControlPanel.sync(map);
+  assert.equal(notesAt(api, s1.components.overlay, "Route 1 · Travel %"), full);
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.stops[3].name = "Hyères";
+  api.setUserData(r.groupId, "geoRoute", rec);
+  const s2 = context.GeoControlPanel.sync(map);
+  assert.equal(notesAt(api, s2.components.overlay, "Route 1 · Colour"), "Saint-Rémy-de-Provence → Aix-en-Provence → Marseille → Hyères");
+});
+
+test("controls: an old-style route's notes follow its title when the group is renamed", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const map = controlsMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, STOPS3, { lift: 30, pins: false, labels: false });
+  const s1 = context.GeoControlPanel.sync(map);
+  assert.equal(notesAt(api, s1.components.overlay, "Route 1 · Width"), "A → B → C");
+  api.rename(r.groupId, "Route 1: Paris → Rome");
+  const s2 = context.GeoControlPanel.sync(map);
+  ["Travel %", "Arc height", "Colour", "Width"].forEach((n) => assert.equal(notesAt(api, s2.components.overlay, "Route 1 · " + n), "Paris → Rome", n));
+});
+
+test("controls: a plugin note the user cleared comes back on the next refresh", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.createRoute(map, STOPS3, { arc: 30 });
+  const s1 = context.GeoControlPanel.sync(map), i = plain(promotedNames(api, s1.components.overlay)).indexOf("Route 1 · Arc height");
+  api.set(s1.components.overlay, { ["promotedAttributes." + i + ".notes"]: "" });
+  const s2 = context.GeoControlPanel.sync(map);
+  assert.equal(notesAt(api, s2.components.overlay, "Route 1 · Arc height"), "A → B → C");
+});
+
+test("controls: when one row's promotion fails, every other row still gets its own notes", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.createRoute(map, STOPS3, { arc: 30 });
+  const second = G.createRoute(map, STOPS_DE, { arc: 30 });
+  const real = api.connect;
+  // Route 2's Width input can't be promoted (Cavalry refuses it). Route 2 is listed first, so every
+  // row after it sits one promotion slot higher than its place in the plan.
+  api.connect = function (x, y, z, w) {
+    if (w === "promotedAttributes" && api.hasUserDataKey(x, "geoSlots") && api.getUserDataKey(x, "geoSlots")["route:" + second.groupId + ":width"] === y) throw new Error("no");
+    return real.apply(this, arguments);
+  };
+  const s = context.GeoControlPanel.sync(map);
+  api.connect = real;
+  const names = plain(promotedNames(api, s.components.overlay));
+  assert.ok(!names.includes("Route 2 · Width"), "the failed row is missing");
+  assert.ok(names.indexOf("Route 2 · Colour") < names.indexOf("Route 1 · Travel %"));
+  names.forEach((n, i) => {
+    const notes = api.get(s.components.overlay, "promotedAttributes." + i + ".notes");
+    if (/^Route 1 · /.test(n)) assert.equal(notes, "A → B → C", n);
+    else if (/^Route 2 · /.test(n)) assert.equal(notes, "D → E", n);
+    else assert.equal(notes, "", n);
+  });
 });

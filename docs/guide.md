@@ -196,16 +196,21 @@ cache come after them).
   select it and press **Pin here**: the spot you dropped it on becomes its new place, so from then
   on it stays on that spot of the map as the camera moves. If a stop's place is animated
   (keyframed), Pin here sets a key at the current frame.
-- Routes are numbered: "Route 1: Paris → Rome", "Route 2: …". Route names that still read
-  "Route: …" are numbered and renamed the next time the Controls refresh; a name you gave a route
-  yourself is kept.
+- Routes are numbered: "Route 1: Paris → Rome", "Route 2: …". Routes made before numbers are
+  numbered the next time the Controls refresh (or when you make a route), oldest first (from the
+  bottom of the Scene Window up), and a name that still reads "Route: …" is renamed; a name you
+  gave a route yourself is kept. A duplicated route takes the next free number.
 - The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
   once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
-  Controls; they are still on the route's handle helpers (inside its "Route helpers" group).
+  Controls: their values live on the route's handle helpers (inside its "Route helpers" group),
+  and on a map from an older version the Controls hand their values over to those helpers. One
+  you had animated (keyed) stays on "<Map> control values", still driving the helpers.
 - To draw the route on, animate **Route n · Travel %** from 0 to 100 (two keyframes): the legs
   draw on one after another, and a traveller rides along. Each leg's draw is a small helper
-  ("Leg k draw") driving its Trim end; a leg whose Trim end you animate or connect yourself is
-  left alone. `Stops · Hide`, `Stops · Colour` and `Stops · Size` style every circle.
+  ("Leg k draw") driving its Trim end; a leg whose Trim end you had already animated, connected
+  or set below 100 yourself is left alone. On a new route every leg's Trim end is driven by its
+  draw helper, so to animate one leg by hand, disconnect its helper first. `Stops · Hide`,
+  `Stops · Colour` and `Stops · Size` style every circle.
 - Hover any route row in the Controls to see the route's stops (its notes). A note you type
   there yourself is never overwritten.
 - **Travellers.** Pick a **Traveller** (Plane, Arrow, Dot or Selected layer) before **Create route**

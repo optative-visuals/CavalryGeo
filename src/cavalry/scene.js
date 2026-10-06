@@ -169,14 +169,35 @@ var GeoScene = (function () {
 
   var ROUTE_NUMBER_KEY = "geoRouteNumber", ROUTE_TRAVEL_KEY = "geoRouteTravel";
   var ROUTE_PREFIX = /^Route( \d+)?: /;
+  // A route group's name is capped at 60 characters.
+  function capTitle(t) { return t.length > 60 ? t.slice(0, 59) + "…" : t; }
   function routeTitle(stops, number) {
-    var t = "Route " + number + ": " + stops.map(function (s) { return s.name; }).join(" → ");
-    return t.length > 60 ? t.slice(0, 59) + "…" : t;
+    return capTitle("Route " + number + ": " + stops.map(function (s) { return s.name; }).join(" → "));
   }
   function stripRoute(name) { return String(name).replace(ROUTE_PREFIX, ""); }
   function routeNumber(groupId) { var n = Number(userData(groupId, ROUTE_NUMBER_KEY)); return n >= 1 && Math.floor(n) === n ? n : 0; }
-  // Every route group of the map (new style from geoRoute, old style = groups holding script legs), Scene Window order.
-  function routeGroups(map, mapLayers, routes) {
+
+  // Sorts layers (ids or { id }) in Scene Window order under groupId: top first, a group's
+  // children right after it; layers outside the group go last. The groups in `skip` (imagery,
+  // which holds thousands of tiles) are ranked but not looked inside.
+  function sceneOrder(groupId, skip) {
+    var order = {}, n = 0;
+    skip = skip || {};
+    function visit(id) { api.getChildren(id).forEach(function (k) { order[k] = n++; if (!skip[k]) visit(k); }); }
+    function at(x) { var id = typeof x === "string" ? x : x.id; return order[id] === undefined ? 1e9 : order[id]; }
+    visit(groupId);
+    return function (a, b) { return at(a) - at(b); };
+  }
+  // The map's Scene Window order, never looking inside its imagery groups.
+  function mapOrder(map) {
+    var skip = {};
+    findImagery(map).forEach(function (im) { skip[im.groupId] = true; });
+    return sceneOrder(map.groupId, skip);
+  }
+
+  // Every route group of the map (new style from geoRoute, old style = groups holding script legs),
+  // in Scene Window order (top first). order: a sceneOrder the caller already made, else a fresh one.
+  function routeGroups(map, mapLayers, routes, order) {
     var seen = {}, out = [];
     (routes || findRoutes(map)).forEach(function (r) { if (!seen[r.groupId]) { seen[r.groupId] = true; out.push(r.groupId); } });
     (mapLayers || findMapLayers(map)).forEach(function (l) {
@@ -184,35 +205,77 @@ var GeoScene = (function () {
       var g = api.getParent(l.id);
       if (g && g !== map.groupId && !seen[g]) { seen[g] = true; out.push(g); }
     });
-    var order = api.getChildren(map.groupId);
-    return out.sort(function (x, y) { return order.indexOf(x) - order.indexOf(y); });
-  }
-  function nextRouteNumber(map) {
-    var top = 0;
-    routeGroups(map).forEach(function (g) { top = Math.max(top, routeNumber(g)); });
-    return top + 1;
+    return out.sort(order || mapOrder(map));
   }
 
-  // A "Leg k draw" helper: the route's Travel % -> this leg's trim end.
+  // A group still named with the plugin's `prefix` takes "Route <number>: " instead (capped at
+  // 60 characters); a name the user gave it is left alone.
+  function renameRoute(groupId, prefix, number) {
+    if (typeof api.rename !== "function") return;
+    try {
+      var name = String(api.getNiceName(groupId));
+      if (name.indexOf(prefix) === 0) api.rename(groupId, capTitle("Route " + number + ": " + name.slice(prefix.length)));
+    } catch (e) { /* cosmetic */ }
+  }
+
+  // Gives every route a lasting number. groups: the map's route groups in Scene Window order (top
+  // first). They are walked in creation order (oldest first, from the bottom of the Scene Window
+  // up): a route without a number, or one sharing its number with an older route (a duplicated
+  // group copies the number), takes the highest number + 1. Returns the highest number.
+  function numberRoutes(map, groups) {
+    var top = 0, seen = {};
+    groups.forEach(function (g) { top = Math.max(top, routeNumber(g)); });
+    if (typeof api.setUserData !== "function") return top;
+    groups.slice().reverse().forEach(function (g) {
+      var n = routeNumber(g);
+      if (n && !seen[n]) { seen[n] = true; return; }
+      try { api.setUserData(g, ROUTE_NUMBER_KEY, top + 1); } catch (e) { return; }
+      top += 1;
+      seen[top] = true;
+      renameRoute(g, n ? "Route " + n + ": " : "Route: ", top);
+    });
+    return top;
+  }
+
+  // A "Leg k draw" helper: the route's Travel % -> this leg's trim end. A helper that can't be
+  // set up and wired is deleted again before the error goes on.
   function addLegDraw(map, parentId, line, index, count, track) {
     var id = api.create(A.CAMERA_LAYER_TYPE, "Leg " + (index + 1) + " draw");
     if (track) track(id);
-    addInputs(id, A.CAMERA_ARRAY_ATTR, GeoExpression.ROUTE_DRAW_INPUTS, { travel: 100, index: index, count: count });
-    setOne(id, A.CAMERA_EXPR_ATTR, GeoExpression.routeDrawExpression({ camera: map.cameraId, category: "routeDraw" }));
-    api.parent(id, parentId);
-    try { setOne(line, "stroke.trim", true); } catch (e) { /* draw-on stays off */ }
-    api.connect(id, A.DRIVER_OUTPUT_ATTR, line, "stroke.trimEnd", true);
+    try {
+      addInputs(id, A.CAMERA_ARRAY_ATTR, GeoExpression.ROUTE_DRAW_INPUTS, { travel: 100, index: index, count: count });
+      setOne(id, A.CAMERA_EXPR_ATTR, GeoExpression.routeDrawExpression({ camera: map.cameraId, category: "routeDraw" }));
+      api.parent(id, parentId);
+      try { setOne(line, "stroke.trim", true); } catch (e) { /* draw-on stays off */ }
+      api.connect(id, A.DRIVER_OUTPUT_ATTR, line, "stroke.trimEnd", true);
+    } catch (e) {
+      try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ }
+      throw e;
+    }
     return id;
   }
+  // A leg's trim end is the user's when it is keyframed, connected to anything, or set by hand
+  // to something other than fully drawn (100): such a leg gets no draw helper.
   function trimTaken(line) {
     var from = "";
     try { from = String(api.getInConnection(line, "stroke.trimEnd") || ""); } catch (e) { from = ""; }
     var keys = [];
     try { keys = api.getKeyframeTimes(line, "stroke.trimEnd") || []; } catch (e) { keys = []; }
-    return !!from || keys.length > 0;
+    if (from || keys.length > 0) return true;
+    var v = NaN;
+    try { v = Number(api.get(line, "stroke.trimEnd")); } catch (e) { v = NaN; }
+    return isFinite(v) && Math.abs(v - 100) > 1e-6;
+  }
+  // An old-style route's geoRouteTravel legs that belong to this group (a duplicated group
+  // copies the record, which still names the original's legs).
+  function ownTravelLegs(groupId) {
+    var old = userData(groupId, ROUTE_TRAVEL_KEY);
+    return ((old && old.legs) || []).filter(function (l) {
+      try { return !!l.line && api.getParent(l.line) === groupId; } catch (e) { return false; }
+    });
   }
   function routeDraws(groupId) {
-    var rec = userData(groupId, ROUTE_KEY), old = userData(groupId, ROUTE_TRAVEL_KEY), legs = (rec && rec.legs) || (old && old.legs) || [];
+    var rec = userData(groupId, ROUTE_KEY), legs = (rec && rec.legs) || ownTravelLegs(groupId);
     return legs.map(function (l) { return l.draw; }).filter(function (d) { return !!d && layerThere(d); });
   }
 
@@ -231,8 +294,8 @@ var GeoScene = (function () {
   }
 
   // Old-style route (script-drawn legs + pins at stops), used when this Cavalry can't make Bézier lines.
-  function createOldRoute(map, stops, pairs, opts) {
-    var number = nextRouteNumber(map);
+  // number: the route's number (createRoute numbers the older routes first).
+  function createOldRoute(map, stops, pairs, opts, number) {
     var groupId = api.create("group", routeTitle(stops, number));
     if (typeof api.setUserData === "function") api.setUserData(groupId, ROUTE_NUMBER_KEY, number);
     api.parent(groupId, map.groupId);
@@ -254,7 +317,15 @@ var GeoScene = (function () {
       if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId);
       if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId);
     });
-    if (typeof api.setUserData === "function") api.setUserData(groupId, ROUTE_TRAVEL_KEY, { legs: legs.map(function (line, i) { return { line: line, draw: addLegDraw(map, groupId, line, i, legs.length) }; }) });
+    if (typeof api.setUserData === "function") {
+      // The helpers made are always recorded. One that can't be wired is deleted again (by
+      // addLegDraw) and the legs left without one get theirs on the next Controls refresh.
+      var travel = { legs: [] };
+      try {
+        legs.forEach(function (line, i) { travel.legs.push({ line: line, draw: addLegDraw(map, groupId, line, i, legs.length) }); });
+      } catch (e) { /* the route still draws; prepareRoutes tries those legs again */ }
+      finally { api.setUserData(groupId, ROUTE_TRAVEL_KEY, travel); }
+    }
     return { groupId: groupId, legs: legs };
   }
 
@@ -264,10 +335,9 @@ var GeoScene = (function () {
   // world transform (rewriting the local one), so every layer is reset right after it is
   // parented. A holder's position is driven, so only its rotation and scale are reset; the
   // helper utilities have no transform at all.
-  function buildRoute(map, stops, pairs, opts, track) {
+  function buildRoute(map, stops, pairs, opts, track, number) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
     var look = styleOf(map);
-    var number = nextRouteNumber(map);
     var groupId = track(api.create("group", routeTitle(stops, number)));
     if (typeof api.setUserData === "function") api.setUserData(groupId, ROUTE_NUMBER_KEY, number);
     api.parent(groupId, map.groupId);
@@ -366,11 +436,13 @@ var GeoScene = (function () {
   function createRoute(map, stops, opts) {
     var pairs = routePairs(stops);
     opts = opts || {};
-    if (typeof api.setGenerator !== "function" || typeof api.primitive !== "function" || typeof api.setUserData !== "function") return createOldRoute(map, stops, pairs, opts);
+    // Older routes without a number (or sharing one) are numbered first, so this one takes the highest + 1.
+    var number = numberRoutes(map, routeGroups(map)) + 1;
+    if (typeof api.setGenerator !== "function" || typeof api.primitive !== "function" || typeof api.setUserData !== "function") return createOldRoute(map, stops, pairs, opts, number);
     var made = [];
     function track(id) { made.push(id); return id; }
     try {
-      return buildRoute(map, stops, pairs, opts, track);
+      return buildRoute(map, stops, pairs, opts, track, number);
     } catch (e) {
       for (var i = made.length - 1; i >= 0; i--) { try { if (layerThere(made[i])) api.deleteLayer(made[i]); } catch (e2) { /* already gone */ } }
       throw e;
@@ -386,8 +458,10 @@ var GeoScene = (function () {
         if (!api.hasUserDataKey(id, ROUTE_KEY)) return;
         var d = api.getUserDataKey(id, ROUTE_KEY);
         if (!d || d.camera !== map.cameraId) return;
+        // title: every stop's name from the record, in full (the group name is capped at 60 characters).
         out.push({
           groupId: id, name: String(api.getNiceName(id)), helpers: d.helpers,
+          title: (d.stops || []).map(function (s) { return String(s.name); }).join(" → "),
           stops: (d.stops || []).filter(function (s) { return there(s.holder) && there(s.circle) && there(s.position); }),
           legs: (d.legs || []).filter(function (l) { return there(l.line) && there(l.startHandle) && there(l.endHandle); })
         });
@@ -1113,45 +1187,55 @@ var GeoScene = (function () {
     return legs.sort(function (a, b) { return a.number - b.number; }).map(function (l) { return { line: l.line }; });
   }
 
-  // Numbers / renames routes made before route numbers and gives legs without one a draw helper.
-  // mapLayers / routes: the lists the caller already read (no extra comp scans).
-  function prepareRoutes(map, mapLayers, routes) {
-    if (typeof api.setUserData !== "function") return;
-    routes = routes || findRoutes(map);
-    mapLayers = mapLayers || findMapLayers(map);
-    var groups = routeGroups(map, mapLayers, routes), top = 0;
-    groups.forEach(function (g) { top = Math.max(top, routeNumber(g)); });
-    groups.forEach(function (g) {
-      if (!routeNumber(g)) {
-        top += 1;
-        api.setUserData(g, ROUTE_NUMBER_KEY, top);
-        var name = String(api.getNiceName(g));
-        if (name.indexOf("Route: ") === 0 && typeof api.rename === "function") { try { api.rename(g, "Route " + top + ": " + name.slice(7)); } catch (e) { /* cosmetic */ } }
-      }
-      // Legs in route order from what's already read (routeLegs would rescan the comp per route).
-      var rec = userData(g, ROUTE_KEY), info = { legs: legsInOrder(g, rec, mapLayers) };
-      if (!info.legs.length) return;
-      var count = info.legs.length, changed = false;
-      if (rec && rec.legs) {
+  // Gives a route's legs without one a draw helper. The record (geoRoute / geoRouteTravel) is
+  // saved with every helper made, even when a later leg fails.
+  function prepareTravel(map, g, mapLayers) {
+    // Legs in route order from what's already read (routeLegs would rescan the comp per route).
+    var rec = userData(g, ROUTE_KEY), legs = legsInOrder(g, rec, mapLayers);
+    if (!legs.length) return;
+    var count = legs.length, changed = false;
+    if (rec && rec.legs) {
+      try {
         rec.legs.forEach(function (l) {
           if ((l.draw && layerThere(l.draw)) || !l.line || !layerThere(l.line) || trimTaken(l.line)) return;
           var at = 0;
-          info.legs.forEach(function (x, i) { if (x.line === l.line) at = i; });
+          legs.forEach(function (x, i) { if (x.line === l.line) at = i; });
           l.draw = addLegDraw(map, rec.helpers && layerThere(rec.helpers) ? rec.helpers : g, l.line, at, count);
           changed = true;
         });
+      } finally {
         if (changed) api.setUserData(g, ROUTE_KEY, rec);
-      } else {
-        var old = userData(g, ROUTE_TRAVEL_KEY) || { legs: [] }, have = {};
-        old.legs = old.legs.filter(function (l) { return l.draw && layerThere(l.draw); });
-        old.legs.forEach(function (l) { have[l.line] = true; });
-        info.legs.forEach(function (x, i) {
-          if (have[x.line] || trimTaken(x.line)) return;
-          old.legs.push({ line: x.line, draw: addLegDraw(map, g, x.line, i, count) });
-          changed = true;
-        });
-        if (changed) api.setUserData(g, ROUTE_TRAVEL_KEY, old);
       }
+      return;
+    }
+    var old = userData(g, ROUTE_TRAVEL_KEY), before = (old && old.legs) || [], have = {};
+    // Only this group's own legs whose helper is still there (a duplicated group copies the record).
+    var kept = ownTravelLegs(g).filter(function (l) { return l.draw && layerThere(l.draw); });
+    var travel = { legs: kept };
+    changed = kept.length !== before.length;
+    kept.forEach(function (l) { have[l.line] = true; });
+    try {
+      legs.forEach(function (x, i) {
+        if (have[x.line] || trimTaken(x.line)) return;
+        travel.legs.push({ line: x.line, draw: addLegDraw(map, g, x.line, i, count) });
+        changed = true;
+      });
+    } finally {
+      if (changed) api.setUserData(g, ROUTE_TRAVEL_KEY, travel);
+    }
+  }
+
+  // Numbers routes made before route numbers (and duplicated ones) and gives legs without one a
+  // draw helper. mapLayers / routes / order: the lists and Scene Window order the caller already
+  // read (no extra comp scans). A route that fails is left as it is; the others still go ahead.
+  function prepareRoutes(map, mapLayers, routes, order) {
+    if (typeof api.setUserData !== "function") return;
+    routes = routes || findRoutes(map);
+    mapLayers = mapLayers || findMapLayers(map);
+    var groups = routeGroups(map, mapLayers, routes, order);
+    numberRoutes(map, groups);
+    groups.forEach(function (g) {
+      try { prepareTravel(map, g, mapLayers); } catch (e) { /* the next Controls refresh tries again */ }
     });
   }
 
@@ -1533,7 +1617,7 @@ var GeoScene = (function () {
     STYLE: STYLE,
     styleOf: styleOf, setMapStyle: setMapStyle, layerStyle: layerStyle, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
     compSize: compSize, createMapLayer: createMapLayer, findMapLayers: findMapLayers, readLayerData: readLayerData, readLayerMeta: layerMeta,
-    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, routeNumber: routeNumber, routeDraws: routeDraws, stripRoute: stripRoute, prepareRoutes: prepareRoutes, pinStops: pinStops,
+    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, routeNumber: routeNumber, routeDraws: routeDraws, stripRoute: stripRoute, prepareRoutes: prepareRoutes, numberRoutes: numberRoutes, sceneOrder: sceneOrder, pinStops: pinStops,
     isMapPart: isMapPart, routeOfSelection: routeOfSelection, addTraveller: addTraveller, removeTraveller: removeTraveller, findTravellers: findTravellers,
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,

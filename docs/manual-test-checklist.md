@@ -141,7 +141,14 @@ adding street layers.
       stop's place is keyframed, Pin here sets a key at the current frame.
 - [ ] 25b. In Controls, change Route 1 · Arc height → every leg of the route changes.
 - [ ] 25c. Select a leg's handle helper and change Lean, Flip side or shape by hand there → only
-      that leg changes. Stops · Hide / Colour / Size change every circle.
+      that leg changes (those values live on the handle helpers). Open a map made by v0.6.0 with
+      Lean / Flip side / shape by hand set in its Controls → Refresh controls: the rows are gone,
+      the curves look the same and the values are on the handle helpers; one you had animated
+      (keyed) stays on "<Map> control values" and still animates. Stops · Hide / Colour / Size
+      change every circle.
+- [ ] 25c2. On a new route every leg's Trim end is driven by its "Leg k draw" helper: to animate
+      one leg by hand, disconnect its helper first, then key its Trim end → Refresh controls
+      leaves that leg alone.
 - [ ] 25d. Set the camera projection to 2 (globe) and rotate so a stop goes behind the Earth →
       the stop and its legs fade out.
 - [ ] 26. Bake an old-style leg (a route from v0.5.0, or one made where Bézier lines aren't
@@ -299,10 +306,10 @@ adding street layers.
 ## Simpler route controls
 
 - [ ] Create two routes → they are named "Route 1: …" and "Route 2: …", and the Overlay controls show only Route n · Travel %, Arc height, Colour and Width for each (plus the traveller rows when it has one). No Lean, Flip side, per-leg draw on % or handle rows.
-- [ ] Open a scene saved before this change → press Refresh controls: its routes are numbered in Scene Window order (top = 1), a route still named "Route: …" is renamed "Route n: …", a name you gave it is kept, and every leg gets a "Leg k draw" helper.
+- [ ] Open a scene saved before this change → press Refresh controls: its routes are numbered oldest first (the bottom of the Scene Window = 1), a route still named "Route: …" is renamed "Route n: …", a name you gave it is kept, and every leg gets a "Leg k draw" helper. Duplicate a route group and press Refresh controls → the copy takes the next free number.
 - [ ] Keyframe Route 1 · Travel % 0 → 100 on a 3-leg route → the legs draw on one after another; with a traveller, it rides all three legs.
 - [ ] Hover a route row and a Data n row in the Controls → the notes tooltip shows the route's stops / the data set's name. Type your own note on a row, press Refresh controls → your note stays.
-- [ ] A leg whose Trim end you keyframed by hand is left alone (no helper added, still animates).
+- [ ] In a scene saved before this change, a leg whose Trim end you keyframed by hand, connected, or set below 100 is left alone (no helper added, still animates / keeps its value).
 - [ ] An old-style route (made where Bézier lines are not available, or by v0.5.0) gets the same four rows and a working Travel %.
 
 ## Previews
