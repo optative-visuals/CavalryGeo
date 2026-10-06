@@ -1444,7 +1444,7 @@ test("createRoute builds a named group with one camera-linked leg per pair of st
   const map = GeoScene.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
   const stops = [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "Lyon", lon: 4.84, lat: 45.76 }, { name: "Marseille", lon: 5.37, lat: 43.3 }];
   const r = GeoScene.createRoute(map, stops, { lift: 40, pins: true, labels: false });
-  assert.equal(api.getNiceName(r.groupId), "Route: Paris → Lyon → Marseille");
+  assert.equal(api.getNiceName(r.groupId), "Route 1: Paris → Lyon → Marseille");
   assert.equal(api.getParent(r.groupId), map.groupId);
   assert.equal(r.legs.length, 2);
   assert.equal(api.getNiceName(r.legs[0]), "Leg 1: Paris → Lyon");
@@ -5906,7 +5906,7 @@ test("routes: Create route builds stops, Bézier legs and helpers, top to bottom
   const { context, api } = buildSandbox();
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
-  assert.equal(api.getNiceName(r.groupId), "Route: A → B → C");
+  assert.equal(api.getNiceName(r.groupId), "Route 1: A → B → C");
   assert.equal(api.getParent(r.groupId), map.groupId);
   assert.deepEqual(api.getChildren(r.groupId).map((id) => api.getNiceName(id)), ["Stop: A", "Stop: B", "Stop: C", "Leg 2: B → C", "Leg 1: A → B", "Route helpers"]);
   const d = routeData(api, r.groupId);
@@ -7249,4 +7249,89 @@ test("a panel action scans the comp's layers no more often than before the furni
   assert.ok(furnished.finds <= 2, "findMapLayers calls: " + furnished.finds);
   assert.ok(plainMap.scans <= 9, "before the furniture branch one sync made 8 comp scans (9 with the group-controls lookup), now " + plainMap.scans);
   assert.equal(furnished.scans, plainMap.scans, "comp scans: " + furnished.scans + " vs " + plainMap.scans);
+});
+
+// ---- Simpler route controls: numbers, titles, Travel % helpers ----
+const STOPS3 = [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 5, lat: 5 }, { name: "C", lon: 10, lat: 0 }];
+function drawsOf(api, G, groupId) { return plain(G.routeDraws(groupId)); }
+
+test("new routes are numbered, titled Route n, and each leg gets a draw helper on its trim end", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("R", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const r1 = G.createRoute(map, STOPS3, { arc: 30 });
+  assert.equal(G.routeNumber(r1.groupId), 1);
+  assert.equal(api.getNiceName(r1.groupId), "Route 1: A → B → C");
+  const draws = drawsOf(api, G, r1.groupId);
+  assert.equal(draws.length, 2);
+  draws.forEach((d, k) => {
+    assert.equal(api.getNiceName(d), "Leg " + (k + 1) + " draw");
+    assert.equal(api.getInConnection(r1.legs[k], "stroke.trimEnd"), d + ".id");
+    assert.equal(api.get(d, "array.1"), k);
+    assert.equal(api.get(d, "array.2"), 2);
+    assert.equal(api.get(d, "array.0"), 100);
+  });
+  const rec = plain(api.getUserDataKey(r1.groupId, "geoRoute"));
+  assert.deepEqual(rec.legs.map((l) => l.draw), draws);
+  const r2 = G.createRoute(map, [{ name: "D", lon: 1, lat: 1 }, { name: "E", lon: 2, lat: 2 }], { arc: 30 });
+  assert.equal(G.routeNumber(r2.groupId), 2);
+  assert.equal(G.stripRoute(api.getNiceName(r2.groupId)), "D → E");
+  assert.equal(G.stripRoute("Route: X → Y"), "X → Y");
+});
+
+test("old-style routes are numbered too and record their draw helpers in geoRouteTravel", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;
+  const G = context.GeoScene;
+  const map = G.createMap("O", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const r = G.createRoute(map, STOPS3, { lift: 30, pins: true, labels: false });
+  assert.equal(G.routeNumber(r.groupId), 1);
+  assert.equal(api.getNiceName(r.groupId), "Route 1: A → B → C");
+  const travel = plain(api.getUserDataKey(r.groupId, "geoRouteTravel"));
+  assert.deepEqual(travel.legs.map((l) => l.line), plain(r.legs));
+  travel.legs.forEach((l) => assert.equal(api.getInConnection(l.line, "stroke.trimEnd"), l.draw + ".id"));
+  assert.deepEqual(drawsOf(api, G, r.groupId), travel.legs.map((l) => l.draw));
+});
+
+test("prepareRoutes numbers existing unnumbered routes in Scene Window order, renames only default titles, and adds helpers except on animated or wired legs", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("P", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const a = G.createRoute(map, STOPS3, { arc: 30 }), b = G.createRoute(map, [{ name: "D", lon: 1, lat: 1 }, { name: "E", lon: 2, lat: 2 }], { arc: 30 });
+  // Make them look like routes from before this feature: no number, old title, no helpers.
+  [a, b].forEach((r) => {
+    G.routeDraws(r.groupId).forEach((d) => api.deleteLayer(d));
+    const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+    rec.legs.forEach((l) => delete l.draw);
+    api.setUserData(r.groupId, "geoRoute", rec);
+    api.setUserData(r.groupId, "geoRouteNumber", null);
+  });
+  api.rename(a.groupId, "Route: A → B → C");
+  api.rename(b.groupId, "My trip");
+  api.keyframe(a.legs[0], 0, { "stroke.trimEnd": 0 });
+  G.prepareRoutes(map);
+  const kids = api.getChildren(map.groupId), first = kids.indexOf(a.groupId) < kids.indexOf(b.groupId) ? a : b, second = first === a ? b : a;
+  assert.equal(G.routeNumber(first.groupId), 1, "top of the Scene Window first");
+  assert.equal(G.routeNumber(second.groupId), 2);
+  assert.equal(api.getNiceName(a.groupId), "Route " + G.routeNumber(a.groupId) + ": A → B → C");
+  assert.equal(api.getNiceName(b.groupId), "My trip", "a user name is kept");
+  const drawsA = drawsOf(api, G, a.groupId);
+  assert.equal(drawsA.length, 1, "the animated first leg gets no helper");
+  assert.equal(api.getInConnection(a.legs[1], "stroke.trimEnd"), drawsA[0] + ".id");
+  assert.equal(api.get(drawsA[0], "array.1"), 1, "index keeps the leg's place in the route");
+  assert.equal(drawsOf(api, G, b.groupId).length, 1);
+  G.prepareRoutes(map);
+  assert.equal(drawsOf(api, G, a.groupId).length, 1, "running again adds nothing");
+  assert.equal(G.routeNumber(first.groupId), 1);
+});
+
+test("the traveller still rides: its tip reads the leg's trim end, now driven by the draw helper", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("T", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  G.addTraveller(map, r.groupId, "dot");
+  const t = plain(api.getUserDataKey(r.groupId, "geoTraveller"));
+  assert.equal(api.getInConnection(t.legs[0].tip, "array.0"), r.legs[0] + ".stroke.trimEnd");
+  assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), G.routeDraws(r.groupId)[0] + ".id");
 });

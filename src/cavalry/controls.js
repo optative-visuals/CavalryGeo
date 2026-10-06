@@ -226,7 +226,7 @@ var GeoControlPanel = (function () {
         model.pins.push({ id: l.id, state: linkState(l.id, S.pin) });
       } else if (c === "route") {
         var g = api.getParent(l.id);
-        if (!routes[g]) { routes[g] = { id: g, name: stripPrefix(api.getNiceName(g), "Route: "), legs: [] }; model.routes.push(routes[g]); }
+        if (!routes[g]) { routes[g] = { id: g, name: GeoScene.stripRoute(api.getNiceName(g)), legs: [] }; model.routes.push(routes[g]); }
         routes[g].legs.push({ id: l.id, number: legNumber(l.name), place: i, state: linkState(l.id, S.leg) });
       } else if (c === "data" && DATA_KINDS[l.meta.display]) {
         var d = l.meta.display, p = api.getParent(l.id);
@@ -241,7 +241,7 @@ var GeoControlPanel = (function () {
     var routeLabels = [];
     GeoScene.findRoutes(map).sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
       model.newRoutes.push({
-        id: r.groupId, name: stripPrefix(r.name, "Route: "),
+        id: r.groupId, name: GeoScene.stripRoute(r.name),
         legs: r.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) {
           return { id: l.line, number: l.number, state: linkState(l.line, S.newLeg),
             start: { id: l.startHandle, state: linkState(l.startHandle, S.handle) }, end: { id: l.endHandle, state: linkState(l.endHandle, S.handle) } };

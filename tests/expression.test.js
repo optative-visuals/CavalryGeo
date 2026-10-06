@@ -262,3 +262,16 @@ test("the bundled scale bar and north arrow layer expressions run and draw", () 
   assert.ok(arrow.cmds.filter((c) => c[0] === "lineTo").length >= 3, "the arrow has drawing commands");
   assert.deepEqual(arrow.cmds.filter((c) => c[0] === "addText").map((c) => c[1]), ["N"]);
 });
+
+test("route draw helper: Travel % draws the legs one after another", () => {
+  assert.deepEqual(E.ROUTE_DRAW_INPUTS, [["travel", 100], ["index", 0], ["count", 1]]);
+  const expr = E.routeDrawExpression({ camera: "c", category: "routeDraw" });
+  assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "routeDraw" });
+  const run = (travel, index, count) => Function("travel", "index", "count", "return eval(" + JSON.stringify(expr) + ");")(travel, index, count);
+  const legs = (t) => [0, 1, 2].map((i) => Math.round(run(t, i, 3) * 10) / 10);
+  assert.deepEqual(legs(0), [0, 0, 0]);
+  assert.deepEqual(legs(100 / 6), [50, 0, 0]);
+  assert.deepEqual(legs(100 / 3), [100, 0, 0]);
+  assert.deepEqual(legs(50), [100, 50, 0]);
+  assert.deepEqual(legs(100), [100, 100, 100]);
+});

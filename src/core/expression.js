@@ -141,6 +141,11 @@ var GeoExpression = (function () {
       "(_i11 ? [_i12, _i13] : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + ");\n";
   }
 
+  var ROUTE_DRAW_INPUTS = [["travel", 100], ["index", 0], ["count", 1]];
+  // One leg's draw-on from the route's Travel %: the legs draw one after another.
+  function routeDrawExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(ROUTE_DRAW_INPUTS) + "Math.max(0, Math.min(100, (_i0 / 100 * _i2 - _i1) * 100));\n";
+  }
   function routeFadeExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
   }
@@ -195,7 +200,7 @@ var GeoExpression = (function () {
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
-    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression,
+    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,
     legendExpression: legendExpression, bubbleLegendExpression: bubbleLegendExpression, replaceData: replaceData
