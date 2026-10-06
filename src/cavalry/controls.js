@@ -1,4 +1,4 @@
-// Builds and updates each map's "<Map> Controls" component (GeoControls decides what goes in
+// Builds and updates each map's "<Map> Map controls" component (GeoControls decides what goes in
 // it). The component holds one "<Map> control values" utility: its inputs drive the settings
 // that map-layer scripts read by name (renaming those inputs on the layer would break them)
 // and the settings shared by several layers. Everything else is promoted straight from its
@@ -8,7 +8,8 @@ var GeoControlPanel = (function () {
   var PROMOTED = "promotedAttributes";
   var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
   var GROUP_KEY = "geoControlsGroup", GROUP_ORDER = G.GROUPS;
-  var GROUP_SUFFIX = { main: " Controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
+  var GROUP_SUFFIX = { main: " Map controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
+  var OLD_MAIN_SUFFIX = " Controls"; // the main component's name before it became "<Map> Map controls"
   var INPUT_TYPES = { double: "double", bool: "bool", color: A.COLOR_INPUT_TYPE };
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var DATA_KINDS = { regions: "regions", bubbles: "bubbles", labels: "valueLabels" };
@@ -71,11 +72,12 @@ var GeoControlPanel = (function () {
   // (only while making one), an untagged one with the group's name.
   function findGroupIn(parentId, map, group, adopt) {
     var kids = api.getChildren(parentId), byName = null, name = map.name + GROUP_SUFFIX[group];
+    var oldName = group === "main" ? map.name + OLD_MAIN_SUFFIX : name;
     for (var i = 0; i < kids.length; i++) {
       if (layerType(kids[i]) !== "component") continue;
       var cam = userData(kids[i], CONTROLS_KEY);
       if (cam === map.cameraId && groupTag(kids[i]) === group) return kids[i];
-      if (adopt && !byName && cam === null && api.getNiceName(kids[i]) === name) byName = kids[i];
+      if (adopt && !byName && cam === null && (api.getNiceName(kids[i]) === name || api.getNiceName(kids[i]) === oldName)) byName = kids[i];
     }
     return byName;
   }
@@ -135,6 +137,8 @@ var GeoControlPanel = (function () {
       if (!comp) comp = findAnywhere(map, "main", cache);
       if (!comp) { comp = api.create("component", compName); move = true; }
       setUserData(comp, CONTROLS_KEY, map.cameraId);
+      // A main component still carrying the old default name takes the new one; the user's own name stays.
+      if (has("rename")) attempt(function () { if (api.getNiceName(comp) === map.name + OLD_MAIN_SUFFIX) api.rename(comp, compName); });
       if (move) place(comp, map, "main");
       var values = findChild(comp, A.CAMERA_LAYER_TYPE, VALUES_KEY, map.cameraId, valuesName);
       if (!values) {

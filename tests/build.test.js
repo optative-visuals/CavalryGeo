@@ -132,6 +132,7 @@ function makeFakeApi() {
       o[arr + "." + n] = 0;
       return arr + "." + n; // like Cavalry: the new attribute's path
     },
+    rename: function (id, name) { niceNames[id] = name; },
     renameAttribute: function (id, attr, name) { (attrNames[id] = attrNames[id] || {})[attr] = name; },
     getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
@@ -5220,7 +5221,7 @@ test("controls: a sync puts \"<Map> Controls\" just above the map group with the
   assert.equal(api.getParent(r.componentId), "", "at the composition's top level");
   assert.equal(kids.indexOf(r.componentId), -1, "not inside the group");
   assert.equal(api.getLayerType(r.componentId), "component");
-  assert.equal(api.getNiceName(r.componentId), "Map Controls");
+  assert.equal(api.getNiceName(r.componentId), "Map Map controls");
   assert.deepEqual(api.getChildren(r.componentId), [r.valuesId]);
   assert.equal(api.getNiceName(r.valuesId), "Map control values");
   assert.equal(api.get(r.valuesId, "expression"), "0;");
@@ -5622,7 +5623,7 @@ test("controls: a map made by Search gets its Controls component straight away",
   const map = context.GeoScene.findMaps()[0];
   const top = controlsOf(api, map);
   assert.equal(api.getLayerType(top), "component");
-  assert.equal(api.getNiceName(top), map.name + " Controls");
+  assert.equal(api.getNiceName(top), map.name + " Map controls");
   assert.ok(directlyAbove(api, top, map.groupId));
   assert.ok(promotedNames(api, top).indexOf("Countries · Fill colour") >= 0, "starter layers are in it");
 });
@@ -5658,11 +5659,82 @@ test("controls: Refresh controls lives on the Layers tab and (re)builds the Cont
   context.refreshControlsBtn.onClick();
   const comp = controlsOf(api, map);
   assert.equal(api.getLayerType(comp), "component");
-  assert.equal(context.statusLabel.getText(), "Controls updated: " + api._promoted(comp).length + " setting(s) in \"Map Controls\". Select it to see them.");
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + api._promoted(comp).length + " settings in Map Map controls.");
   context.GeoScene.addPin(map, "Here", 1, 1);
   context.refreshControlsBtn.onClick();
   const total = api._promoted(comp).length + api._promoted(controlsOf(api, map, "overlay")).length;
-  assert.equal(context.statusLabel.getText(), "Controls updated: " + total + " setting(s) in \"Map Controls\" and its Overlay controls. Select them to see them.");
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + total + " settings across Map Map controls and Overlay controls.");
+});
+
+test("controls rename: a new map's main component is named \"<Map> Map controls\"", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getNiceName(r.componentId), "Map Map controls");
+});
+
+test("controls rename: a main component still named the old default is renamed on sync; the user's own name stays", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.rename(r1.componentId, "Map Controls");
+  const r2 = context.GeoControlPanel.sync(map);
+  assert.equal(r2.componentId, r1.componentId);
+  assert.equal(api.getNiceName(r1.componentId), "Map Map controls", "renamed");
+  api.rename(r1.componentId, "My controls");
+  context.GeoControlPanel.sync(map);
+  assert.equal(api.getNiceName(r1.componentId), "My controls", "the user's name is kept");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 1, "no second main component");
+});
+
+test("controls rename: sync works when the API has no rename", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  const r1 = context.GeoControlPanel.sync(map);
+  api.rename(r1.componentId, "Map Controls");
+  delete api.rename;
+  assert.doesNotThrow(() => context.GeoControlPanel.sync(map));
+  assert.equal(api.getNiceName(r1.componentId), "Map Controls");
+});
+
+test("controls rename: an untagged component named \"<Map> Controls\" or \"<Map> Map controls\" is adopted as main", () => {
+  ["Map Controls", "Map Map controls"].forEach((name) => {
+    const { context, api } = buildSandbox();
+    const map = controlsMap(context);
+    const mine = api.create("component", name);
+    const r = context.GeoControlPanel.sync(map);
+    assert.equal(r.componentId, mine, name + ": adopted");
+    assert.equal(api.getUserDataKey(mine, "geoControls"), map.cameraId);
+    assert.equal(api.getNiceName(mine), "Map Map controls");
+    assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "component").length, 1, "no second main made");
+  });
+});
+
+test("controls rename: Refresh controls names the components that exist, singular for one setting", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  context.GeoScene.addPin(map, "Here", 1, 1);
+  context.refreshControlsBtn.onClick();
+  let n = ["main", "overlay"].reduce((t, g) => t + api._promoted(controlsOf(api, map, g)).length, 0);
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + n + " settings across Map Map controls and Overlay controls.");
+  context.GeoScene.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context), { regions: true, bubbles: false, labels: false, legend: false });
+  context.refreshControlsBtn.onClick();
+  n = ["main", "overlay", "data"].reduce((t, g) => t + api._promoted(controlsOf(api, map, g)).length, 0);
+  assert.equal(context.statusLabel.getText(), "Controls updated: " + n + " settings across Map Map controls, Overlay controls and Data controls.");
+  const full = buildSandbox();
+  const fmap = fullControlsMap(full.context);
+  full.context.refreshControlsBtn.onClick();
+  assert.match(full.context.statusLabel.getText(), /^Controls updated: \d+ settings across Map Map controls, Overlay controls, Data controls and Extract controls\.$/);
+  assert.ok(fmap);
+});
+
+test("controls rename: Refresh controls says \"1 setting\" for a single setting", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.GeoControlPanel.sync = () => ({ controls: 1, components: { main: "c", overlay: null, data: null, extract: null } });
+  context.refreshControlsBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Controls updated: 1 setting in Map Map controls.");
 });
 
 // ---- Map controls: where the component sits, selection, readable names ------------------
@@ -5687,7 +5759,7 @@ test("controls: with two maps, each Controls sits directly above its own group",
   const rs = maps.map((m) => context.GeoControlPanel.sync(m));
   maps.forEach((m, i) => {
     assert.ok(directlyAbove(api, rs[i].componentId, m.groupId), m.name);
-    assert.equal(api.getNiceName(rs[i].componentId), m.name + " Controls");
+    assert.equal(api.getNiceName(rs[i].componentId), m.name + " Map controls");
   });
   assert.notEqual(rs[0].componentId, rs[1].componentId);
 });
@@ -5707,7 +5779,7 @@ test("controls: adding a pin and syncing leaves the component where it is", () =
 test("controls: a Controls component made inside the group by the earlier build is moved out, keeping its id and promotions", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);
-  const old = api.create("component", "Map Controls");
+  const old = api.create("component", "My old controls");
   api.parent(old, map.groupId);
   api.setUserData(old, "geoControls", map.cameraId);
   const other = api.create("basicShape", "Other");

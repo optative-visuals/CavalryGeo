@@ -67,7 +67,7 @@ Each map remembers its style, so pins, routes, labels and layers you add later m
 
 ## Map controls
 
-Every map has a **Controls** layer (named after the map, for example "Map Controls"), just above the map's group in the Scene Window (not
+Every map has a **Map controls** layer (named after the map, for example "Paris Map controls"), just above the map's group in the Scene Window (not
 inside it). The plugin selects it when you make a map, so the Attribute Editor opens on it. Open
 the **Controls** tab there to find the map's settings in one place:
 
@@ -81,12 +81,13 @@ the **Controls** tab there to find the map's settings in one place:
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size.
 - **Imagery:** opacity and hide.
 
-A map's settings are split over up to four components, stacked above the map group: **Controls**
+A map's settings are split over up to four components, stacked above the map group: **Map controls**
 (named after the map: camera, ocean, base layers, imagery), **Overlay controls** (pins, labels, routes,
 travellers, scale bar, north arrow), **Data controls** (data maps) and **Extract controls**
 (extracted features). Each appears once it has something to show. Maps made with earlier versions
 are split the next time their controls refresh (any action in the panel, or Refresh controls);
-anything you promoted yourself stays where it is.
+anything you promoted yourself stays where it is. A main component still called "Map name Controls"
+is renamed to "Map name Map controls" then; a name you gave it yourself is kept.
 
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
 press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
