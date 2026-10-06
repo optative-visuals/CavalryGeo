@@ -9,7 +9,7 @@ Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch
 - [Map](#map)
 - [Layers](#layers)
 - [Imagery](#imagery)
-- [Extract and Bake](#extract-and-bake)
+- [Extract and Bake](#extract-and-bake) (with [Highlights](#highlights))
 - [Label: pins and labels](#label-pins-and-labels)
 - [Label: routes](#label-routes)
 - [Data](#data)
@@ -174,6 +174,39 @@ cache come after them).
   editable shape at the current frame. Baked shapes stop following the camera. The legs and stops
   of a new-style route are already ordinary Cavalry shapes, so Bake skips them (it still bakes the
   legs of routes made by earlier versions).
+
+### Highlights
+
+A highlight draws attention to a place with an animated effect, as its own layer next to the
+extracted place.
+
+1. Press **Find**, then select one or more places in the list.
+2. Under the list, choose an **Effect**, a **Start** frame and a number of **Frames** (the
+   duration). Start opens on the playhead and moves on after each highlight, so the next one
+   follows straight after. Frames opens at one second of your comp.
+3. Press **Highlight selected**. A place that isn't extracted yet is extracted first; one that
+   already is gets reused.
+
+The effects:
+
+- **Fill in:** the place fades in as a solid colour.
+- **Outline draw-on:** the outline draws itself around the place.
+- **Pulse:** a ring grows outward from the outline and fades, over and over. It keeps pinging
+  after the Amount reaches 100 %.
+- **Glow:** a soft halo around the place. It sits just below the extracted layer, so the place
+  itself stays crisp.
+
+Each highlight is a group named "Highlight 1: France" (then 2, 3 and so on). Its timing is an
+**Amount %** that runs from 0 at Start to 100 at Start plus Frames. The keys are on the timeline:
+drag them to re-time, or ease them in the graph editor.
+
+The map's **Extract controls** get a row for each highlight: **Highlight n · Amount %** and
+**Colour**, plus **Width** (Outline draw-on), **Speed** (Pulse) or **Size** (Glow). Hover a row to
+see which place it belongs to.
+
+To remove a highlight, delete its group. If you delete the extracted place instead, its
+highlights go away the next time the Controls refresh (press **Refresh controls**). Highlights
+can't be baked: Bake skips them.
 
 ## Label: pins and labels
 

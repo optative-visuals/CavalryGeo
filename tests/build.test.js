@@ -520,7 +520,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "bakeBtn", "refreshControlsBtn",
+    "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -3680,7 +3680,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn",
     "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn"];
-  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -6230,6 +6230,66 @@ test("Extract Find box: the Find button always runs, and the text it ran counts 
   assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
 });
 
+function findFrance(context) {
+  const C = require("../src/core/codec.js"), map = controlsMap(context), G = context.GeoScene;
+  const poly = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} }] });
+  G.createMapLayer(map, "Map: Countries", poly, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  context.featureQuery.setText("France");
+  context.findBtn.onClick();
+  context.featureList.getSelection = () => ["g0"];
+  return map;
+}
+
+test("Highlight selected: extracts a feature not yet extracted, then highlights it with the picked effect and timing", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  context.highlightEffectPicker.setValue(1);          // Outline draw-on
+  context.highlightStartField.setValue(12);
+  context.highlightLengthField.setValue(8);
+  context.highlightBtn.onClick();
+  const extracts = G.findMapLayers(map).filter((l) => l.meta.category === "extract");
+  assert.equal(extracts.length, 1);
+  const hs = G.findHighlights(map);
+  assert.equal(hs.length, 1); assert.equal(hs[0].effect, "outline"); assert.equal(hs[0].extract, extracts[0].id);
+  assert.deepEqual(plain(api.getKeyframeTimes(hs[0].shape, "stroke.trimEnd")), [12, 20]);
+  assert.match(context.statusLabel.getText(), /^Highlighted 1 feature\(s\) with Outline draw-on\. Animate or re-time its Amount % keys on the timeline\./);
+  assert.equal(context.highlightStartField.getValue(), 20, "Start moves on so the next highlight follows");
+});
+
+test("Highlight selected: reuses the feature's existing extract", () => {
+  const { context } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  context.extractBtn.onClick();
+  context.highlightBtn.onClick();
+  context.highlightBtn.onClick();
+  assert.equal(G.findMapLayers(map).filter((l) => l.meta.category === "extract").length, 1);
+  assert.equal(G.findHighlights(map).length, 2);
+});
+
+test("Highlight selected: asks for Find first, then for a selection", () => {
+  const { context } = buildSandbox();
+  context.highlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Click Find first (Layers tab).");
+  findFrance(context);
+  context.featureList.getSelection = () => [];
+  context.highlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Select some features in the list first.");
+});
+
+test("Highlight row sits in the Layers tab's Extract section; highlights are not Extract sources; Bake skips them", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context);
+  assert.deepEqual(plain(context.highlightEffectPicker._entries), ["Fill in", "Outline draw-on", "Pulse", "Glow"]);
+  assert.ok(holds(context.sectionPages.pages[1], context.highlightBtn), "Layers page");
+  context.highlightBtn.onClick();
+  context.findBtn.onClick();
+  assert.ok(!context.sourceLayers.some((l) => l.meta.category === "highlight"));
+  const h = context.GeoScene.findHighlights(map)[0];
+  api.select([h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
+});
+
 function stubLoad(context) {
   const fetched = [];
   context.GeoNet.fetchCsv = (url) => { fetched.push(url); return "Location,Visitors\nParis,30\n"; };
@@ -7677,4 +7737,323 @@ test("controls: when one row's promotion fails, every other row still gets its o
     else if (/^Route 2 · /.test(n)) assert.equal(notes, "D → E", n);
     else assert.equal(notes, "", n);
   });
+});
+
+// ---- Highlights --------------------------------------------------------------------
+function highlightMap(context) {
+  const map = controlsMap(context), G = context.GeoScene, C = require("../src/core/codec.js");
+  const poly = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]] }] });
+  const extract = G.createMapLayer(map, "France", poly, { camera: map.cameraId, category: "extract", source: "countries" }, G.layerStyle(map, "extractFill"), {});
+  return { map, extract };
+}
+const hlRec = (api, g) => plain(api.getUserDataKey(g, "geoHighlight"));
+
+test("highlights: the effects list", () => {
+  const { context } = buildSandbox();
+  assert.deepEqual(plain(context.GeoScene.HIGHLIGHT_EFFECTS), [{ id: "fill", name: "Fill in" }, { id: "outline", name: "Outline draw-on" }, { id: "pulse", name: "Pulse" }, { id: "glow", name: "Glow" }]);
+});
+
+test("highlights: Fill in makes a numbered group directly above the extract, a filled shape from the extract's data, keyed opacity", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 10, duration: 25 });
+  assert.equal(api.getNiceName(g), "Highlight 1: France");
+  assert.equal(api.getUserDataKey(g, "geoHighlightNumber"), 1);
+  assert.ok(directlyAbove(api, g, extract));
+  const rec = hlRec(api, g);
+  assert.equal(rec.extract, extract); assert.equal(rec.effect, "fill");
+  assert.equal(api.getParent(rec.shape), g);
+  assert.equal(api.getNiceName(rec.shape), "Highlight 1 shape");
+  assert.deepEqual(plain(G.readLayerMeta(rec.shape)), { camera: map.cameraId, category: "highlight", effect: "fill" });
+  assert.deepEqual(plain(G.readLayerData(rec.shape)), plain(G.readLayerData(extract)));
+  assert.equal(api.getInConnection(rec.shape, "generator.array.2"), map.cameraId + ".array.2", "follows the camera");
+  assert.ok(api.hasFill(rec.shape) && !api.hasStroke(rec.shape));
+  assert.equal(api.get(rec.shape, "material.materialColor"), "#1F8F4E");
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [10, 35]);
+  api.setFrame(10); assert.equal(api.get(rec.shape, "opacity"), 0);
+  api.setFrame(35); assert.equal(api.get(rec.shape, "opacity"), 100);
+});
+
+test("highlights: Outline draw-on keys the shape's trim end, stroke only, width 3", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context);
+  const rec = hlRec(api, context.GeoScene.createHighlight(map, extract, "outline", { start: 0, duration: 20 }));
+  assert.ok(api.hasStroke(rec.shape) && !api.hasFill(rec.shape));
+  assert.equal(api.get(rec.shape, "stroke.width"), 3);
+  assert.equal(api.get(rec.shape, "stroke.trim"), true);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "stroke.trimEnd")), [0, 20]);
+});
+
+test("highlights: Pulse adds an oscillator into the shape's phase and a fade helper into its opacity; Amount keys the group", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context);
+  const g = context.GeoScene.createHighlight(map, extract, "pulse", { start: 5, duration: 10 }), rec = hlRec(api, g);
+  const phase = "generator.array." + context.GeoExpression.inputIndex(context.GeoExpression.HIGHLIGHT_SHAPE_INPUTS, "phase");
+  assert.equal(api.getParent(rec.osc), g); assert.equal(api.getNiceName(rec.osc), "Highlight 1 pulse");
+  assert.equal(api.get(rec.osc, "waveType"), 3); assert.equal(api.get(rec.osc, "minimum"), 0); assert.equal(api.get(rec.osc, "maximum"), 1);
+  assert.equal(api.get(rec.osc, "frequency"), 1); assert.equal(api.get(rec.osc, "strengthToZero"), false);
+  assert.equal(api.getInConnection(rec.shape, phase), rec.osc + ".id");
+  assert.equal(api.getParent(rec.fade), g); assert.equal(api.getNiceName(rec.fade), "Highlight 1 fade");
+  assert.equal(api.getInConnection(rec.fade, "array.0"), rec.osc + ".id");
+  assert.equal(api.getInConnection(rec.shape, "opacity"), rec.fade + ".id");
+  assert.deepEqual(plain(api.getKeyframeTimes(g, "opacity")), [5, 15]);
+});
+
+test("highlights: Glow sits directly below the extract with a blur inside its group", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context);
+  const g = context.GeoScene.createHighlight(map, extract, "glow", { start: 0, duration: 25 }), rec = hlRec(api, g);
+  assert.ok(directlyAbove(api, extract, g), "the extract stays on top");
+  assert.ok(api.hasFill(rec.shape));
+  assert.equal(api.getInConnection(rec.shape, "filters"), rec.blur + ".id");
+  assert.equal(api.getParent(rec.blur), g);
+  assert.deepEqual(plain(api.get(rec.blur, "amount")), { x: 20, y: 20 });
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [0, 25]);
+});
+
+test("highlights: numbers go up; findHighlights lists them in Scene Window order with their members", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const a = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 });
+  const b = G.createHighlight(map, extract, "outline", { start: 0, duration: 5 });
+  assert.equal(api.getNiceName(b), "Highlight 2: France");
+  const found = G.findHighlights(map);
+  assert.deepEqual(plain(found.map((h) => h.groupId)), [b, a], "top first");
+  assert.equal(found[1].number, 1); assert.equal(found[1].effect, "fill"); assert.equal(found[1].name, "France");
+  assert.equal(found[1].extract, extract); assert.equal(found[1].osc, null);
+});
+
+test("highlights: prepareHighlights deletes highlights whose extract is gone and renumbers a duplicate", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const a = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 });
+  const b = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 });
+  api.setUserData(b, "geoHighlightNumber", 1);    // a duplicated group copies its number
+  api.rename(b, "Highlight 1: France");
+  assert.equal(G.prepareHighlights(map), 0);
+  assert.equal(api.getUserDataKey(a, "geoHighlightNumber"), 1);
+  assert.equal(api.getUserDataKey(b, "geoHighlightNumber"), 2);
+  assert.equal(api.getNiceName(b), "Highlight 2: France");
+  api.deleteLayer(extract);
+  assert.equal(G.prepareHighlights(map), 2);
+  assert.equal(api.layerExists(a), false); assert.equal(api.layerExists(b), false);
+});
+
+test("highlights: createHighlight refuses a layer that isn't an extract of this map, and leaves nothing behind", () => {
+  const { context, api } = buildSandbox();
+  const { map } = highlightMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Here", 1, 1), before = api.getCompLayers(false).length;
+  assert.throws(() => G.createHighlight(map, pin, "fill", {}), /extracted feature/);
+  assert.throws(() => G.createHighlight(map, pin, "sparkle", {}), /Unknown highlight effect/);
+  assert.equal(api.getCompLayers(false).length, before);
+});
+
+test("highlights: highlightParts lists every group and member", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 0, duration: 5 }), rec = hlRec(api, g);
+  const parts = G.highlightParts(map);
+  [g, rec.shape, rec.osc, rec.fade].forEach((id) => assert.ok(parts[id], id));
+  assert.ok(!parts[extract]);
+});
+
+test("highlights in Controls: rows land in Extract controls with notes; a highlight shape is not an extract row", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "glow", { start: 0, duration: 10 }), rec = plain(api.getUserDataKey(g, "geoHighlight"));
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.components.extract));
+  ["Highlight 1 · Amount %", "Highlight 1 · Colour", "Highlight 1 · Size"].forEach((n) => assert.ok(names.includes(n), n));
+  assert.ok(names.includes("France · Hide"));
+  assert.ok(!names.some((n) => /^Highlight 1 shape/.test(n)), "the shape is not listed as an extract");
+  const promos = api._promoted(r.components.extract);
+  assert.ok(promos.includes(rec.shape + ".opacity"));
+  const notes = api.get(r.components.extract, "promotedAttributes." + promos.indexOf(rec.shape + ".opacity") + ".notes");
+  assert.equal(notes, "France");
+  // Size: one values input driving both blur axes.
+  const slot = plain(api.getUserDataKey(r.valuesId, "geoSlots"))["hl:" + g + ":size"];
+  assert.equal(api.getInConnection(rec.blur, "amount.x"), r.valuesId + "." + slot);
+  assert.equal(api.getInConnection(rec.blur, "amount.y"), r.valuesId + "." + slot);
+});
+
+test("highlights in Controls: a refresh after the extract is deleted removes the highlight and its rows", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 0, duration: 10 });
+  context.GeoControlPanel.sync(map);
+  api.deleteLayer(extract);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(g), false);
+  assert.equal(r.components.extract, null, "nothing left to show");
+});
+
+test("highlights in Controls: the Amount row points at the keyed attribute and keeps its keys", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "outline", { start: 3, duration: 7 }), rec = plain(api.getUserDataKey(g, "geoHighlight"));
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(api._promoted(r.components.extract).includes(rec.shape + ".stroke.trimEnd"));
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "stroke.trimEnd")), [3, 10]);
+});
+
+// ---- Highlights: final review fixes ---------------------------------------------------
+// A duplicated highlight group: the copy carries the original's record, but its own shape (and helpers).
+function duplicateHighlight(api, G, map, extract, effect) {
+  const a = G.createHighlight(map, extract, effect, { start: 0, duration: 5 });
+  const b = G.createHighlight(map, extract, effect, { start: 0, duration: 5 });
+  api.setUserData(b, "geoHighlight", api.getUserDataKey(a, "geoHighlight"));
+  api.setUserData(b, "geoHighlightNumber", 1);
+  api.rename(b, "Highlight 1: France");
+  return { a, b, recA: hlRec(api, a), own: G.findHighlights(map).filter((h) => h.groupId === b)[0] };
+}
+
+test("highlights (duplicate): a copied group's members are its own children, not the original's", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const { a, b, recA, own } = duplicateHighlight(api, G, map, extract, "pulse");
+  assert.equal(api.getParent(own.shape), b); assert.notEqual(own.shape, recA.shape);
+  assert.equal(api.getParent(own.osc), b); assert.notEqual(own.osc, recA.osc);
+  assert.equal(api.getParent(own.fade), b); assert.notEqual(own.fade, recA.fade);
+  const parts = G.highlightParts(map);
+  [b, own.shape, own.osc, own.fade, a, recA.shape].forEach((id) => assert.ok(parts[id], id));
+});
+
+test("highlights (duplicate): sync renumbers the copy, rewrites its record and points its rows at its own shape", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const { a, b, recA, own } = duplicateHighlight(api, G, map, extract, "pulse");
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getUserDataKey(a, "geoHighlightNumber"), 1);
+  assert.equal(api.getUserDataKey(b, "geoHighlightNumber"), 2);
+  const recB = hlRec(api, b);
+  assert.equal(recB.shape, own.shape); assert.equal(recB.osc, own.osc); assert.equal(recB.fade, own.fade);
+  assert.equal(hlRec(api, a).shape, recA.shape, "the original keeps its own members");
+  const promos = plain(api._promoted(r.components.extract));
+  assert.equal(promos.filter((p) => p === a + ".opacity").length, 1, "the original is promoted once");
+  assert.ok(promos.includes(b + ".opacity"), "the copy's Amount row is its own group");
+  assert.deepEqual(promos, promos.filter((p, i) => promos.indexOf(p) === i), "no duplicated promotion");
+  const names = plain(promotedNames(api, r.components.extract));
+  assert.ok(names.includes("Highlight 1 · Amount %") && names.includes("Highlight 2 · Amount %"));
+});
+
+test("highlights (duplicate): Bake on a copy's shape is skipped", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const { own } = duplicateHighlight(api, G, map, extract, "fill");
+  api.select([own.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
+});
+
+test("highlights: Bake skips a highlight shape that no group record lists", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "fill", { start: 0, duration: 5 }), rec = hlRec(api, g);
+  api.setUserData(g, "geoHighlight", {});
+  api.select([rec.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
+});
+
+test("highlights: a highlight whose extract is gone is removed, but a group holding the user's layers stays", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const g = G.createHighlight(map, extract, "pulse", { start: 0, duration: 10 }), rec = hlRec(api, g);
+  const mine = api.create("group", "Mine"); api.parent(mine, g);
+  context.GeoControlPanel.sync(map);
+  api.deleteLayer(extract);
+  const r = context.GeoControlPanel.sync(map);
+  [rec.shape, rec.osc, rec.fade].forEach((id) => assert.equal(api.layerExists(id), false, id));
+  assert.equal(api.layerExists(g), true); assert.equal(api.layerExists(mine), true);
+  assert.equal(api.getParent(mine), g);
+  assert.equal(r.components.extract, null, "no rows");
+});
+
+test("highlights: prepareHighlights on a copy whose extract is gone never touches the original's members", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const { a, b, recA, own } = duplicateHighlight(api, G, map, extract, "fill");
+  api.deleteLayer(extract);
+  assert.equal(G.prepareHighlights(map), 2);
+  [a, b, recA.shape, own.shape].forEach((id) => assert.equal(api.layerExists(id), false, id));
+});
+
+test("highlights: the shape's detail and dot size follow the extract's inputs", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = hlRec(api, G.createHighlight(map, extract, "fill", { start: 0, duration: 5 }));
+  ["detail", "pointRadius"].forEach((n) => {
+    const at = "generator.array." + E.inputIndex(E.MAP_INPUTS, n);
+    assert.equal(api.getInConnection(rec.shape, at), extract + "." + at, n);
+  });
+});
+
+test("highlights: if connecting detail fails the extract's value is copied instead", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const at = "generator.array." + E.inputIndex(E.MAP_INPUTS, "detail");
+  api.set(extract, { [at]: 77 });
+  const real = api.connect;
+  api.connect = function (a, b, c, d) { if (a === extract && d === at) throw new Error("no"); return real.apply(this, arguments); };
+  try {
+    const rec = hlRec(api, G.createHighlight(map, extract, "fill", { start: 0, duration: 5 }));
+    assert.equal(api.getInConnection(rec.shape, at), "");
+    assert.equal(api.get(rec.shape, at), 77);
+  } finally { api.connect = real; }
+});
+
+test("highlights: createHighlight leaves the user's selection as it was, even for Glow", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  ["fill", "glow"].forEach((effect) => {
+    api.select(["someone#1"]);
+    G.createHighlight(map, extract, effect, { start: 0, duration: 5 });
+    assert.deepEqual(plain(api.getSelection()), ["someone#1"], effect);
+  });
+});
+
+test("highlights: Glow is made without selection or reorder calls", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  api.select = undefined;
+  assert.doesNotThrow(() => G.createHighlight(map, extract, "glow", { start: 0, duration: 5 }));
+});
+
+function twoFeatures(context) {
+  const C = require("../src/core/codec.js"), map = controlsMap(context), G = context.GeoScene;
+  const poly = C.encodeLayer({ kind: "polygon", features: [
+    { name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} },
+    { name: "Spain", rank: 1, rings: [[[-8, 36], [-2, 36], [-2, 43], [-8, 36]]], props: {} }] });
+  G.createMapLayer(map, "Map: Countries", poly, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  context.featureQuery.setText("");
+  context.findBtn.onClick();
+  context.featureList.getSelection = () => context.featureList._model.map((m) => m.uuid);
+  return map;
+}
+
+test("Highlight selected: one failing feature doesn't stop the others", () => {
+  const { context } = buildSandbox();
+  const map = twoFeatures(context), G = context.GeoScene;
+  assert.equal(context.featureList._model.length, 2);
+  const real = G.createHighlight; let calls = 0;
+  G.createHighlight = function () { if (++calls === 2) throw new Error("Boom"); return real.apply(this, arguments); };
+  context.highlightStartField.setValue(5); context.highlightLengthField.setValue(10);
+  context.highlightBtn.onClick();
+  G.createHighlight = real;
+  assert.equal(G.findHighlights(map).length, 1);
+  assert.match(context.statusLabel.getText(), /^Highlighted 1 feature\(s\) with Fill in\. Animate or re-time its Amount % keys on the timeline\./);
+  assert.match(context.statusLabel.getText(), / Couldn't highlight 1: Boom/);
+  assert.equal(context.highlightStartField.getValue(), 15, "Start still advances");
+});
+
+test("Highlight selected: when every feature fails the first error is shown and Start stays", () => {
+  const { context } = buildSandbox();
+  twoFeatures(context);
+  const G = context.GeoScene, real = G.createHighlight; let calls = 0;
+  G.createHighlight = function () { throw new Error("Boom " + (++calls)); };
+  context.highlightStartField.setValue(5);
+  context.highlightBtn.onClick();
+  G.createHighlight = real;
+  assert.equal(context.statusLabel.getText(), "Error: Boom 1");
+  assert.equal(context.highlightStartField.getValue(), 5);
 });
