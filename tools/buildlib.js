@@ -7,8 +7,9 @@ const RUNTIME_FILES = ["src/core/projection.js", "src/core/routes.js", "src/core
 const DATA_RUNTIME_FILES = RUNTIME_FILES.concat(["src/core/datamap.js"]);
 const IMAGERY_RUNTIME_FILES = ["src/core/tiles.js"];
 const CURVE_RUNTIME_FILES = ["src/core/curve.js"];
+const FURNITURE_RUNTIME_FILES = ["src/core/projection.js", "src/core/furniture.js"];
 const CORE_FILES = [
-  "src/core/projection.js", "src/core/routes.js", "src/core/curve.js", "src/core/markers.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js",
+  "src/core/projection.js", "src/core/routes.js", "src/core/curve.js", "src/core/markers.js", "src/core/furniture.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js",
   "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js", "src/core/controls.js", "src/core/styles.js",
   "src/core/update.js", "src/core/preview.js"
 ];
@@ -32,6 +33,7 @@ function buildRuntimeSource() { return RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildDataRuntimeSource() { return DATA_RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildImageryRuntimeSource() { return IMAGERY_RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildCurveSource() { return CURVE_RUNTIME_FILES.map(read).join("\n;\n"); }
+function buildFurnitureSource() { return FURNITURE_RUNTIME_FILES.map(read).join("\n;\n"); }
 
 // options.version overrides package.json's version (tests, and trying out the update check).
 function buildPanel(options = {}) {
@@ -46,8 +48,9 @@ function buildPanel(options = {}) {
     "var GEO_DATA_RUNTIME_SRC = " + JSON.stringify(buildDataRuntimeSource()) + ";",
     "var GEO_IMAGERY_RUNTIME_SRC = " + JSON.stringify(buildImageryRuntimeSource()) + ";",
     "var GEO_CURVE_SRC = " + JSON.stringify(buildCurveSource()) + ";",
+    "var GEO_FURNITURE_SRC = " + JSON.stringify(buildFurnitureSource()) + ";",
     ...CAVALRY_FILES.map(read)
   ].join("\n;\n");
 }
 
-module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildPanel, copyDirSync };
+module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildFurnitureSource, buildPanel, copyDirSync };

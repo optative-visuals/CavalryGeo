@@ -41,7 +41,7 @@ var GeoStyles = (function () {
     extractLine: { stroke: "extract", width: 3 },
     pin: { fill: "accent" }, stop: { fill: "accent" }, marker: { fill: "accent" },
     route: { stroke: "accent", width: "routes" },
-    label: { fill: "text" }, credit: { fill: "text" }, valueLabels: { fill: "text" }, legend: { fill: "text" },
+    label: { fill: "text" }, credit: { fill: "text" }, valueLabels: { fill: "text" }, legend: { fill: "text" }, furniture: { fill: "text" },
     ocean: { fill: "ocean" },
     regions: { stroke: "ocean", width: 0.5 },
     bubbles: { fill: "#bc4749", stroke: "#ffffff", width: 1 }
@@ -64,7 +64,7 @@ var GeoStyles = (function () {
     if (parts.ocean) add(parts.ocean, FILL, "ocean", "color");
     (parts.layers || []).forEach(function (l) {
       var k = l.category === "extract" ? KINDS[l.line ? "extractLine" : "extractFill"] : KINDS[l.category];
-      if (!k || ["pin", "stop", "marker", "route", "label", "credit", "valueLabels", "legend", "ocean", "regions", "bubbles"].indexOf(l.category) >= 0) return;
+      if (!k || ["pin", "stop", "marker", "route", "label", "credit", "valueLabels", "legend", "furniture", "ocean", "regions", "bubbles"].indexOf(l.category) >= 0) return;
       if (k.fill) add(l.id, FILL, k.fill, "color");
       if (k.stroke) add(l.id, STROKE, k.stroke, "color");
       if (typeof k.width === "string") add(l.id, WIDTH, k.width, "width");
@@ -77,6 +77,7 @@ var GeoStyles = (function () {
     each(parts.valueLabels, FILL, "text");
     each(parts.legends, FILL, "text");
     each(parts.credits, FILL, "text");
+    each(parts.furniture, FILL, "text");
     each(parts.regions, STROKE, "ocean");
     return out;
   }

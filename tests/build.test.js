@@ -6789,3 +6789,54 @@ test("a street layer that fails to read doesn't stop the overlay or the other st
   });
   assert.ok(good);
 });
+
+// ---- Map furniture ----
+test("Add scale bar: a camera-linked script layer in the text colour, with a fade utility on its opacity", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 48.85, lon: 2.35, zoom: 12, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Vintage"));
+  const id = G.addScaleBar(map);
+  assert.equal(api.getNiceName(id), "Scale bar");
+  assert.equal(api.getParent(id), map.groupId);
+  assert.equal(api.get(id, "material.materialColor"), "#4a3423");
+  assert.equal(api.getInConnection(id, "generator.array.2"), map.cameraId + ".array.2");
+  const SB = context.GeoExpression.SCALE_BAR_INPUTS, at = (n) => "generator.array." + context.GeoExpression.inputIndex(SB, n);
+  assert.equal(api.get(id, at("compW")), 1920);
+  assert.equal(api.get(id, at("raise")), 0);
+  const f = G.findFurniture(map);
+  assert.equal(f.scaleBar, id);
+  assert.equal(api.getNiceName(f.fade), "Scale bar fade");
+  assert.equal(api.getInConnection(id, "opacity"), f.fade + ".id");
+  assert.equal(api.getInConnection(f.fade, "array.0"), map.cameraId + ".array.2");
+  assert.throws(() => G.addScaleBar(map), /This map already has a scale bar\./);
+});
+
+test("Add scale bar sits above the OpenStreetMap credit; Add north arrow defaults to top-right", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  G.createAttribution(map);
+  const id = G.addScaleBar(map);
+  const at = (inputs, n) => "generator.array." + context.GeoExpression.inputIndex(inputs, n);
+  assert.equal(api.get(id, at(context.GeoExpression.SCALE_BAR_INPUTS, "raise")), 40);
+  const na = G.addNorthArrow(map);
+  assert.equal(api.getNiceName(na), "North arrow");
+  assert.equal(api.get(na, at(context.GeoExpression.NORTH_ARROW_INPUTS, "corner")), 1);
+  assert.throws(() => G.addNorthArrow(map), /This map already has a north arrow\./);
+});
+
+test("fitFurniture follows a resized composition; Apply style recolours the furniture", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const sb = G.addScaleBar(map), na = G.addNorthArrow(map);
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  G.fitFurniture(map);
+  const at = (inputs, n) => "generator.array." + context.GeoExpression.inputIndex(inputs, n);
+  assert.equal(api.get(sb, at(context.GeoExpression.SCALE_BAR_INPUTS, "compW")), 1080);
+  assert.equal(api.get(na, at(context.GeoExpression.NORTH_ARROW_INPUTS, "compH")), 1080);
+  G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(api.get(sb, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(na, "material.materialColor"), "#ffffff");
+});

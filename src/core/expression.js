@@ -168,7 +168,26 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(travellerShowInputs(laterCount)) + "((" + cond + ") ? _i1 : 0);\n";
   }
 
+  var CAMERA_FIVE = MAP_INPUTS.slice(0, 5);
+  var SCALE_BAR_INPUTS = CAMERA_FIVE.concat([["compW", 1920], ["compH", 1080], ["units", 0], ["style", 0], ["corner", 2], ["margin", 40], ["maxWidth", 200], ["raise", 0], ["textSize", 16]]);
+  var NORTH_ARROW_INPUTS = CAMERA_FIVE.concat([["compW", 1920], ["compH", 1080], ["style", 0], ["corner", 1], ["margin", 40], ["size", 40]]);
+  var FURNITURE_FADE_INPUTS = [["zoom", 2], ["hideBelow", 3]];
+  function scaleBarExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(SCALE_BAR_INPUTS) +
+      "GeoFurniture.scaleBar({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, compW: _i5, compH: _i6, units: _i7, style: _i8, corner: _i9, margin: _i10, maxWidth: _i11, raise: _i12, textSize: _i13}, cavalry);\n";
+  }
+  function northArrowExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(NORTH_ARROW_INPUTS) +
+      "GeoFurniture.northArrow({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, compW: _i5, compH: _i6, style: _i7, corner: _i8, margin: _i9, size: _i10}, cavalry);\n";
+  }
+  // Same formula as GeoFurniture.fade (a unit test keeps them equal); no projection maths needed.
+  function furnitureFadeExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(FURNITURE_FADE_INPUTS) + "Math.max(0, Math.min(1, (_i0 - (_i1 - 0.5)) / 0.5)) * 100;\n";
+  }
+
   return {
+    SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
+    scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
     REGION_INPUTS: REGION_INPUTS, BUBBLE_INPUTS: BUBBLE_INPUTS, VALUE_LABEL_INPUTS: VALUE_LABEL_INPUTS,
     LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS,

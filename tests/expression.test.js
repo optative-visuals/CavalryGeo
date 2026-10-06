@@ -215,3 +215,24 @@ test("traveller helpers: tip clamps to 0..99.9; show is the current leg only", (
   const show0 = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 0);
   assert.equal(run(show0, [100, 100]), 100, "last leg fully drawn → shown at the end");
 });
+
+test("furniture inputs and expressions", () => {
+  assert.deepEqual(E.SCALE_BAR_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "compW", "compH", "units", "style", "corner", "margin", "maxWidth", "raise", "textSize"]);
+  assert.deepEqual(E.SCALE_BAR_INPUTS.slice(5).map((i) => i[1]), [1920, 1080, 0, 0, 2, 40, 200, 0, 16]);
+  assert.deepEqual(E.NORTH_ARROW_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "compW", "compH", "style", "corner", "margin", "size"]);
+  assert.deepEqual(E.NORTH_ARROW_INPUTS.slice(5).map((i) => i[1]), [1920, 1080, 0, 1, 40, 40]);
+  assert.deepEqual(E.FURNITURE_FADE_INPUTS, [["zoom", 2], ["hideBelow", 3]]);
+  const sb = E.scaleBarExpression("/*SRC*/", { camera: "c", category: "scaleBar" });
+  assert.deepEqual(E.readTag(sb, "GEO_META"), { camera: "c", category: "scaleBar" });
+  assert.ok(sb.includes("/*SRC*/") && sb.includes("GeoFurniture.scaleBar("));
+  assert.ok(E.northArrowExpression("/*SRC*/", { camera: "c", category: "northArrow" }).includes("GeoFurniture.northArrow("));
+});
+
+test("the fade expression evaluates exactly like GeoFurniture.fade", () => {
+  const F = require("../src/core/furniture.js");
+  const expr = E.furnitureFadeExpression({ camera: "c", category: "scaleBarFade" });
+  [[2, 3], [2.75, 3], [5, 3], [1, 0]].forEach(([zoom, hideBelow]) => {
+    const got = Function("zoom", "hideBelow", "return eval(" + JSON.stringify(expr) + ");")(zoom, hideBelow);
+    assert.equal(got, F.fade(zoom, hideBelow));
+  });
+});
