@@ -82,28 +82,54 @@ test("labels share Hide, Colour and Size (font size)", () => {
   assert.equal(row(p, "Labels · Size").key, "labels:size");
 });
 
-test("routes: shared colour, width and arc height, then each leg's draw on % in leg order", () => {
-  const p = G.plan(model({ routes: [{ id: "rg", name: "Paris → Rome", legs: [{ id: "l1", number: 1, state: {} }, { id: "l2", number: 2, state: {} }] }] }));
-  assert.deepEqual(labels(p).slice(5), ["Paris → Rome · Colour", "Paris → Rome · Width", "Paris → Rome · Arc height", "Paris → Rome · Leg 1 draw on %", "Paris → Rome · Leg 2 draw on %"]);
-  assert.deepEqual(row(p, "Paris → Rome · Colour").link, [{ layer: "l1", attr: "stroke.strokeColor" }, { layer: "l2", attr: "stroke.strokeColor" }]);
-  assert.equal(row(p, "Paris → Rome · Arc height").key, "route:rg:lift");
-  assert.deepEqual(row(p, "Paris → Rome · Arc height").link[0], { layer: "l1", attr: "generator.array.7" });
-  assert.deepEqual(row(p, "Paris → Rome · Leg 2 draw on %"), { kind: "direct", layer: "l2", attr: "stroke.trimEnd", label: "Paris → Rome · Leg 2 draw on %" });
+test("old-style route: Travel %, Arc height, Colour, Width — numbered, with the stops as notes", () => {
+  const p = G.plan(model({ routes: [{ id: "g1", name: "A → B", number: 3, title: "A → B", legs: [{ id: "l1", number: 1, state: {} }, { id: "l2", number: 2, state: {} }], draws: [{ id: "d1", state: {} }, { id: "d2", state: {} }] }] }));
+  const rows = p.rows.filter((r) => r.label.indexOf("Route 3") === 0);
+  assert.deepEqual(rows.map((r) => r.label), ["Route 3 · Travel %", "Route 3 · Arc height", "Route 3 · Colour", "Route 3 · Width"]);
+  assert.deepEqual(rows[0].link, [{ layer: "d1", attr: "array.0" }, { layer: "d2", attr: "array.0" }]);
+  assert.deepEqual(rows[0].overrides, { hardMin: 0, hardMax: 100 });
+  rows.forEach((r) => assert.equal(r.notes, "A → B"));
   assert.deepEqual(p.trim, ["l1", "l2"]);
+  assert.ok(!p.rows.some((r) => /draw on|Lean|Flip|hand|handle/.test(r.label)));
+});
+
+test("new-style route: the same four rows (Arc height on the handle helpers) plus traveller rows, nothing per leg", () => {
+  const leg = (id, s, e) => ({ id, number: 1, state: {}, start: { id: s, state: {} }, end: { id: e, state: {} } });
+  const p = G.plan(model({
+    newRoutes: [{ id: "g2", name: "C → D", number: 1, title: "C → D", legs: [leg("l3", "h1", "h2")], draws: [{ id: "d3", state: {} }] }],
+    travellers: [{ routeId: "g2", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "u1", state: {} }] }]
+  }));
+  assert.deepEqual(p.rows.filter((r) => r.label.indexOf("Route 1") === 0).map((r) => r.label), [
+    "Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width",
+    "Route 1 · Traveller hide", "Route 1 · Traveller size", "Route 1 · Traveller colour", "Route 1 · Traveller faces direction"
+  ]);
+  assert.deepEqual(row(p, "Route 1 · Arc height").link, [{ layer: "h1", attr: "array.8" }, { layer: "h2", attr: "array.8" }]);
+  assert.ok(p.rows.filter((r) => r.label.indexOf("Route 1") === 0).every((r) => r.notes === "C → D"));
+});
+
+test("a route without a number falls back to its name; data sets read Data n with their title as notes", () => {
+  const p = G.plan(model({
+    routes: [{ id: "g", name: "E → F", number: 0, title: "E → F", legs: [{ id: "l", number: 1, state: {} }], draws: [] }],
+    data: { year: [{ id: "rg", state: {} }], sets: [{ id: "s1", name: "Population", regions: { id: "rg", state: {}, useMiddle: false }, bubbles: null, labels: null }] }
+  }));
+  assert.ok(p.rows.some((r) => r.label === "E → F · Colour"));
+  assert.ok(!p.rows.some((r) => r.label === "E → F · Travel %"), "no draw helpers, no Travel row");
+  assert.equal(row(p, "Data 1 · Low colour").notes, "Population");
+  assert.ok(row(p, "Data · Year"));
 });
 
 test("data: one shared Year, colours per set (Middle only when used), bubble and label size", () => {
   const regions = { id: "rg", useMiddle: false, state: {} }, bubbles = { id: "bb", state: {} }, vals = { id: "vl", state: {} };
   const p = G.plan(model({ data: { year: [regions, bubbles, vals], sets: [{ id: "dg", name: "GDP", regions, bubbles, labels: vals }] } }));
-  assert.deepEqual(labels(p).slice(5), ["Data · Year", "GDP · Low colour", "GDP · High colour", "GDP · No-data colour", "GDP · Bubble size", "GDP · Bubble colour", "GDP · Label size"]);
+  assert.deepEqual(labels(p).slice(5), ["Data · Year", "Data 1 · Low colour", "Data 1 · High colour", "Data 1 · No-data colour", "Data 1 · Bubble size", "Data 1 · Bubble colour", "Data 1 · Label size"]);
   assert.deepEqual(row(p, "Data · Year").link, [{ layer: "rg", attr: "generator.array.7" }, { layer: "bb", attr: "generator.array.7" }, { layer: "vl", attr: "generator.array.7" }]);
-  assert.deepEqual(row(p, "GDP · Low colour"), { kind: "value", key: "data:dg:low", type: "color", label: "GDP · Low colour", link: [{ layer: "rg", attr: "generator.array.8" }], linked: [] });
-  assert.deepEqual(row(p, "GDP · No-data colour").link, [{ layer: "rg", attr: "generator.array.15" }]);
-  assert.deepEqual(row(p, "GDP · Bubble size").link, [{ layer: "bb", attr: "generator.array.8" }]);
-  assert.deepEqual(row(p, "GDP · Bubble colour"), { kind: "direct", layer: "bb", attr: "material.materialColor", label: "GDP · Bubble colour" });
-  assert.deepEqual(row(p, "GDP · Label size").link, [{ layer: "vl", attr: "generator.array.8" }]);
+  assert.deepEqual(row(p, "Data 1 · Low colour"), { kind: "value", key: "data:dg:low", type: "color", label: "Data 1 · Low colour", link: [{ layer: "rg", attr: "generator.array.8" }], linked: [], notes: "GDP" });
+  assert.deepEqual(row(p, "Data 1 · No-data colour").link, [{ layer: "rg", attr: "generator.array.15" }]);
+  assert.deepEqual(row(p, "Data 1 · Bubble size").link, [{ layer: "bb", attr: "generator.array.8" }]);
+  assert.deepEqual(row(p, "Data 1 · Bubble colour"), { kind: "direct", layer: "bb", attr: "material.materialColor", label: "Data 1 · Bubble colour", notes: "GDP" });
+  assert.deepEqual(row(p, "Data 1 · Label size").link, [{ layer: "vl", attr: "generator.array.8" }]);
   regions.useMiddle = true;
-  assert.deepEqual(row(G.plan(model({ data: { year: [regions], sets: [{ id: "dg", name: "GDP", regions, bubbles: null, labels: null }] } })), "GDP · Middle colour").link, [{ layer: "rg", attr: "generator.array.11" }]);
+  assert.deepEqual(row(G.plan(model({ data: { year: [regions], sets: [{ id: "dg", name: "GDP", regions, bubbles: null, labels: null }] } })), "Data 1 · Middle colour").link, [{ layer: "rg", attr: "generator.array.11" }]);
 });
 
 test("imagery: opacity and hide on each imagery group", () => {
@@ -130,17 +156,18 @@ test("ids lists every layer in the model", () => {
   const regions = { id: "rg", useMiddle: false, state: {} };
   const ids = G.ids(model({
     ocean: "oc", layers: [{ id: "cn" }], pins: [{ id: "p1" }], labels: [{ id: "t1" }],
-    routes: [{ id: "r", name: "", legs: [{ id: "l1" }] }],
+    routes: [{ id: "r", name: "", legs: [{ id: "l1" }], draws: [{ id: "dw" }] }],
     data: { year: [regions], sets: [{ id: "dg", name: "", regions, bubbles: { id: "bb" }, labels: { id: "vl" } }] },
     imagery: [{ id: "ig" }]
   }));
-  assert.deepEqual(Object.keys(ids).sort(), [V, "bb", "cam", "cn", "ig", "l1", "oc", "p1", "rg", "t1", "vl"].sort());
+  assert.deepEqual(Object.keys(ids).sort(), [V, "bb", "cam", "cn", "dw", "ig", "l1", "oc", "p1", "rg", "t1", "vl"].sort());
 });
 
 test("STATE_ATTRS name the attributes each kind of member is driven on", () => {
   assert.deepEqual(G.STATE_ATTRS.layer, ["generator.array.5", "generator.array.6"]);
   assert.deepEqual(G.STATE_ATTRS.pin, ["hidden", "material.materialColor", "generator.array.6"]);
   assert.deepEqual(G.STATE_ATTRS.label, ["hidden", "material.materialColor", "fontSize"]);
+  assert.deepEqual(G.STATE_ATTRS.draw, ["array.0"]);
   assert.deepEqual(G.STATE_ATTRS.leg, ["stroke.strokeColor", "stroke.width", "generator.array.7"]);
   assert.deepEqual(G.STATE_ATTRS.regions, ["generator.array.7", "generator.array.8", "generator.array.9", "generator.array.11", "generator.array.15"]);
   assert.deepEqual(G.STATE_ATTRS.bubbles, ["generator.array.7", "generator.array.8"]);
@@ -164,14 +191,14 @@ test("every values row has the key its input is found again by", () => {
     ["Cities · Detail", "layer:ci:detail"], ["Cities · Dot size", "layer:ci:dot"],
     ["Pins · Hide", "pins:hidden"], ["Pins · Colour", "pins:color"], ["Pins · Size", "pins:size"],
     ["Labels · Hide", "labels:hidden"], ["Labels · Colour", "labels:color"], ["Labels · Size", "labels:size"],
-    ["A → B · Colour", "route:r:color"], ["A → B · Width", "route:r:width"], ["A → B · Arc height", "route:r:lift"],
+    ["A → B · Arc height", "route:r:lift"], ["A → B · Colour", "route:r:color"], ["A → B · Width", "route:r:width"],
     ["Data · Year", "data:year"],
-    ["GDP · Low colour", "data:dg:low"], ["GDP · High colour", "data:dg:high"], ["GDP · Middle colour", "data:dg:middle"], ["GDP · No-data colour", "data:dg:noData"],
-    ["GDP · Bubble size", "data:dg:bubbleSize"], ["GDP · Label size", "data:dg:labelSize"]
+    ["Data 1 · Low colour", "data:dg:low"], ["Data 1 · High colour", "data:dg:high"], ["Data 1 · Middle colour", "data:dg:middle"], ["Data 1 · No-data colour", "data:dg:noData"],
+    ["Data 1 · Bubble size", "data:dg:bubbleSize"], ["Data 1 · Label size", "data:dg:labelSize"]
   ]);
 });
 
-test("routes and data sets with the same name are numbered, separately from the layers", () => {
+test("routes without a number and with the same name are numbered, data sets by position, separately from the layers", () => {
   const leg = (id) => [{ id, number: 1, state: {} }];
   const regions = (id) => ({ id, useMiddle: false, state: {} });
   const r1 = regions("rg1"), r2 = regions("rg2");
@@ -183,11 +210,11 @@ test("routes and data sets with the same name are numbered, separately from the 
   const L = labels(p);
   assert.ok(L.indexOf("Countries · Hide") >= 0, "the layer keeps its name");
   assert.deepEqual(L.filter((l) => / · Colour$/.test(l)), ["A → B · Colour", "A → B 2 · Colour", "Countries · Colour"]);
-  assert.deepEqual(L.filter((l) => / · Low colour$/.test(l)), ["GDP · Low colour", "GDP 2 · Low colour"]);
-  assert.equal(row(p, "A → B 2 · Leg 1 draw on %").layer, "l2");
+  assert.deepEqual(L.filter((l) => / · Low colour$/.test(l)), ["Data 1 · Low colour", "Data 2 · Low colour"]);
+  assert.equal(row(p, "A → B 2 · Arc height").link[0].layer, "l2");
 });
 
-test("new routes: shared stop rows, then per-route curve rows and per-leg hand rows", () => {
+test("new routes: shared stop rows, then four rows per route and no per-leg rows", () => {
   const leg = (id, n) => ({ id, number: n, state: {}, start: { id: id + "s", state: {} }, end: { id: id + "e", state: {} } });
   const p = G.plan(model({
     stops: [{ id: "c1", state: {} }, { id: "c2", state: {} }],
@@ -195,9 +222,7 @@ test("new routes: shared stop rows, then per-route curve rows and per-leg hand r
   }));
   assert.deepEqual(labels(p).slice(5), [
     "Stops · Hide", "Stops · Colour", "Stops · Size",
-    "A → B · Colour", "A → B · Width", "A → B · Arc height", "A → B · Lean", "A → B · Flip side",
-    "A → B · Leg 1 draw on %", "A → B · Leg 1 shape by hand", "A → B · Leg 1 start handle X", "A → B · Leg 1 start handle Y", "A → B · Leg 1 end handle X", "A → B · Leg 1 end handle Y",
-    "A → B · Leg 2 draw on %", "A → B · Leg 2 shape by hand", "A → B · Leg 2 start handle X", "A → B · Leg 2 start handle Y", "A → B · Leg 2 end handle X", "A → B · Leg 2 end handle Y"
+    "A → B · Arc height", "A → B · Colour", "A → B · Width"
   ]);
   assert.deepEqual(row(p, "Stops · Size").link, [
     { layer: "c1", attr: "generator.radius.x" }, { layer: "c1", attr: "generator.radius.y" },
@@ -207,12 +232,6 @@ test("new routes: shared stop rows, then per-route curve rows and per-leg hand r
   assert.deepEqual(row(p, "A → B · Colour").link, [{ layer: "l1", attr: "stroke.strokeColor" }, { layer: "l2", attr: "stroke.strokeColor" }]);
   assert.deepEqual(row(p, "A → B · Arc height").link.map((t) => t.layer + "." + t.attr), ["l1s.array.8", "l1e.array.8", "l2s.array.8", "l2e.array.8"]);
   assert.equal(row(p, "A → B · Arc height").key, "route:rg:arc");
-  assert.equal(row(p, "A → B · Flip side").type, "bool");
-  assert.deepEqual(row(p, "A → B · Lean").link[0], { layer: "l1s", attr: "array.9" });
-  assert.deepEqual(row(p, "A → B · Leg 1 shape by hand").link, [{ layer: "l1s", attr: "array.11" }, { layer: "l1e", attr: "array.11" }]);
-  assert.equal(row(p, "A → B · Leg 1 shape by hand").type, "bool");
-  assert.deepEqual(row(p, "A → B · Leg 2 end handle Y"), { kind: "value", key: "leg:l2:endY", type: "double", label: "A → B · Leg 2 end handle Y", link: [{ layer: "l2e", attr: "array.13" }], linked: [] });
-  assert.deepEqual(row(p, "A → B · Leg 1 draw on %"), { kind: "direct", layer: "l1", attr: "stroke.trimEnd", label: "A → B · Leg 1 draw on %" });
   assert.deepEqual(p.trim, ["l1", "l2"]);
 });
 
@@ -220,7 +239,7 @@ test("new routes: an old-style route and a new one share the route name numberin
   const leg = { id: "n1", number: 1, state: {}, start: { id: "n1s", state: {} }, end: { id: "n1e", state: {} } };
   const m = model({ routes: [{ id: "old", name: "A → B", legs: [{ id: "o1", number: 1, state: {} }] }], stops: [{ id: "c1", state: {} }], newRoutes: [{ id: "new", name: "A → B", legs: [leg] }] });
   const p = G.plan(m);
-  assert.ok(labels(p).indexOf("A → B · Arc height") >= 0 && labels(p).indexOf("A → B 2 · Lean") >= 0);
+  assert.ok(labels(p).indexOf("A → B · Arc height") >= 0 && labels(p).indexOf("A → B 2 · Arc height") >= 0);
   assert.ok(labels(p).indexOf("Stops · Hide") < labels(p).indexOf("A → B · Colour"));
   const ids = Object.keys(G.ids(m));
   ["c1", "n1", "n1s", "n1e"].forEach((id) => assert.ok(ids.indexOf(id) >= 0, id));
@@ -237,7 +256,7 @@ test("travellers: hide, size, colour (plugin markers) and faces direction after 
   }));
   const L = labels(p);
   const i = L.indexOf("A → B · Traveller hide");
-  assert.ok(i > L.indexOf("A → B · Leg 1 end handle Y"));
+  assert.ok(i > L.indexOf("A → B · Width"));
   assert.deepEqual(L.slice(i, i + 4), ["A → B · Traveller hide", "A → B · Traveller size", "A → B · Traveller colour", "A → B · Traveller faces direction"]);
   assert.deepEqual(row(p, "A → B · Traveller size").link.map((t) => t.layer + "." + t.attr), ["sc.array.0"], "one target: the scale helper's size input");
   assert.equal(row(p, "A → B · Traveller size").key, "trav:rg:size");
@@ -250,7 +269,7 @@ test("travellers: hide, size, colour (plugin markers) and faces direction after 
   const own = G.plan(model({ routes: [{ id: "old", name: "C → D", legs: [{ id: "o1", number: 1, state: {} }] }], travellers: [{ routeId: "old", marker: null, scale: null, dups: [{ id: "d9", state: {} }] }] }));
   assert.ok(labels(own).indexOf("C → D · Traveller size") < 0, "no scale helper, no size row");
   assert.ok(labels(own).indexOf("C → D · Traveller colour") < 0, "no colour row for your own layer");
-  assert.ok(labels(own).indexOf("C → D · Traveller hide") > labels(own).indexOf("C → D · Leg 1 draw on %"));
+  assert.ok(labels(own).indexOf("C → D · Traveller hide") > labels(own).indexOf("C → D · Width"));
   const tids = Object.keys(G.ids(model({ travellers: [{ routeId: "x", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }] }] })));
   assert.ok(tids.indexOf("d1") >= 0 && tids.indexOf("sc") >= 0);
 });
@@ -309,7 +328,7 @@ test("every row knows its Controls group, in a list beside the rows", () => {
   assert.deepEqual(groupOf("A → B"), ["overlay"]);
   assert.deepEqual(groupOf("C → D"), ["overlay"], "new route rows, leg rows and traveller rows");
   assert.deepEqual(groupOf("Data"), ["data"]);
-  assert.deepEqual(groupOf("Pop"), ["data"]);
+  assert.deepEqual(groupOf("Data 1"), ["data"]);
   assert.deepEqual(groupOf("Scale bar"), ["overlay"]);
   assert.deepEqual(groupOf("North arrow"), ["overlay"]);
   assert.ok(p.rows.some((r) => r.label.indexOf("C → D · Traveller") === 0), "the traveller rows are in the list");

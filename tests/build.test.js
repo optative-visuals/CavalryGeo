@@ -5025,8 +5025,8 @@ test("controls split: four components stacked main, overlay, data, extract direc
   assert.deepEqual(ids.map((id) => sib.indexOf(id)), [g - 4, g - 3, g - 2, g - 1], "stacked in order right above the group");
   const names = (id) => plain(promotedNames(api, id));
   assert.ok(names(r.components.main).includes("Camera · Zoom") && names(r.components.main).includes("Countries · Hide"));
-  assert.ok(!names(r.components.main).some((n) => /^(Pins|Data|France|Scale bar|A → B)/.test(n)), "main holds only the base map");
-  assert.ok(names(r.components.overlay).includes("Pins · Colour") && names(r.components.overlay).includes("Scale bar · Hide") && names(r.components.overlay).some((n) => n.indexOf("A → B") === 0));
+  assert.ok(!names(r.components.main).some((n) => /^(Pins|Data|France|Scale bar|Route)/.test(n)), "main holds only the base map");
+  assert.ok(names(r.components.overlay).includes("Pins · Colour") && names(r.components.overlay).includes("Scale bar · Hide") && names(r.components.overlay).includes("Route 1 · Travel %"));
   assert.ok(names(r.components.data).includes("Data · Year"));
   assert.ok(names(r.components.extract).includes("France · Hide"));
   assert.deepEqual(api.getChildren(r.components.overlay), [], "the values utility stays in main");
@@ -5065,7 +5065,7 @@ test("controls split: an old combined Controls is split by one sync, keeping the
   const r1 = context.GeoControlPanel.sync(map);
   const direct = combineIntoMain(api, r1);
   const has = (suffix) => direct.some((a) => a.endsWith("." + suffix));
-  assert.ok(has("stroke.trimEnd") && has("hidden") && has("material.materialColor") && has("opacity"), "the fixture holds direct rows: draw on %, scale bar, extract layer");
+  assert.ok(has("hidden") && has("material.materialColor") && has("opacity"), "the fixture holds direct rows: scale bar, extract layer");
   const mine = api.create("basicShape", "Mine");
   api.connect(mine, "opacity", r1.componentId, "promotedAttributes");
   api.set(r1.componentId, { ["promotedAttributes." + (api._promoted(r1.componentId).length - 1) + ".name"]: "My opacity" });
@@ -5457,17 +5457,15 @@ test("controls: labels share Hide, Colour and Size", () => {
   assert.equal(api.getInConnection(t, "fontSize"), r.valuesId + "." + slotsOf(api, r.valuesId)["labels:size"]);
 });
 
-test("controls: a route gets shared colour, width and arc height, then each leg's draw on %", () => {
+test("controls: an old-style route gets Travel %, Arc height, Colour and Width; Travel drives each leg's draw helper", () => {
   const { context, api } = buildSandbox();
   delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
   const route = context.GeoScene.createRoute(map, [{ name: "Paris", lon: 2.35, lat: 48.85 }, { name: "London", lon: -0.12, lat: 51.5 }, { name: "Rome", lon: 12.5, lat: 41.9 }], { lift: 30, pins: false, labels: false });
   const r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), [
-    "Paris → London → Rome · Colour", "Paris → London → Rome · Width", "Paris → London → Rome · Arc height",
-    "Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"
-  ]);
-  assert.equal(plain(api._promoted(r.components.overlay))[3], route.legs[0] + ".stroke.trimEnd");
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"]);
+  const travel = slotsOf(api, r.valuesId)["route:" + route.groupId + ":travel"];
+  context.GeoScene.routeDraws(route.groupId).forEach((d) => assert.equal(api.getInConnection(d, "array.0"), r.valuesId + "." + travel));
   route.legs.forEach((leg) => assert.equal(api.get(leg, "stroke.trim"), true));
   const lift = slotsOf(api, r.valuesId)["route:" + route.groupId + ":lift"];
   route.legs.forEach((leg) => assert.equal(api.getInConnection(leg, "generator.array.7"), r.valuesId + "." + lift));
@@ -5524,8 +5522,8 @@ test("controls: data layers share Data · Year, and each set gets its colours an
   ["regions", "bubbles", "labels"].forEach((k) => assert.equal(api.getInConnection(d.layers[k], "generator.array.7"), r.valuesId + "." + year, k));
   assert.equal(api.get(r.valuesId, year), 2020, "starts at the layers' year");
   assert.deepEqual(plain(promotedNames(api, r.components.data)), [
-    "Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour",
-    "Population · Bubble size", "Population · Bubble colour", "Population · Label size"
+    "Data · Year", "Data 1 · Low colour", "Data 1 · High colour", "Data 1 · No-data colour",
+    "Data 1 · Bubble size", "Data 1 · Bubble colour", "Data 1 · Label size"
   ]);
   assert.equal(api.getInConnection(d.layers.regions, "generator.array.8"), r.valuesId + "." + slots["data:" + d.groupId + ":low"]);
 });
@@ -5539,7 +5537,7 @@ test("controls: a regions layer whose Use middle can't be read still gets its ot
   api.get = function (id, attr) { if (id === d.layers.regions && attr === useMiddle) throw new Error("no"); return realGet.apply(this, arguments); };
   let r;
   assert.doesNotThrow(() => { r = context.GeoControlPanel.sync(map); });
-  assert.deepEqual(plain(promotedNames(api, r.components.data)), ["Data · Year", "Population · Low colour", "Population · High colour", "Population · No-data colour"]);
+  assert.deepEqual(plain(promotedNames(api, r.components.data)), ["Data · Year", "Data 1 · Low colour", "Data 1 · High colour", "Data 1 · No-data colour"]);
 });
 
 test("controls: a label helper whose connections can't be read skips only its own label", () => {
@@ -5554,7 +5552,7 @@ test("controls: a label helper whose connections can't be read skips only its ow
   assert.ok(found[0] === t1 || found[0] === t2);
 });
 
-test("controls: a leg whose name doesn't say its number is numbered by its place in the route", () => {
+test("controls: a leg whose name doesn't say its number still gets its own draw helper in order", () => {
   const { context, api } = buildSandbox();
   delete api.setGenerator;   // the old-style route (script legs, pins) is what this checks
   const map = controlsMap(context);
@@ -5562,10 +5560,10 @@ test("controls: a leg whose name doesn't say its number is numbered by its place
   const realName = api.getNiceName;
   api.getNiceName = function (id) { return id === route.legs[1] ? "Last hop" : realName.apply(this, arguments); };
   const r = context.GeoControlPanel.sync(map);
-  const names = plain(promotedNames(api, r.components.overlay)).filter((n) => /draw on %$/.test(n));
-  assert.deepEqual(names, ["Paris → London → Rome · Leg 1 draw on %", "Paris → London → Rome · Leg 2 draw on %"]);
-  const p = plain(api._promoted(r.components.overlay));
-  assert.ok(p.indexOf(route.legs[0] + ".stroke.trimEnd") < p.indexOf(route.legs[1] + ".stroke.trimEnd"));
+  assert.deepEqual(plain(promotedNames(api, r.components.overlay)), ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"]);
+  const travel = slotsOf(api, r.valuesId)["route:" + route.groupId + ":travel"], draws = context.GeoScene.routeDraws(route.groupId);
+  assert.equal(draws.length, 2);
+  draws.forEach((d, k) => { assert.equal(api.getInConnection(d, "array.0"), r.valuesId + "." + travel); assert.equal(api.get(d, "array.1"), k, "each helper keeps its leg's place"); });
 });
 
 test("controls: sync never looks inside imagery groups (they hold thousands of tiles)", () => {
@@ -6108,24 +6106,21 @@ test("routes: Pin here treats a stop whose camera inputs aren't numbers as off t
   assert.deepEqual(plain(api.get(s.circle, "position")), { x: 10, y: 10, z: 0 }, "and its drag");
 });
 
-test("controls: a new route gets stop, curve and hand rows; values drive every handle", () => {
+test("controls: a new route gets its four rows beside the stop rows; Arc height drives every handle", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: true });
   const s = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, s.components.overlay));
   assert.deepEqual(names.slice(0, 6), ["Labels · Hide", "Labels · Colour", "Labels · Size", "Stops · Hide", "Stops · Colour", "Stops · Size"]);
-  assert.deepEqual(names.slice(6, 11), ["A → B → C · Colour", "A → B → C · Width", "A → B → C · Arc height", "A → B → C · Lean", "A → B → C · Flip side"]);
-  assert.equal(names[11], "A → B → C · Leg 1 draw on %");
-  assert.equal(names.length, 6 + 5 + 2 * 6);
+  assert.deepEqual(names.slice(6), ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"]);
   const d = routeData(api, r.groupId), slots = slotsOf(api, s.valuesId);
   const arc = slots["route:" + r.groupId + ":arc"];
   d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), s.valuesId + "." + arc)));
   assert.equal(api.get(s.valuesId, arc), 40);
   const size = slots["stops:size"];
   d.stops.forEach((st) => ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(st.circle, a), s.valuesId + "." + size)));
-  const hx = slots["leg:" + d.legs[0].line + ":startX"];
-  assert.equal(api.get(s.valuesId, hx), api.get(d.legs[0].startHandle, "array.12"), "hand X starts with the seeded value");
+  assert.ok(!Object.keys(slots).some((k) => k.indexOf("leg:") === 0 || /:(lean|flip)$/.test(k)), "no per-leg or Lean / Flip rows");
 });
 
 test("Routes tab: Arc height %, Labels at stops and Pin here; no Pins at stops", () => {
@@ -6149,7 +6144,7 @@ test("Create route passes Arc height % and makes a new-style route", () => {
   const found = plain(context.GeoScene.findRoutes(map));
   assert.equal(found.length, 1);
   assert.equal(api.get(found[0].legs[0].startHandle, "array.8"), 55);
-  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\. Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls\./);
+  assert.match(context.statusLabel.getText(), /^Route created: 1 leg\(s\)\. Drag its stops in the viewer, then Pin here to keep them there; animate its Travel % in the map's Controls\./);
 });
 
 test("Bake selected layers: a new route's legs and stops are skipped, with a message of their own", () => {
@@ -6475,7 +6470,7 @@ test("controls: a traveller gets its rows and one Size drives the scale helper",
   context.GeoScene.addTraveller(map, r.groupId, "plane");
   const s = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, s.components.overlay));
-  ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller colour", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
+  ["Route 1 · Traveller hide", "Route 1 · Traveller size", "Route 1 · Traveller colour", "Route 1 · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
   const size = slotsOf(api, s.valuesId)["trav:" + r.groupId + ":size"];
   assert.equal(api.getInConnection(travData(api, r.groupId).scale, "array.0"), s.valuesId + "." + size);
 });
@@ -6662,8 +6657,8 @@ test("controls: a deleted plugin marker keeps the traveller's other rows", () =>
   api.deleteLayer(travData(api, r.groupId).source);
   const s = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, s.components.overlay));
-  ["A → B → C · Traveller hide", "A → B → C · Traveller size", "A → B → C · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
-  assert.ok(names.indexOf("A → B → C · Traveller colour") < 0, "nothing left to recolour");
+  ["Route 1 · Traveller hide", "Route 1 · Traveller size", "Route 1 · Traveller faces direction"].forEach((n) => assert.ok(names.indexOf(n) >= 0, n));
+  assert.ok(names.indexOf("Route 1 · Traveller colour") < 0, "nothing left to recolour");
 });
 
 test("controls: a traveller without a scale helper (older record) gets no size row", () => {
@@ -6674,8 +6669,8 @@ test("controls: a traveller without a scale helper (older record) gets no size r
   const rec = travData(api, r.groupId); delete rec.scale;
   api.setUserData(r.groupId, "geoTraveller", rec);
   const names = plain(promotedNames(api, context.GeoControlPanel.sync(map).components.overlay));
-  assert.ok(names.indexOf("A → B → C · Traveller size") < 0);
-  assert.ok(names.indexOf("A → B → C · Traveller hide") >= 0);
+  assert.ok(names.indexOf("Route 1 · Traveller size") < 0);
+  assert.ok(names.indexOf("Route 1 · Traveller hide") >= 0);
 });
 
 test("map styles: Apply recolours every part of a map and remembers the style", () => {
@@ -7334,4 +7329,39 @@ test("the traveller still rides: its tip reads the leg's trim end, now driven by
   const t = plain(api.getUserDataKey(r.groupId, "geoTraveller"));
   assert.equal(api.getInConnection(t.legs[0].tip, "array.0"), r.legs[0] + ".stroke.trimEnd");
   assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), G.routeDraws(r.groupId)[0] + ".id");
+});
+
+test("controls: a route shows Travel %, Arc height, Colour and Width in the Overlay controls, with the stops as notes; Travel drives every leg", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  const s = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, s.components.overlay));
+  ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"].forEach((n) => assert.ok(names.includes(n), n));
+  assert.ok(!names.some((n) => /draw on|Lean|Flip|hand|handle/.test(n)));
+  const list = api._promoted(s.components.overlay), i = names.indexOf("Route 1 · Travel %");
+  assert.equal(api.get(s.components.overlay, "promotedAttributes." + i + ".notes"), "A → B → C");
+  const slot = slotsOf(api, s.valuesId)["route:" + r.groupId + ":travel"];
+  G.routeDraws(r.groupId).forEach((d) => assert.equal(api.getInConnection(d, "array.0"), s.valuesId + "." + slot));
+  assert.ok(list.length);
+});
+
+test("controls: a refresh numbers an old route and gives it Travel %; notes the user typed are kept", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, STOPS3, { arc: 30 });
+  G.routeDraws(r.groupId).forEach((d) => api.deleteLayer(d));
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.legs.forEach((l) => delete l.draw);
+  api.setUserData(r.groupId, "geoRoute", rec);
+  api.setUserData(r.groupId, "geoRouteNumber", null);
+  api.rename(r.groupId, "Route: A → B → C");
+  const s1 = context.GeoControlPanel.sync(map);
+  assert.equal(api.getNiceName(r.groupId), "Route 1: A → B → C");
+  assert.equal(G.routeDraws(r.groupId).length, 2);
+  const names = plain(promotedNames(api, s1.components.overlay)), i = names.indexOf("Route 1 · Colour");
+  api.set(s1.components.overlay, { ["promotedAttributes." + i + ".notes"]: "my note" });
+  const s2 = context.GeoControlPanel.sync(map);
+  const j = plain(promotedNames(api, s2.components.overlay)).indexOf("Route 1 · Colour");
+  assert.equal(api.get(s2.components.overlay, "promotedAttributes." + j + ".notes"), "my note");
 });

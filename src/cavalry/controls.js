@@ -7,6 +7,7 @@ var GeoControlPanel = (function () {
   var A = GeoAttrs, G = GeoControls;
   var PROMOTED = "promotedAttributes";
   var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
+  var NOTES_KEY = "geoNotes";
   var GROUP_KEY = "geoControlsGroup", GROUP_ORDER = G.GROUPS;
   var GROUP_SUFFIX = { main: " Map controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
   var OLD_MAIN_SUFFIX = " Controls"; // the main component's name before it became "<Map> Map controls"
@@ -210,12 +211,19 @@ var GeoControlPanel = (function () {
     try { return !!Number(api.get(id, attr)); } catch (e) { return false; }
   }
 
-  function readModel(map, valuesId) {
+  // The lists default to a fresh read; sync passes the ones it already read (no extra comp scans).
+  // A route's existing draw helpers (leg order), each with its link state on the travel input.
+  function drawsOf(groupId) {
+    return GeoScene.routeDraws(groupId).map(function (d) { return { id: d, state: linkState(d, G.STATE_ATTRS.draw) }; });
+  }
+
+  function readModel(map, valuesId, mapLayers, foundRoutes) {
     var S = G.STATE_ATTRS, imagery = GeoScene.findImagery(map), skip = {}, routes = {}, sets = {};
     imagery.forEach(function (im) { skip[im.groupId] = true; });
     var order = sceneOrder(map.groupId, skip);
     var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], travellers: [], data: { year: [], sets: [] }, imagery: [] };
-    var mapLayers = GeoScene.findMapLayers(map);
+    mapLayers = mapLayers || GeoScene.findMapLayers(map);
+    foundRoutes = foundRoutes || GeoScene.findRoutes(map);
     mapLayers.slice().sort(order).forEach(function (l, i) {
       var c = l.meta.category;
       if (G.BASE.indexOf(c) >= 0 || c === "extract") {
@@ -226,7 +234,11 @@ var GeoControlPanel = (function () {
         model.pins.push({ id: l.id, state: linkState(l.id, S.pin) });
       } else if (c === "route") {
         var g = api.getParent(l.id);
-        if (!routes[g]) { routes[g] = { id: g, name: GeoScene.stripRoute(api.getNiceName(g)), legs: [] }; model.routes.push(routes[g]); }
+        if (!routes[g]) {
+          var title = GeoScene.stripRoute(api.getNiceName(g));
+          routes[g] = { id: g, name: title, title: title, number: GeoScene.routeNumber(g), legs: [], draws: drawsOf(g) };
+          model.routes.push(routes[g]);
+        }
         routes[g].legs.push({ id: l.id, number: legNumber(l.name), place: i, state: linkState(l.id, S.leg) });
       } else if (c === "data" && DATA_KINDS[l.meta.display]) {
         var d = l.meta.display, p = api.getParent(l.id);
@@ -239,9 +251,10 @@ var GeoControlPanel = (function () {
     });
     model.routes.forEach(function (r) { sortLegs(r.legs); });
     var routeLabels = [];
-    GeoScene.findRoutes(map).sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
+    foundRoutes.slice().sort(function (a, b) { return order(a.groupId, b.groupId); }).forEach(function (r) {
+      var title = GeoScene.stripRoute(api.getNiceName(r.groupId));
       model.newRoutes.push({
-        id: r.groupId, name: GeoScene.stripRoute(r.name),
+        id: r.groupId, name: title, title: title, number: GeoScene.routeNumber(r.groupId), draws: drawsOf(r.groupId),
         legs: r.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) {
           return { id: l.line, number: l.number, state: linkState(l.line, S.newLeg),
             start: { id: l.startHandle, state: linkState(l.startHandle, S.handle) }, end: { id: l.endHandle, state: linkState(l.endHandle, S.handle) } };
@@ -372,10 +385,26 @@ var GeoControlPanel = (function () {
     attempt(function () { setUserData(comp, PROMOTED_KEY, wanted.map(keyOf)); });
   }
 
+  // Plugin notes on promotions: (re)set only where the notes are empty or still the plugin's own.
+  // The wanted rows occupy promotion slots 0..wanted.length-1 once the list is rebuilt.
+  function applyNotes(comp, wanted) {
+    var stored = userData(comp, NOTES_KEY) || {}, next = {};
+    wanted.forEach(function (w, i) {
+      var key = keyOf(w), path = PROMOTED + "." + i + ".notes", cur = "";
+      try { cur = String(api.get(comp, path) || ""); } catch (e) { cur = ""; }
+      if (w.notes && cur !== w.notes && (cur === "" || cur === stored[key])) attempt(function () { api.set(comp, one(path, w.notes)); });
+      if (w.notes) next[key] = w.notes;
+    });
+    attempt(function () { setUserData(comp, NOTES_KEY, next); });
+  }
+
   function sync(map) {
     requireApis();
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
-    var model = readModel(map, V), p = G.plan(model);
+    // Routes are numbered and given their draw helpers first, from the lists this sync reads once.
+    var mapLayers = GeoScene.findMapLayers(map), newRoutes = GeoScene.findRoutes(map);
+    attempt(function () { GeoScene.prepareRoutes(map, mapLayers, newRoutes); });
+    var model = readModel(map, V, mapLayers, newRoutes), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {
       var fu = model.furniture;
@@ -392,7 +421,7 @@ var GeoControlPanel = (function () {
               attempt(function () { api.setAttributeDefinitionOverride(row.layer, row.attr, k, row.overrides[k]); });
             });
           }
-          wanted[p.groups[i]].push({ layer: row.layer, attr: row.attr });
+          wanted[p.groups[i]].push({ layer: row.layer, attr: row.attr, notes: row.notes || "" });
           return;
         }
         attempt(function () {
@@ -407,7 +436,7 @@ var GeoControlPanel = (function () {
             if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
             if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
-          wanted[p.groups[i]].push({ layer: V, attr: path });
+          wanted[p.groups[i]].push({ layer: V, attr: path, notes: row.notes || "" });
         });
       });
     } finally {
@@ -423,11 +452,13 @@ var GeoControlPanel = (function () {
       readPromotions(existing).forEach(function (p) { if (p.name || p.notes) typed[keyOf(p)] = { name: p.name, notes: p.notes }; });
     });
     rebuild(made.id, V, wanted.main, typed);
+    applyNotes(made.id, wanted.main);
     GROUP_ORDER.forEach(function (g) {
       if (g === "main") return;
       var comp = findOrCreateGroup(map, g, wanted[g].length > 0, cache);
       if (!comp) return;
       rebuild(comp, V, wanted[g], typed);
+      applyNotes(comp, wanted[g]);
       // A group component the plugin no longer needs is removed: nothing wanted, nothing inside, and
       // a promotions list that was read successfully and is empty (an unreadable one is left alone).
       var after = { ok: true };

@@ -29,7 +29,7 @@ var GeoControls = (function () {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
     stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
-    dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"],
+    dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"]
   };
   var SEP = " · ";
@@ -40,10 +40,11 @@ var GeoControls = (function () {
   function recordFor(valuesId, key) { return valuesId + "|" + key; }
 
   function plan(model) {
-    var out = { rows: [], trim: [], groups: [] }, V = model.valuesId, group = "main";
+    var out = { rows: [], trim: [], groups: [] }, V = model.valuesId, group = "main", notes = "";
     function direct(layer, attr, label, overrides) {
       var r = { kind: "direct", layer: layer, attr: attr, label: label };
       if (overrides) r.overrides = overrides;
+      if (notes) r.notes = notes;
       out.rows.push(r);
       out.groups.push(group);
     }
@@ -63,6 +64,7 @@ var GeoControls = (function () {
       if (link.length || linked.length) {
         var row = { kind: "value", key: key, type: type, label: label, link: link, linked: linked };
         if (overrides) row.overrides = overrides;
+        if (notes) row.notes = notes;
         out.rows.push(row);
         out.groups.push(group);
       }
@@ -73,7 +75,9 @@ var GeoControls = (function () {
     }
     // A second use of a name gets " 2", " 3"...; layers, routes and data sets are counted apart.
     function numberer() { var used = {}; return function (name) { used[name] = (used[name] || 0) + 1; return used[name] > 1 ? name + " " + used[name] : name; }; }
-    var layerName = numberer(), routeName = numberer(), setName = numberer();
+    var layerName = numberer(), routeName = numberer();
+    // "Route 3" when the route has a number, else its name (numbered apart from the layers).
+    function routeLabel(r) { return r.number ? "Route " + r.number : routeName(r.name); }
     // A route's travellers (copies riding its legs): shared hide, size, colour (a plugin marker only) and facing.
     function travellerRows(routeId, n) {
       (model.travellers || []).filter(function (t) { return t.routeId === routeId; }).forEach(function (t) {
@@ -131,41 +135,34 @@ var GeoControls = (function () {
       valueTargets("stops:size", "double", "Stops" + SEP + "Size", sizeTargets);
     }
     (model.routes || []).forEach(function (r) {
-      var n = routeName(r.name) + SEP, k = "route:" + r.id + ":";
+      var n = routeLabel(r) + SEP, k = "route:" + r.id + ":";
+      notes = r.title || r.name || "";
+      if ((r.draws || []).length) value(k + "travel", "double", n + "Travel %", r.draws, "array.0", { hardMin: 0, hardMax: 100 });
+      value(k + "lift", "double", n + "Arc height", r.legs, LIFT);
       value(k + "color", "color", n + "Colour", r.legs, STROKE);
       value(k + "width", "double", n + "Width", r.legs, WIDTH);
-      value(k + "lift", "double", n + "Arc height", r.legs, LIFT);
-      r.legs.forEach(function (leg, i) {
-        direct(leg.id, "stroke.trimEnd", n + "Leg " + (leg.number || i + 1) + " draw on %");
-        out.trim.push(leg.id);
-      });
+      r.legs.forEach(function (leg) { out.trim.push(leg.id); });
       travellerRows(r.id, n);
+      notes = "";
     });
     (model.newRoutes || []).forEach(function (r) {
-      var n = routeName(r.name) + SEP, k = "route:" + r.id + ":", handles = [];
+      var n = routeLabel(r) + SEP, k = "route:" + r.id + ":", handles = [];
       r.legs.forEach(function (leg) { handles.push(leg.start, leg.end); });
+      notes = r.title || r.name || "";
+      if ((r.draws || []).length) value(k + "travel", "double", n + "Travel %", r.draws, "array.0", { hardMin: 0, hardMax: 100 });
+      value(k + "arc", "double", n + "Arc height", handles, H_ARC);
       value(k + "color", "color", n + "Colour", r.legs, STROKE);
       value(k + "width", "double", n + "Width", r.legs, WIDTH);
-      value(k + "arc", "double", n + "Arc height", handles, H_ARC);
-      value(k + "lean", "double", n + "Lean", handles, H_LEAN);
-      value(k + "flip", "bool", n + "Flip side", handles, H_FLIP);
-      r.legs.forEach(function (leg, i) {
-        var ln = n + "Leg " + (leg.number || i + 1) + " ", lk = "leg:" + leg.id + ":";
-        direct(leg.id, "stroke.trimEnd", ln + "draw on %");
-        out.trim.push(leg.id);
-        value(lk + "hand", "bool", ln + "shape by hand", [leg.start, leg.end], H_HAND);
-        value(lk + "startX", "double", ln + "start handle X", [leg.start], H_X);
-        value(lk + "startY", "double", ln + "start handle Y", [leg.start], H_Y);
-        value(lk + "endX", "double", ln + "end handle X", [leg.end], H_X);
-        value(lk + "endY", "double", ln + "end handle Y", [leg.end], H_Y);
-      });
+      r.legs.forEach(function (leg) { out.trim.push(leg.id); });
       travellerRows(r.id, n);
+      notes = "";
     });
     group = "data";
     var data = model.data || {};
     if (data.year && data.year.length) value("data:year", "double", "Data" + SEP + "Year", data.year, YEAR);
-    (data.sets || []).forEach(function (s) {
-      var n = setName(s.name) + SEP, k = "data:" + s.id + ":";
+    (data.sets || []).forEach(function (s, i) {
+      var n = "Data " + (i + 1) + SEP, k = "data:" + s.id + ":";
+      notes = s.name || "";
       if (s.regions) {
         value(k + "low", "color", n + "Low colour", [s.regions], LOW);
         value(k + "high", "color", n + "High colour", [s.regions], HIGH);
@@ -177,6 +174,7 @@ var GeoControls = (function () {
         direct(s.bubbles.id, FILL, n + "Bubble colour");
       }
       if (s.labels) value(k + "labelSize", "double", n + "Label size", [s.labels], TEXT_SIZE);
+      notes = "";
     });
     group = "main";
     (model.imagery || []).forEach(function (g) {
@@ -213,9 +211,9 @@ var GeoControls = (function () {
     function add(m) { var id = m && typeof m === "object" ? m.id : m; if (id) out[id] = true; }
     add(model.valuesId); add(model.camera); add(model.ocean);
     (model.layers || []).concat(model.pins || [], model.labels || [], model.imagery || []).forEach(add);
-    (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); });
+    (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); (r.draws || []).forEach(add); });
     (model.stops || []).forEach(add);
-    (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); });
+    (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);

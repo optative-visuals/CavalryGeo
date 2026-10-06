@@ -29,9 +29,9 @@ city.
 ![The end of a camera flight into Paris, over satellite imagery](docs/images/flight.jpg)
 
 ### Routes
-Stops you can drag, joined by Bézier lines that draw on. Shape the curves from the map's
-Controls (Arc height, Lean, Flip side) or by hand for each leg, and press **Pin here** to keep a
-dragged stop on its new spot.
+Stops you can drag, joined by Bézier lines that draw on. Each route is numbered ("Route 1: …") and
+the map's Controls give it one **Travel %** to animate the whole journey, plus Arc height, Colour
+and Width; press **Pin here** to keep a dragged stop on its new spot.
 
 ### Data maps
 Paste a Google Sheet or CSV link and get coloured countries, bubbles, value labels and a legend —

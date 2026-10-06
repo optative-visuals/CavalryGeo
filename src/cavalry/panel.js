@@ -959,8 +959,8 @@ createRouteBtn.onClick = guard(function () {
     try { GeoScene.addTraveller(map, r.groupId, kind, layer); }
     catch (e) { travNote = " The traveller couldn't be added: " + (e && e.message ? e.message : e) + "."; }
   }
-  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate each leg's draw on % in the map's Controls."
-    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate each leg's draw on % in the map's Controls.";
+  var how = r.stops ? " Drag its stops in the viewer, then Pin here to keep them there; animate its Travel % in the map's Controls."
+    : " This Cavalry can't make Bézier lines, so it uses the older route style; animate its Travel % in the map's Controls.";
   say("Route created: " + r.legs.length + " leg(s)." + how + travNote + syncControls(map));
 });
 addTravellerBtn.onClick = guard(function () {
