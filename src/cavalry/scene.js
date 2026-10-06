@@ -1181,10 +1181,97 @@ var GeoScene = (function () {
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
 
+  // ---- Map furniture: a scale bar and a north arrow pinned to a frame corner -------------------
+  var FURNITURE_NAMES = { scaleBar: "Scale bar", northArrow: "North arrow" }, FADE_NAME = "Scale bar fade";
+  function findFurniture(map, layers) {
+    var out = { scaleBar: null, northArrow: null, fade: null };
+    (layers || findMapLayers(map)).forEach(function (l) {
+      if (l.meta.category === "scaleBar" && !out.scaleBar) out.scaleBar = l.id;
+      if (l.meta.category === "northArrow" && !out.northArrow) out.northArrow = l.id;
+    });
+    // The fade is the one wired to the bar's opacity (and made for this map), never found by scanning the comp.
+    if (out.scaleBar) {
+      try {
+        var from = String(api.getInConnection(out.scaleBar, "opacity") || ""), dot = from.indexOf("."), fid = dot > 0 ? from.slice(0, dot) : "";
+        if (fid && isFade(map, fid)) out.fade = fid;
+      } catch (e) { /* no fade */ }
+    }
+    return out;
+  }
+  function isFade(map, id) {
+    if (!layerThere(id)) return false;
+    var m = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
+    return !!m && m.category === "scaleBarFade" && m.camera === map.cameraId;
+  }
+  // Fades left behind when their bar was deleted: this map's fades (children of its group) that drive nothing.
+  function deleteOrphanFades(map) {
+    api.getChildren(map.groupId).forEach(function (id) {
+      try {
+        if (!isFade(map, id)) return;
+        if (typeof api.getOutConnections === "function" && (api.getOutConnections(id, A.DRIVER_OUTPUT_ATTR) || []).length) return;
+        api.deleteLayer(id);
+      } catch (e) { /* left in place */ }
+    });
+  }
+  // Makes one furniture layer (camera-linked script shape in the map's text colour); cleans up on failure.
+  function makeFurniture(map, kind, inputs, values, expr) {
+    var made = [];
+    try {
+      var id = api.create(A.MAP_LAYER_TYPE, FURNITURE_NAMES[kind]); made.push(id);
+      addInputs(id, A.MAP_ARRAY_ATTR, inputs, values);
+      setOne(id, A.MAP_EXPR_ATTR, expr);
+      connectCamera(map.cameraId, id, A.MAP_ARRAY_ATTR);
+      applyStyle(id, layerStyle(map, "furniture"));
+      api.parent(id, map.groupId);
+      return { id: id, made: made };
+    } catch (e) {
+      made.forEach(function (x) { try { if (layerThere(x)) api.deleteLayer(x); } catch (e2) { /* already gone */ } });
+      throw e;
+    }
+  }
+  function addScaleBar(map) {
+    if (findFurniture(map).scaleBar) throw new Error("This map already has a scale bar.");
+    var E = GeoExpression, s = compSize(), r = makeFurniture(map, "scaleBar", E.SCALE_BAR_INPUTS,
+      { compW: s.width, compH: s.height, raise: hasAttribution(map) ? 40 : 0 },
+      E.scaleBarExpression(GEO_FURNITURE_SRC, { camera: map.cameraId, category: "scaleBar" }));
+    try {
+      deleteOrphanFades(map);
+      var fade = api.create(A.CAMERA_LAYER_TYPE, FADE_NAME); r.made.push(fade);
+      addInputs(fade, A.CAMERA_ARRAY_ATTR, E.FURNITURE_FADE_INPUTS);
+      setOne(fade, A.CAMERA_EXPR_ATTR, E.furnitureFadeExpression({ camera: map.cameraId, category: "scaleBarFade" }));
+      api.connect(map.cameraId, A.CAMERA_ARRAY_ATTR + ".2", fade, A.CAMERA_ARRAY_ATTR + ".0", true);
+      api.connect(fade, A.DRIVER_OUTPUT_ATTR, r.id, "opacity", true);
+      api.parent(fade, map.groupId);
+    } catch (e) {
+      r.made.forEach(function (x) { try { if (layerThere(x)) api.deleteLayer(x); } catch (e2) { /* already gone */ } });
+      throw e;
+    }
+    return r.id;
+  }
+  function addNorthArrow(map) {
+    if (findFurniture(map).northArrow) throw new Error("This map already has a north arrow.");
+    var E = GeoExpression, s = compSize();
+    return makeFurniture(map, "northArrow", E.NORTH_ARROW_INPUTS, { compW: s.width, compH: s.height },
+      E.northArrowExpression(GEO_FURNITURE_SRC, { camera: map.cameraId, category: "northArrow" })).id;
+  }
+  // Keeps the furniture's comp size in step with the composition (it can't read it itself).
+  // found is { scaleBar, northArrow } when the caller already knows them (no comp scan then).
+  function fitFurniture(map, found) {
+    var f = found || findFurniture(map), s = compSize(), E = GeoExpression;
+    [[f.scaleBar, E.SCALE_BAR_INPUTS], [f.northArrow, E.NORTH_ARROW_INPUTS]].forEach(function (x) {
+      if (!x[0]) return;
+      var o = {}, w = A.MAP_ARRAY_ATTR + "." + E.inputIndex(x[1], "compW"), h = A.MAP_ARRAY_ATTR + "." + E.inputIndex(x[1], "compH");
+      if (Number(api.get(x[0], w)) !== s.width) o[w] = s.width;
+      if (Number(api.get(x[0], h)) !== s.height) o[h] = s.height;
+      if (Object.keys(o).length) api.set(x[0], o);
+    });
+  }
+
   // The ids of every part of a map a style colours (see GeoStyles.targets).
   function styleParts(map) {
-    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], regions: [] };
-    findMapLayers(map).forEach(function (l) {
+    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], furniture: [], regions: [] };
+    var layers = findMapLayers(map);
+    layers.forEach(function (l) {
       var c = l.meta.category;
       if (GeoControls.BASE.indexOf(c) >= 0) parts.layers.push({ id: l.id, category: c });
       else if (c === "extract") parts.layers.push({ id: l.id, category: c, line: LINE_SOURCES.indexOf(l.meta.source) >= 0 });
@@ -1202,6 +1289,7 @@ var GeoScene = (function () {
     findTravellers(map).forEach(function (t) { if (!t.userSource && t.source && layerThere(t.source)) parts.markers.push(t.source); });
     findLabels(map).forEach(function (id) { parts.labels.push(id); });
     api.getChildren(map.groupId).forEach(function (id) { if (CREDIT_NAMES.indexOf(api.getNiceName(id)) >= 0) parts.credits.push(id); });
+    var fu = findFurniture(map, layers); [fu.scaleBar, fu.northArrow].forEach(function (id) { if (id) parts.furniture.push(id); });
     return parts;
   }
 
@@ -1348,6 +1436,7 @@ var GeoScene = (function () {
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
+    addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
 })();

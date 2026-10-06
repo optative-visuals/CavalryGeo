@@ -119,3 +119,8 @@ test("names, find, builtIn and previewColors", () => {
   assert.equal(S.builtIn("mono").name, "Mono");
   assert.deepEqual(S.previewColors(S.builtIn("Light")), { water: "#cfe3ec", land: "#f2efe6", border: "#b9b4a6" });
 });
+
+test("furniture takes the text colour and is a style target", () => {
+  assert.deepEqual(S.layerStyle(S.builtIn("Vintage"), "furniture"), { fill: "#4a3423" });
+  assert.deepEqual(S.targets({ furniture: ["f"] }), [{ layer: "f", attr: "material.materialColor", role: "text", kind: "color" }]);
+});

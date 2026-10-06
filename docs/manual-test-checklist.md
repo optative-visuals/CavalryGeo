@@ -266,6 +266,17 @@ adding street layers.
 - [ ] Save "Mine" again: asked to replace; No keeps the old one. Delete style removes "Mine"; Delete on a built-in refuses.
 - [ ] Imagery keys and source are still there after saving a style (and vice versa).
 
+## Scale bar and north arrow
+
+- [ ] Add scale bar and Add north arrow (Layers tab) each work once on a map; a second press says the map already has one.
+- [ ] The bar's label changes as you zoom and is right (compare a known distance, e.g. two cities).
+- [ ] Units 0 / 1 / 2 (metric, imperial, both) and Style 0 / 1 (line, segmented) all draw; try all four corners.
+- [ ] Fly here from a street view out to the world view fades the bar out (below Hide below zoom).
+- [ ] The north arrow turns with the camera Rotation and on the globe; Style 0 / 1 / 2 all draw.
+- [ ] Apply style recolours both (they take the style's text colour).
+- [ ] Resize the comp, then press any panel action: both move to the new corners.
+- [ ] Bake with only the bar / arrow selected says they can't be baked; Extract's layer list doesn't show them.
+
 ## Previews
 
 - [ ] Map, Pins and Routes previews show the picked map's pins, labels and routes (curved like the real legs) in the map's style colours.

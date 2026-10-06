@@ -215,3 +215,50 @@ test("traveller helpers: tip clamps to 0..99.9; show is the current leg only", (
   const show0 = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 0);
   assert.equal(run(show0, [100, 100]), 100, "last leg fully drawn → shown at the end");
 });
+
+test("furniture inputs and expressions", () => {
+  assert.deepEqual(E.SCALE_BAR_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "compW", "compH", "units", "style", "corner", "margin", "maxWidth", "raise", "textSize"]);
+  assert.deepEqual(E.SCALE_BAR_INPUTS.slice(5).map((i) => i[1]), [1920, 1080, 0, 0, 2, 40, 200, 0, 16]);
+  assert.deepEqual(E.NORTH_ARROW_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "compW", "compH", "style", "corner", "margin", "size"]);
+  assert.deepEqual(E.NORTH_ARROW_INPUTS.slice(5).map((i) => i[1]), [1920, 1080, 0, 1, 40, 40]);
+  assert.deepEqual(E.FURNITURE_FADE_INPUTS, [["zoom", 2], ["hideBelow", 3]]);
+  const sb = E.scaleBarExpression("/*SRC*/", { camera: "c", category: "scaleBar" });
+  assert.deepEqual(E.readTag(sb, "GEO_META"), { camera: "c", category: "scaleBar" });
+  assert.ok(sb.includes("/*SRC*/") && sb.includes("GeoFurniture.scaleBar("));
+  assert.ok(E.northArrowExpression("/*SRC*/", { camera: "c", category: "northArrow" }).includes("GeoFurniture.northArrow("));
+});
+
+test("the fade expression evaluates exactly like GeoFurniture.fade", () => {
+  const F = require("../src/core/furniture.js");
+  const expr = E.furnitureFadeExpression({ camera: "c", category: "scaleBarFade" });
+  [[2, 3], [2.75, 3], [5, 3], [1, 0]].forEach(([zoom, hideBelow]) => {
+    const got = Function("zoom", "hideBelow", "return eval(" + JSON.stringify(expr) + ");")(zoom, hideBelow);
+    assert.equal(got, F.fade(zoom, hideBelow));
+  });
+});
+
+test("the bundled scale bar and north arrow layer expressions run and draw", () => {
+  const { buildFurnitureSource } = require("../tools/buildlib.js");
+  const src = buildFurnitureSource();
+  class Path {
+    constructor() { this.cmds = []; }
+    moveTo() { this.cmds.push(["moveTo"]); }
+    lineTo() { this.cmds.push(["lineTo"]); }
+    close() { this.cmds.push(["close"]); }
+    addEllipse() { this.cmds.push(["addEllipse"]); }
+    addText(t) { this.cmds.push(["addText", t]); }
+  }
+  const run = (expr, inputs) => {
+    const names = inputs.map((x) => x[0]), values = inputs.map((x) => x[1]);
+    // `require` is not in scope, as in Cavalry
+    return Function(...names, "cavalry", "require", "return eval(" + JSON.stringify(expr) + ");")(...values, { Path }, undefined);
+  };
+  const bar = run(E.scaleBarExpression(src, { camera: "c", category: "scaleBar" }), E.SCALE_BAR_INPUTS.map((x) => x[0] === "lat" ? ["lat", 48.85] : x[0] === "zoom" ? ["zoom", 12] : x));
+  const barText = bar.cmds.filter((c) => c[0] === "addText").map((c) => c[1]);
+  assert.ok(bar.cmds.filter((c) => c[0] === "lineTo").length >= 3, "the bar has drawing commands");
+  assert.equal(barText.length, 1);
+  assert.match(barText[0], /^[\d,]+ (m|km)$/, "a distance label");
+  const arrow = run(E.northArrowExpression(src, { camera: "c", category: "northArrow" }), E.NORTH_ARROW_INPUTS);
+  assert.ok(arrow.cmds.filter((c) => c[0] === "lineTo").length >= 3, "the arrow has drawing commands");
+  assert.deepEqual(arrow.cmds.filter((c) => c[0] === "addText").map((c) => c[1]), ["N"]);
+});

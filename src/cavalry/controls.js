@@ -166,7 +166,8 @@ var GeoControlPanel = (function () {
     imagery.forEach(function (im) { skip[im.groupId] = true; });
     var order = sceneOrder(map.groupId, skip);
     var model = { valuesId: valuesId, camera: map.cameraId, ocean: GeoScene.findOcean(map), layers: [], pins: [], labels: [], routes: [], stops: [], newRoutes: [], travellers: [], data: { year: [], sets: [] }, imagery: [] };
-    GeoScene.findMapLayers(map).sort(order).forEach(function (l, i) {
+    var mapLayers = GeoScene.findMapLayers(map);
+    mapLayers.slice().sort(order).forEach(function (l, i) {
       var c = l.meta.category;
       if (G.BASE.indexOf(c) >= 0 || c === "extract") {
         var styleKey = c === "extract" ? (LINE_SOURCES.indexOf(l.meta.source) >= 0 ? "extractLine" : "extractFill") : c;
@@ -209,6 +210,8 @@ var GeoControlPanel = (function () {
       var scale = t.scale && (typeof api.layerExists !== "function" || api.layerExists(t.scale)) ? { id: t.scale, state: linkState(t.scale, S.travellerScale) } : null;
       model.travellers.push({ routeId: t.groupId, marker: marker, scale: scale, dups: t.legs.map(function (l) { return { id: l.dup, state: linkState(l.dup, S.dup) }; }) });
     });
+    var fu = GeoScene.findFurniture(map, mapLayers);
+    model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
     return model;
@@ -319,6 +322,11 @@ var GeoControlPanel = (function () {
     requireApis();
     var made = findOrCreate(map), V = made.valuesId;
     var model = readModel(map, V), p = G.plan(model);
+    // The comp size is kept in step from the furniture this read already found (no extra comp scan).
+    attempt(function () {
+      var fu = model.furniture;
+      GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null });
+    });
     var slots = userData(V, SLOTS_KEY) || {}, wanted = [];
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
@@ -336,6 +344,9 @@ var GeoControlPanel = (function () {
         attempt(function () {
           var slot = ensureSlot(V, slots, row), path = slot.path, rec = G.recordFor(V, row.key);
           attempt(function () { api.renameAttribute(V, path, inputLabel(path, row.label)); });
+          if (row.overrides && has("setAttributeDefinitionOverride")) {
+            Object.keys(row.overrides).forEach(function (k) { attempt(function () { api.setAttributeDefinitionOverride(V, path, k, row.overrides[k]); }); });
+          }
           row.link.forEach(function (t) {
             // A new input links only the targets already showing its value; any other target
             // was set apart on purpose, so it is marked as if the user had pressed Disconnect.

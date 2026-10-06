@@ -3709,7 +3709,7 @@ test("each section has grey headings in order", () => {
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["Search", "Preview (drag to move)", "Style"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
   assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
@@ -6788,4 +6788,171 @@ test("a street layer that fails to read doesn't stop the overlay or the other st
     assert.equal(strokes(p._draw, "#8a948e").length, 1, "the good street layer still draws");
   });
   assert.ok(good);
+});
+
+// ---- Map furniture ----
+test("Add scale bar: a camera-linked script layer in the text colour, with a fade utility on its opacity", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 48.85, lon: 2.35, zoom: 12, rotation: 0, projection: 0 }, context.GeoStyles.builtIn("Vintage"));
+  const id = G.addScaleBar(map);
+  assert.equal(api.getNiceName(id), "Scale bar");
+  assert.equal(api.getParent(id), map.groupId);
+  assert.equal(api.get(id, "material.materialColor"), "#4a3423");
+  assert.equal(api.getInConnection(id, "generator.array.2"), map.cameraId + ".array.2");
+  const SB = context.GeoExpression.SCALE_BAR_INPUTS, at = (n) => "generator.array." + context.GeoExpression.inputIndex(SB, n);
+  assert.equal(api.get(id, at("compW")), 1920);
+  assert.equal(api.get(id, at("raise")), 0);
+  const f = G.findFurniture(map);
+  assert.equal(f.scaleBar, id);
+  assert.equal(api.getNiceName(f.fade), "Scale bar fade");
+  assert.equal(api.getInConnection(id, "opacity"), f.fade + ".id");
+  assert.equal(api.getInConnection(f.fade, "array.0"), map.cameraId + ".array.2");
+  assert.throws(() => G.addScaleBar(map), /This map already has a scale bar\./);
+});
+
+test("Add scale bar sits above the OpenStreetMap credit; Add north arrow defaults to top-right", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  G.createAttribution(map);
+  const id = G.addScaleBar(map);
+  const at = (inputs, n) => "generator.array." + context.GeoExpression.inputIndex(inputs, n);
+  assert.equal(api.get(id, at(context.GeoExpression.SCALE_BAR_INPUTS, "raise")), 40);
+  const na = G.addNorthArrow(map);
+  assert.equal(api.getNiceName(na), "North arrow");
+  assert.equal(api.get(na, at(context.GeoExpression.NORTH_ARROW_INPUTS, "corner")), 1);
+  assert.throws(() => G.addNorthArrow(map), /This map already has a north arrow\./);
+});
+
+test("fitFurniture follows a resized composition; Apply style recolours the furniture", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("F", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const sb = G.addScaleBar(map), na = G.addNorthArrow(map);
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  G.fitFurniture(map);
+  const at = (inputs, n) => "generator.array." + context.GeoExpression.inputIndex(inputs, n);
+  assert.equal(api.get(sb, at(context.GeoExpression.SCALE_BAR_INPUTS, "compW")), 1080);
+  assert.equal(api.get(na, at(context.GeoExpression.NORTH_ARROW_INPUTS, "compH")), 1080);
+  G.applyMapStyle(map, context.GeoStyles.builtIn("Blueprint"));
+  assert.equal(api.get(sb, "material.materialColor"), "#ffffff");
+  assert.equal(api.get(na, "material.materialColor"), "#ffffff");
+});
+
+test("controls: a map with a scale bar and north arrow gets their rows, choice limits on the values inputs", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addScaleBar(map);
+  context.GeoScene.addNorthArrow(map);
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.componentId));
+  ["Scale bar · Hide", "Scale bar · Units (0 metric · 1 imperial · 2 both)", "Scale bar · Hide below zoom", "North arrow · Size"].forEach((n) => assert.ok(names.includes(n), n));
+  const slot = slotsOf(api, r.valuesId)["furn:scale:units"];
+  assert.deepEqual(plain(api._overrides[r.valuesId][slot]), { hardMin: 0, hardMax: 2, step: 1 });
+  const f = context.GeoScene.findFurniture(map);
+  assert.equal(api.getInConnection(f.fade, "array.1"), r.valuesId + "." + slotsOf(api, r.valuesId)["furn:scale:hide"]);
+});
+
+test("Layers tab: Map furniture buttons add a scale bar and a north arrow, once each", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  assert.ok(holds(context.sectionPages.pages[1], context.addScaleBarBtn) && holds(context.sectionPages.pages[1], context.addNorthArrowBtn));
+  context.addScaleBarBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Scale bar added to Map.");
+  context.addScaleBarBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: This map already has a scale bar.");
+  context.addNorthArrowBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "North arrow added to Map.");
+  const f = context.GeoScene.findFurniture(context.currentMap());
+  assert.ok(f.scaleBar && f.northArrow && f.fade);
+});
+
+test("Bake skips the scale bar and north arrow; only furniture selected says why", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const sb = G.addScaleBar(map), na = G.addNorthArrow(map);
+  api.select([sb, na]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked.");
+  const C = require("../src/core/codec.js");
+  const c = G.createMapLayer(map, "Map: Countries", C.encodeLayer({ kind: "polygon", features: [{ name: "X", rings: [[[0, 0], [5, 0], [5, 5], [0, 0]]] }] }), { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  api.select([sb, c]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped the scale bar \/ north arrow \(they follow the camera\)\./);
+});
+
+test("Extract never lists the scale bar or north arrow; any panel action fits them to a resized comp", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  const sb = context.GeoScene.addScaleBar(map);
+  context.refreshSourceLayers();
+  assert.ok(!context.sourceLayers.some((l) => l.id === sb));
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1920 }; return realGet.apply(this, arguments); };
+  context.syncControls(map);
+  const at = "generator.array." + context.GeoExpression.inputIndex(context.GeoExpression.SCALE_BAR_INPUTS, "compH");
+  assert.equal(api.get(sb, at), 1920);
+});
+
+test("a deleted scale bar's leftover fade is cleaned up when a bar is added again and never hijacks Hide below zoom", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const fadesOf = () => api.getCompLayers(false).filter((id) => api.getNiceName(id) === "Scale bar fade");
+  const first = G.addScaleBar(map), old = G.findFurniture(map).fade;
+  api.deleteLayer(first); // the fade stays behind, driving nothing
+  assert.deepEqual(fadesOf(), [old]);
+  assert.equal(G.findFurniture(map).fade, null, "no bar, so no fade is looked for");
+  const bar = G.addScaleBar(map);
+  assert.equal(fadesOf().length, 1, "exactly one fade for the map");
+  const f = G.findFurniture(map);
+  assert.equal(f.scaleBar, bar);
+  assert.notEqual(f.fade, old);
+  assert.equal(api.getInConnection(bar, "opacity"), f.fade + ".id");
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.getInConnection(f.fade, "array.1"), r.valuesId + "." + slotsOf(api, r.valuesId)["furn:scale:hide"]);
+});
+
+test("findFurniture takes the fade from the bar: other wiring or another map's fade is ignored", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  const bar = G.addScaleBar(map), fade = G.findFurniture(map).fade;
+  assert.equal(G.findFurniture(map).fade, fade);
+  api.disconnect(fade, "id", bar, "opacity");
+  assert.equal(G.findFurniture(map).fade, null, "bar's opacity driven by nothing");
+  const stranger = api.create("javaScript", "Something else");
+  api.connect(stranger, "id", bar, "opacity", true);
+  assert.equal(G.findFurniture(map).fade, null, "bar's opacity driven by a layer that isn't a scale bar fade");
+});
+
+test("a panel action scans the comp's layers no more often than before the furniture existed", () => {
+  const measure = (withFurniture) => {
+    const { context, api } = buildSandbox();
+    const map = controlsMap(context), G = context.GeoScene;
+    if (withFurniture) { G.addScaleBar(map); G.addNorthArrow(map); }
+    context.syncControls(map); // settle: the first sync adds the rows
+    let finds = 0, scans = 0;
+    const realFind = G.findMapLayers, realScan = api.getCompLayers;
+    G.findMapLayers = function () { finds++; return realFind.apply(this, arguments); };
+    api.getCompLayers = function () { scans++; return realScan.apply(this, arguments); };
+    const realGet = api.get;
+    api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+    context.syncControls(map);
+    api.get = realGet; G.findMapLayers = realFind; api.getCompLayers = realScan;
+    if (withFurniture) {
+      const f = G.findFurniture(map), at = (inputs, n) => "generator.array." + context.GeoExpression.inputIndex(inputs, n);
+      assert.equal(api.get(f.scaleBar, at(context.GeoExpression.SCALE_BAR_INPUTS, "compW")), 1080, "the comp size still follows");
+      assert.equal(api.get(f.northArrow, at(context.GeoExpression.NORTH_ARROW_INPUTS, "compH")), 1080);
+      const r = context.GeoControlPanel.sync(map);
+      assert.equal(api.getInConnection(f.fade, "array.1"), r.valuesId + "." + slotsOf(api, r.valuesId)["furn:scale:hide"], "Hide below zoom still links");
+    }
+    return { finds, scans };
+  };
+  const plainMap = measure(false), furnished = measure(true);
+  assert.ok(furnished.finds <= 2, "findMapLayers calls: " + furnished.finds);
+  assert.ok(plainMap.scans <= 8, "before the furniture branch one sync made 8 comp scans, now " + plainMap.scans);
+  assert.equal(furnished.scans, plainMap.scans, "comp scans: " + furnished.scans + " vs " + plainMap.scans);
 });
