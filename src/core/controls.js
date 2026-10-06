@@ -33,16 +33,19 @@ var GeoControls = (function () {
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"]
   };
   var SEP = " · ";
+  // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
+  var GROUPS = ["main", "overlay", "data", "extract"];
 
   // What a layer's geoLinks user data says once a values input has been connected to it.
   function recordFor(valuesId, key) { return valuesId + "|" + key; }
 
   function plan(model) {
-    var out = { rows: [], trim: [] }, V = model.valuesId;
+    var out = { rows: [], trim: [], groups: [] }, V = model.valuesId, group = "main";
     function direct(layer, attr, label, overrides) {
       var r = { kind: "direct", layer: layer, attr: attr, label: label };
       if (overrides) r.overrides = overrides;
       out.rows.push(r);
+      out.groups.push(group);
     }
     // One values input driving each target ({ m: member, attr }) it may: already ours → linked;
     // wired elsewhere, animated, or unlinked by the user on purpose → left alone; otherwise → link.
@@ -61,6 +64,7 @@ var GeoControls = (function () {
         var row = { kind: "value", key: key, type: type, label: label, link: link, linked: linked };
         if (overrides) row.overrides = overrides;
         out.rows.push(row);
+        out.groups.push(group);
       }
     }
     // The same attribute on each of several members.
@@ -82,6 +86,7 @@ var GeoControls = (function () {
       });
     }
 
+    group = "main";
     var c = model.camera;
     if (c) {
       direct(c, "array.2", "Camera" + SEP + "Zoom");
@@ -95,6 +100,7 @@ var GeoControls = (function () {
       direct(model.ocean, "hidden", "Ocean" + SEP + "Hide");
     }
     (model.layers || []).forEach(function (l) {
+      group = l.category === "extract" ? "extract" : "main";
       var n = layerName(l.category === "extract" ? (l.name || "Feature") : (NAMES[l.category] || l.category)) + SEP;
       direct(l.id, "hidden", n + "Hide");
       direct(l.id, "opacity", n + "Opacity");
@@ -103,6 +109,7 @@ var GeoControls = (function () {
       value("layer:" + l.id + ":detail", "double", n + "Detail", [l], DETAIL);
       if (l.point) value("layer:" + l.id + ":dot", "double", n + "Dot size", [l], RADIUS);
     });
+    group = "overlay";
     var pins = model.pins || [];
     if (pins.length) {
       value("pins:hidden", "bool", "Pins" + SEP + "Hide", pins, "hidden");
@@ -154,6 +161,7 @@ var GeoControls = (function () {
       });
       travellerRows(r.id, n);
     });
+    group = "data";
     var data = model.data || {};
     if (data.year && data.year.length) value("data:year", "double", "Data" + SEP + "Year", data.year, YEAR);
     (data.sets || []).forEach(function (s) {
@@ -170,10 +178,12 @@ var GeoControls = (function () {
       }
       if (s.labels) value(k + "labelSize", "double", n + "Label size", [s.labels], TEXT_SIZE);
     });
+    group = "main";
     (model.imagery || []).forEach(function (g) {
       direct(g.id, "opacity", g.name + SEP + "Opacity");
       direct(g.id, "hidden", g.name + SEP + "Hide");
     });
+    group = "overlay";
     var fu = model.furniture || {};
     if (fu.scaleBar) {
       var sb = fu.scaleBar, sn = "Scale bar" + SEP;
@@ -215,6 +225,6 @@ var GeoControls = (function () {
     return out;
   }
 
-  return { plan: plan, ids: ids, recordFor: recordFor, BASE: BASE, STATE_ATTRS: STATE_ATTRS };
+  return { plan: plan, ids: ids, recordFor: recordFor, BASE: BASE, GROUPS: GROUPS, STATE_ATTRS: STATE_ATTRS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoControls;

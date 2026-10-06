@@ -277,3 +277,41 @@ test("furniture rows: hide and colour direct, settings as values with whole-numb
   assert.deepEqual(row("North arrow · Size").link, [{ layer: "na", attr: naAt("size") }]);
   assert.deepEqual(G.plan({ valuesId: "V" }).rows, [], "no furniture, no rows");
 });
+
+test("every row knows its Controls group, in a list beside the rows", () => {
+  assert.deepEqual(G.GROUPS, ["main", "overlay", "data", "extract"]);
+  const p = G.plan(model({
+    ocean: "oc",
+    layers: [
+      { id: "cn", category: "countries", name: "Map: Countries", fill: true, stroke: true, point: false, state: {} },
+      { id: "ex", category: "extract", name: "France", fill: true, stroke: false, point: false, state: {} }
+    ],
+    pins: [{ id: "p1", state: {} }],
+    labels: [{ id: "l1", state: {} }],
+    stops: [{ id: "s1", state: {} }],
+    routes: [{ id: "r1", name: "A → B", legs: [{ id: "lg1", number: 1, state: {} }] }],
+    newRoutes: [{ id: "r2", name: "C → D", legs: [{ id: "lg2", number: 1, state: {}, start: { id: "h1", state: {} }, end: { id: "h2", state: {} } }] }],
+    travellers: [{ routeId: "r2", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }] }],
+    data: { year: [{ id: "rg", state: {} }], sets: [{ id: "ds", name: "Pop", regions: { id: "rg", state: {}, useMiddle: false }, bubbles: null, labels: null }] },
+    imagery: [{ id: "im", name: "Imagery: EOX" }],
+    furniture: { scaleBar: { id: "sb" }, northArrow: { id: "na" }, fade: { id: "fd" } }
+  }));
+  assert.equal(p.groups.length, p.rows.length);
+  const groupOf = (prefix) => [...new Set(p.rows.map((r, i) => (r.label.indexOf(prefix) === 0 ? p.groups[i] : null)).filter(Boolean))];
+  assert.deepEqual(groupOf("Camera"), ["main"]);
+  assert.deepEqual(groupOf("Ocean"), ["main"]);
+  assert.deepEqual(groupOf("Countries"), ["main"]);
+  assert.deepEqual(groupOf("Imagery: EOX"), ["main"]);
+  assert.deepEqual(groupOf("France"), ["extract"]);
+  assert.deepEqual(groupOf("Pins"), ["overlay"]);
+  assert.deepEqual(groupOf("Labels"), ["overlay"]);
+  assert.deepEqual(groupOf("Stops"), ["overlay"]);
+  assert.deepEqual(groupOf("A → B"), ["overlay"]);
+  assert.deepEqual(groupOf("C → D"), ["overlay"], "new route rows, leg rows and traveller rows");
+  assert.deepEqual(groupOf("Data"), ["data"]);
+  assert.deepEqual(groupOf("Pop"), ["data"]);
+  assert.deepEqual(groupOf("Scale bar"), ["overlay"]);
+  assert.deepEqual(groupOf("North arrow"), ["overlay"]);
+  assert.ok(p.rows.some((r) => r.label.indexOf("C → D · Traveller") === 0), "the traveller rows are in the list");
+  assert.deepEqual(G.plan(model()).groups, ["main", "main", "main", "main", "main"]);
+});
