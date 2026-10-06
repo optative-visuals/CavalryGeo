@@ -236,3 +236,29 @@ test("the fade expression evaluates exactly like GeoFurniture.fade", () => {
     assert.equal(got, F.fade(zoom, hideBelow));
   });
 });
+
+test("the bundled scale bar and north arrow layer expressions run and draw", () => {
+  const { buildFurnitureSource } = require("../tools/buildlib.js");
+  const src = buildFurnitureSource();
+  class Path {
+    constructor() { this.cmds = []; }
+    moveTo() { this.cmds.push(["moveTo"]); }
+    lineTo() { this.cmds.push(["lineTo"]); }
+    close() { this.cmds.push(["close"]); }
+    addEllipse() { this.cmds.push(["addEllipse"]); }
+    addText(t) { this.cmds.push(["addText", t]); }
+  }
+  const run = (expr, inputs) => {
+    const names = inputs.map((x) => x[0]), values = inputs.map((x) => x[1]);
+    // `require` is not in scope, as in Cavalry
+    return Function(...names, "cavalry", "require", "return eval(" + JSON.stringify(expr) + ");")(...values, { Path }, undefined);
+  };
+  const bar = run(E.scaleBarExpression(src, { camera: "c", category: "scaleBar" }), E.SCALE_BAR_INPUTS.map((x) => x[0] === "lat" ? ["lat", 48.85] : x[0] === "zoom" ? ["zoom", 12] : x));
+  const barText = bar.cmds.filter((c) => c[0] === "addText").map((c) => c[1]);
+  assert.ok(bar.cmds.filter((c) => c[0] === "lineTo").length >= 3, "the bar has drawing commands");
+  assert.equal(barText.length, 1);
+  assert.match(barText[0], /^[\d,]+ (m|km)$/, "a distance label");
+  const arrow = run(E.northArrowExpression(src, { camera: "c", category: "northArrow" }), E.NORTH_ARROW_INPUTS);
+  assert.ok(arrow.cmds.filter((c) => c[0] === "lineTo").length >= 3, "the arrow has drawing commands");
+  assert.deepEqual(arrow.cmds.filter((c) => c[0] === "addText").map((c) => c[1]), ["N"]);
+});

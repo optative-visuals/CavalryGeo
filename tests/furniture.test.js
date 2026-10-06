@@ -108,3 +108,29 @@ test("northArrow draws each style with an N, turned with the camera", () => {
   const tip = a0.reduce((b, q) => (q[1] > b[1] ? q : b));
   assert.ok(Math.abs(tip[0] - cx) < 1e-6 && Math.abs(tip[1] - (cy + 20)) < 1e-6, "tip straight above the centre at rotation 0");
 });
+
+test("northDirection at a pole (or Mercator's clamp) still turns with rotation", () => {
+  const r = 45 * Math.PI / 180, want = [-Math.sin(r), Math.cos(r)];
+  [0, 1, 2].forEach((projection) => {
+    const d = F.northDirection(cam({ lat: 90, projection, rotation: 45 }));
+    assert.ok(Math.abs(d[0] - want[0]) < 1e-9 && Math.abs(d[1] - want[1]) < 1e-9, `p${projection}: ${d}`);
+  });
+  const m = F.northDirection(cam({ lat: 85.06, projection: 0, rotation: 45 }));
+  assert.ok(Math.abs(m[0] - want[0]) < 1e-9 && Math.abs(m[1] - want[1]) < 1e-9, `mercator clamp: ${m}`);
+  assert.deepEqual(F.northDirection(cam({ lat: 90, projection: 2, rotation: 0 })), [0, 1]);
+  assert.deepEqual(F.northDirection(cam({ lat: 85.06, projection: 0, rotation: 0 })), [0, 1]);
+});
+
+test("a segmented bar's right end is closed by a 1 px side the height of the block", () => {
+  const p = F.scaleBar(BAR({ style: 1 }), cav), c = p.cmds;
+  // boxes are moveTo, 3 lineTo, close; find 1 px wide boxes
+  const boxes = [];
+  for (let i = 0; i + 4 < c.length; i++) {
+    if (c[i][0] === "moveTo" && c[i + 1][0] === "lineTo" && c[i + 3][0] === "lineTo" && c[i + 4][0] === "close") boxes.push({ x: c[i][1], y: c[i][2], w: c[i + 1][1] - c[i][1], h: c[i + 3][2] - c[i][2] });
+  }
+  const right = Math.max(...boxes.map((b) => b.x + b.w));
+  const side = boxes.filter((b) => b.w === 1 && b.x + b.w === right);
+  assert.equal(side.length, 1, "one 1 px box touches the right end");
+  const fill = boxes.find((b) => b.h > 1 && b.w > 1);
+  assert.equal(side[0].h, fill.h, "as tall as a filled block");
+});

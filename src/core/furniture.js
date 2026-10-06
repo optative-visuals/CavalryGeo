@@ -59,11 +59,12 @@ var GeoFurniture = (function () {
   // Which way north is at the frame centre (a unit vector): toward a point a little north of it.
   function northDirection(cam) {
     var p = [0, 0], q = [0, 0], proj = GeoProjection.makeProjector(cam);
-    if (!(cam.lat < 89.99)) return [0, 1];
+    var r = num(cam.rotation, 0) * Math.PI / 180, up = [0 - Math.sin(r), Math.cos(r)];
+    if (!(cam.lat < 89.99)) return up;
     proj(cam.lon, cam.lat, p);
     proj(cam.lon, Math.min(89.999, cam.lat + 0.01), q);
     var dx = q[0] - p[0], dy = q[1] - p[1], len = Math.sqrt(dx * dx + dy * dy);
-    return len > 1e-9 && isFinite(len) ? [dx / len, dy / len] : [0, 1];
+    return len > 1e-9 && isFinite(len) ? [dx / len, dy / len] : up;
   }
 
   // Opacity 0–100: gone below hideBelow, fully shown half a zoom level above it.
@@ -91,6 +92,7 @@ var GeoFurniture = (function () {
         if (k % 2 === 0) box(p, bx, by, w, SEG_H);
         else { box(p, bx, by, w, 1); box(p, bx, by + SEG_H - 1, w, 1); }
       }
+      box(p, x0 + len - 1, by, 1, SEG_H); // closes the right end of the last (outlined) block
       var ly = down ? yb - SEG_H - SEG_GAP - CAP * size : yb + SEG_H + SEG_GAP;
       centred(p, cav, "0", size, x0, ly);
       centred(p, cav, commas(d.value / 2), size, x0 + len / 2, ly);
