@@ -280,7 +280,7 @@ test("highlight shape: Pulse grows the outline by phase × 40, Glow by 6, Fill i
   assert.deepEqual(E.HIGHLIGHT_SHAPE_INPUTS, E.MAP_INPUTS.concat([["phase", 0]]));
   const enc = { kind: "polygon", features: [] };
   const run = (effect, phase) => {
-    const calls = [], path = { offset: (d, round) => calls.push([d, round]) };
+    const calls = [], path = { pointCount: () => 10, offset: (d, round) => calls.push([d, round]) };
     const src = "var GeoRuntime = { buildPath: function () { return GEO_PATH; } };";
     const expr = E.highlightLayerExpression(src, enc, { camera: "c", category: "highlight", effect }, {});
     assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "highlight", effect });
@@ -293,6 +293,23 @@ test("highlight shape: Pulse grows the outline by phase × 40, Glow by 6, Fill i
   assert.deepEqual(run("glow", 0), [[6, true]]);
   assert.deepEqual(run("fill", 0), []);
   assert.deepEqual(run("outline", 0), []);
+});
+
+test("highlight shape: a large outline grows by scaling about its box centre, not by offset", () => {
+  const calls = [];
+  const path = {
+    pointCount: () => 5000,
+    boundingBox: () => { calls.push(["boundingBox"]); return { width: 200, height: 100, centre: { x: 50, y: 25 } }; },
+    translate: (x, y) => calls.push(["translate", x, y]),
+    scale: (sx, sy) => calls.push(["scale", sx, sy]),
+    offset: () => calls.push(["offset"])
+  };
+  const src = "var GeoRuntime = { buildPath: function () { return GEO_PATH; } };";
+  const expr = E.highlightLayerExpression(src, { kind: "polygon", features: [] }, { camera: "c", category: "highlight", effect: "pulse" }, {});
+  const out = Function("GEO_PATH", "phase", "cavalry", "return eval(" + JSON.stringify(expr) + ");")(path, 0.5, { Path: function () {} });
+  assert.equal(out, path);
+  const s = 1 + 40 / 150;
+  assert.deepEqual(calls, [["boundingBox"], ["translate", -50, -25], ["scale", s, s], ["translate", 50, 25]]);
 });
 
 test("highlight shape: a failing offset still returns the plain outline", () => {

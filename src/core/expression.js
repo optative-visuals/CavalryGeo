@@ -96,6 +96,8 @@ var GeoExpression = (function () {
   // sets how far the outline grows outward: Pulse rings out to 40 px, Glow 6 px, the others not at all.
   var HIGHLIGHT_SHAPE_INPUTS = MAP_INPUTS.concat([["phase", 0]]);
   var HIGHLIGHT_GROW = { pulse: 40, glow: 6 };
+  // Above this many points the grow step scales the outline instead of offsetting it: offset gets slow on detailed outlines.
+  var HIGHLIGHT_OFFSET_MAX_POINTS = 500;
   function highlightLayerExpression(runtimeSrc, enc, meta, opts) {
     var ellipseScale = Number(opts && opts.ellipseScale != null ? opts.ellipseScale : 1);
     var grow = meta.effect === "pulse" ? "_i7 * " + HIGHLIGHT_GROW.pulse : meta.effect === "glow" ? String(HIGHLIGHT_GROW.glow) : "0";
@@ -103,7 +105,10 @@ var GeoExpression = (function () {
       DATA_OPEN + JSON.stringify(enc) + DATA_CLOSE + "\n" +
       "var _hp = GeoRuntime.buildPath(GEO_DATA, " + CAM + ", _i5, {pointRadius: _i6, ellipseScale: " + ellipseScale + "}, cavalry.Path);\n" +
       "var _hg = " + grow + ";\n" +
-      "if (_hg > 0) { try { _hp.offset(_hg, true); } catch (_he) { /* plain outline */ } }\n" +
+      "if (_hg > 0) { try {\n" +
+      "  if (_hp.pointCount() <= " + HIGHLIGHT_OFFSET_MAX_POINTS + ") { _hp.offset(_hg, true); }\n" +
+      "  else { var _hb = _hp.boundingBox(), _hs = 1 + 2 * _hg / Math.max(1, (_hb.width + _hb.height) / 2); _hp.translate(-_hb.centre.x, -_hb.centre.y); _hp.scale(_hs, _hs); _hp.translate(_hb.centre.x, _hb.centre.y); }\n" +
+      "} catch (_he) { /* plain outline */ } }\n" +
       "_hp;\n";
   }
   // Pulse: the ring fades out as it grows.
