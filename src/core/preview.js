@@ -4,7 +4,7 @@
 if (typeof GeoCurve === "undefined" && typeof require !== "undefined") { var GeoCurve = require("./curve.js"); }
 var GeoPreview = (function () {
   var D2R = Math.PI / 180, MAX_LAT = 85.0511287798;
-  var FRAME_FRACTION = 0.6, CAMERA_MIN_ZOOM = 0, CAMERA_MAX_ZOOM = 18, MIN_FEATURE_PX = 2;
+  var FRAME_FRACTION = 0.6, CAMERA_MIN_ZOOM = 0, CAMERA_MAX_ZOOM = 18, MIN_FEATURE_PX = 2, ZOOM_DRAG_PX = 100;
   // Tolerances are in zoom-0 world units: 1 px at zoom z is 1 / 2^z.
   // Cavalry draws ~6 ms per 1000 points (probe, 2026-10-04), so each level keeps a view to a few thousand.
   var LEVELS = [
@@ -61,6 +61,11 @@ var GeoPreview = (function () {
     if (z === view.zoom) return view;
     var anchor = fromPx(view, x, y), v = centred(view, view.lon, view.lat, z), p = toPx(v, anchor.lon, anchor.lat);
     return pan(v, x - p[0], y - p[1]);
+  }
+  // Middle-drag zoom: from the view at the press (startView, startX, startY), dragging to y zooms one level
+  // per ZOOM_DRAG_PX pixels (up = in), keeping the press point still. y-down view coordinates.
+  function dragZoom(startView, startX, startY, y, compW, compH) {
+    return zoomAt(startView, (startY - y) / ZOOM_DRAG_PX, startX, startY, compW, compH);
   }
 
   function detailFor(zoom, dragging) {
@@ -250,7 +255,7 @@ var GeoPreview = (function () {
   }
 
   return { FRAME_FRACTION: FRAME_FRACTION, CAMERA_MIN_ZOOM: CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM: CAMERA_MAX_ZOOM, LEVELS: LEVELS,
-    worldX: worldX, worldY: worldY, lonOf: lonOf, latOf: latOf, toPx: toPx, fromPx: fromPx, pan: pan, zoomAt: zoomAt,
+    worldX: worldX, worldY: worldY, lonOf: lonOf, latOf: latOf, toPx: toPx, fromPx: fromPx, pan: pan, zoomAt: zoomAt, dragZoom: dragZoom, ZOOM_DRAG_PX: ZOOM_DRAG_PX,
     frameRect: frameRect, frameCamera: frameCamera, viewForCamera: viewForCamera, cameraRect: cameraRect, detailFor: detailFor,
     prepare: prepare, simplify: simplify, visible: visible, project: project, hitDot: hitDot, distinctPlaces: distinctPlaces, dashes: dashes,
     budget: budget, isClick: isClick, legCurve: legCurve, dashPolyline: dashPolyline, wrapLon: wrapLon };

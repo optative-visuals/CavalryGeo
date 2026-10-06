@@ -20,11 +20,16 @@ Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch
 
 A map is a group with a **Camera** layer. Everything you add to the map follows that camera.
 
+The first time you open the panel, a **Start here** box at the top of this tab gives four quick steps
+(make a map, add layers, mark places, animate). Press **Got it** to hide it; it stays hidden next time.
+The small **Tips** button at the bottom of the Map tab brings it back.
+
 - **Making a map:** with **New map** picked in the Map list (the only entry in a scene without
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
   world map, or **Orthographic** for a globe — optionally type a name, then type a place and press
   **Search**. The map is made centred on the first result and named after the place (or your
-  name). If that name is taken, a number is added. The name and projection fields only show
+  name). If that name is taken, a number is added. With **Create map here** and no name typed, maps are
+  called **Map 1**, **Map 2** and so on: the lowest number not already used by another map. Maps you already have are never renamed. The name and projection fields only show
   while **New map** is picked. New maps start with **Countries** and **Coastlines** (and the
   **Ocean** layer) already added; add more on **Layers**.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
@@ -38,7 +43,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
   world.
 - **Preview:** a flat map under the search results. Drag it to move and use the **+** / **−**
-  squares in its bottom right corner (or double-click) to zoom; the zoom level reads out in its
+  squares in its bottom right corner (or double-click) to zoom — or press the scroll wheel and drag up / down to zoom around the point you pressed; the zoom level reads out in its
   bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
   exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
@@ -118,7 +123,9 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
-  the camera's current view — zoom in before adding them.
+  the camera's current view — zoom in before adding them. Add one street layer at a time: once a
+  street layer is added, its box unticks by itself. (If nothing was found for a layer, or the add
+  was cancelled or failed, the box stays ticked so you can try again.)
 - Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
   minor features, and keyframe it for a "map filling in" effect.
 - Keep the **© OpenStreetMap contributors** credit (added for you) in any scene that uses street
@@ -204,6 +211,14 @@ The map's **Extract controls** get a row for each highlight: **Highlight n · Am
 **Colour**, plus **Width** (Outline draw-on), **Speed** (Pulse) or **Size** (Glow). Hover a row to
 see which place it belongs to.
 
+To try another effect on a highlight you already have, select its group (or any layer inside it)
+in the Scene Window, pick the new **Effect** and press **Change effect** (next to **Highlight
+selected**). The highlight is rebuilt in place: it keeps its number, name and colour, and its
+Amount % keys stay at the same frames with the same values. A Glow moves just below the
+extracted place; the other effects sit above it. Width, Speed and Size go back to their
+defaults when the effect changes (the stroke width stays when you switch between Outline
+draw-on and Pulse). The highlight has to belong to the map picked in the Map tab.
+
 To remove a highlight, delete its group. If you delete the extracted place instead, its
 highlights go away the next time the Controls refresh (press **Refresh controls**). Highlights
 can't be baked: Bake skips them.
@@ -212,7 +227,7 @@ can't be baked: Bake skips them.
 
 - Search for a place under **Label → Pins** (a Map search fills it in for you) and press
   **Pin here** or **Label here**, or place them at exact coordinates.
-- **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom.
+- **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom, or press the scroll wheel and drag up / down to zoom around the point you pressed.
 - Labels hide automatically when their place turns to the far side of a globe.
 
 ## Label: routes
@@ -221,7 +236,7 @@ can't be baked: Bake skips them.
   stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
   with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
   the stop), and press **Create route**.
-- **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it.
+- **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it. Zoom the preview with − / + or by pressing the scroll wheel and dragging up / down (around the point you pressed).
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
   camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
   with it. Until you press **Pin here**, a dragged stop is a fixed offset on screen, so it slides

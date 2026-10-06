@@ -60,7 +60,7 @@ var NEW_MAP = "New map";
 var maps = [], results = [];
 var mapPicker = new ui.DropDown();
 var refreshMapsBtn = GeoStyle.button("Refresh");
-var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name)");
+var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name, or Map 1, Map 2…)");
 var projPicker = new ui.DropDown(); PROJECTIONS.forEach(function (p) { projPicker.addEntry(p); });
 var searchField = new ui.LineEdit(); searchField.setPlaceholder("Search a place, e.g. Notre-Dame, Paris");
 var searchBtn = GeoStyle.primaryButton("Search");
@@ -207,6 +207,12 @@ function uniqueMapName(name) {
   if (!taken[name]) return name;
   for (var n = 2; ; n++) { if (!taken[name + " " + n]) return name + " " + n; }
 }
+// "Map 1", "Map 2"... the lowest number not already used by a map. Existing maps are never renamed.
+function numberedMapName() {
+  var taken = {};
+  GeoScene.findMaps().forEach(function (m) { taken[m.name] = true; });
+  for (var n = 1; ; n++) { if (!taken["Map " + n]) return "Map " + n; }
+}
 // Index 0 of resultPicker is always the fixed "World view" entry, so there is always
 // a way back to a world view even after searches have run.
 // A real search result is results[i - 1] for picker index i.
@@ -343,7 +349,7 @@ flyBtn.onClick = guard(function () {
 
 createHereBtn.onClick = guard(function () {
   if (!preview.available()) throw new Error("The map preview isn't available — search for a place to make a map instead.");
-  var f = preview.frameCamera(), name = uniqueMapName(nameField.getText().trim() || "Map");
+  var f = preview.frameCamera(), typed = nameField.getText().trim(), name = typed ? uniqueMapName(typed) : numberedMapName();
   var made = makeMap(name, { lat: f.lat, lon: f.lon, zoom: f.zoom, rotation: 0, projection: projPicker.getValue() });
   var starter = addStarterLayers(made);
   var note = syncControls(made, true);
@@ -397,8 +403,46 @@ deleteStyleBtn.onClick = guard(function () {
   say("Deleted style \"" + style.name + "\".");
 });
 
+// ---- Start here tips -------------------------------------------------------
+// Shown on the Map tab until "Got it"; the Tips button (bottom of the Map tab) brings them back.
+// A missing showTips setting means a first run, so the box shows.
+var tipsGotItBtn = GeoStyle.primaryButton("Got it");
+var tipsBtn = GeoStyle.quietButton("Tips");
+// The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
+var tipsTitle = new ui.Label("Start here");
+if (typeof tipsTitle.setFontSize === "function") tipsTitle.setFontSize(11);
+if (typeof tipsTitle.setTextColor === "function") tipsTitle.setTextColor(GeoStyle.HEADING_COLOR);
+if (typeof tipsTitle.setFixedHeight === "function") tipsTitle.setFixedHeight(16);
+var tipsBox = [tipsTitle].concat([
+  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
+  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
+  "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
+].map(function (t) { return GeoStyle.note(t); }), [tipsGotItBtn]);
+// Hides or shows the whole box. Cavalry only documents setHidden on some widgets, so check first.
+function showTips(show) {
+  tipsBox.forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(!show); });
+}
+function rememberTips(show) {
+  showTips(show);
+  GeoNet.updateSettings({ showTips: show });
+}
+tipsGotItBtn.onClick = guard(function () { rememberTips(false); });
+tipsBtn.onClick = guard(function () {
+  showSection("Map");
+  rememberTips(true);
+});
+(function () {
+  var s = {};
+  try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
+  showTips(s.showTips !== false);
+})();
+
 TAB_BUILDERS.push(function (tabs) {
-  tabs.add("Map", column([
+  var tipsRow = row(tipsBtn);
+  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
+  tabs.add("Map", column(tipsBox.concat([
     row(mapPicker, refreshMapsBtn),
     row(nameField, projPicker),
     GeoStyle.heading("Search"),
@@ -412,8 +456,9 @@ TAB_BUILDERS.push(function (tabs) {
     createHereBtn,
     GeoStyle.heading("Style"),
     row(mapStylePicker, applyStyleBtn),
-    row(styleNameField, saveStyleBtn, deleteStyleBtn)
-  ]));
+    row(styleNameField, saveStyleBtn, deleteStyleBtn),
+    tipsRow
+  ])));
 });
 
 // ---- Layers tab ------------------------------------------------------------
@@ -505,6 +550,7 @@ addLayersBtn.onClick = guard(function () {
     GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
       { camera: map.cameraId, category: r.category }, GeoScene.layerStyle(map, r.category), {});
     added++;
+    if (isOsm(r.category)) checks[r.category].setValue(false); // one street layer at a time: its box unticks once it's added
   });
   if (selected.some(isOsm) && creditCheck.getValue() && !GeoScene.hasAttribution(map)) GeoScene.createAttribution(map);
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
@@ -555,6 +601,8 @@ var highlightLengthField = new ui.NumericField(compFps());
 });
 highlightStartField.setMin(0); highlightLengthField.setMin(1);
 var highlightBtn = GeoStyle.button("Highlight selected");
+// Change effect: rebuilds the highlight selected in the Scene Window with the picked effect.
+var changeEffectBtn = GeoStyle.button("Change effect");
 var bakeBtn = GeoStyle.button("Bake selected layers to editable shapes");
 var refreshControlsBtn = GeoStyle.button("Refresh controls");
 
@@ -654,6 +702,17 @@ highlightBtn.onClick = guard(function () {
     (failed ? " Couldn't highlight " + failed + ": " + (firstError && firstError.message ? firstError.message : String(firstError)) : "") + syncControls(map));
 });
 
+changeEffectBtn.onClick = guard(function () {
+  var map = currentMap(), sel = api.getSelection(), g = GeoScene.highlightOfSelection(map, sel);
+  if (!g) {
+    var elsewhere = GeoScene.findMaps().some(function (m) { return m.cameraId !== map.cameraId && GeoScene.highlightOfSelection(m, sel); });
+    throw new Error(elsewhere ? "That highlight belongs to another map. Pick that map first." : "Select a highlight in the Scene Window first.");
+  }
+  var effects = GeoScene.HIGHLIGHT_EFFECTS, effect = effects[highlightEffectPicker.getValue()] || effects[0];
+  var r = GeoScene.changeHighlightEffect(map, g, effect.id);
+  say("Highlight " + r.number + " now uses " + effect.name + "." + syncControls(map));
+});
+
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
@@ -734,7 +793,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.toggleGrid(toggles(NE_CATS), 3),
     row(new ui.Label("Detail"), scalePicker),
     GeoStyle.heading("Streets · OpenStreetMap"),
-    GeoStyle.note("Downloads the area the camera shows."),
+    GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."),
     GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
     modePicker,
     row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
@@ -745,11 +804,11 @@ TAB_BUILDERS.push(function (tabs) {
     featureList,
     extractBtn,
     row(highlightEffectPicker, new ui.Label("Start:"), GeoStyle.frameField(highlightStartField), new ui.Label("Frames:"), GeoStyle.frameField(highlightLengthField)),
-    highlightBtn,
+    row(highlightBtn, changeEffectBtn),
     GeoStyle.heading("Bake"),
     bakeBtn,
     GeoStyle.heading("Controls"),
-    GeoStyle.note("Each map's settings in one place: select \"<map> Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
+    GeoStyle.note("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
     refreshControlsBtn,
     clearCacheBtn,
     GeoStyle.heading("Map furniture"),
@@ -829,7 +888,7 @@ function pinsClick(lon, lat) {
   if (ours) { labelText.setText(name || ""); spotName = name || null; }
   say("Spot set: " + (name || coordName()) + ". Press Pin at coordinates or Label at coordinates.");
 }
-var pinsPreview = labelPreview("Click to set the spot · drag to move · + / − to zoom", guardClick(pinsClick), function (i) {
+var pinsPreview = labelPreview("Click to set the spot · drag to move · middle-drag or + / − to zoom", guardClick(pinsClick), function (i) {
   if (i < 0 || i >= pinResults.length) return;
   pinResultPicker.setValue(i);
   pinsFollowPicked();
@@ -917,7 +976,7 @@ function routesClick(lon, lat) {
   refreshStops();
   say("Added stop " + stops.length + ": " + name + ".");
 }
-var routesPreview = labelPreview("Click to add a stop · drag to move · + / − to zoom", guardClick(routesClick), function (i) {
+var routesPreview = labelPreview("Click to add a stop · drag to move · middle-drag or + / − to zoom", guardClick(routesClick), function (i) {
   if (i < 0 || i >= routeResults.length) return;
   routeResultPicker.setValue(i);
   routesFollowPicked();

@@ -112,6 +112,8 @@ adding street layers.
 - [ ] 16h6. Highlight the same place twice → one extract, two highlights, numbered 1 and 2.
 - [ ] 16h7. Delete the extracted place, press Refresh controls → its highlight group and rows are gone. Delete a highlight group on its own → no leftover oscillator, helper or blur layers.
 - [ ] 16h8. Select a highlight's shape or group → Bake says "Highlights can't be baked."; Find's layer list doesn't offer highlights.
+- [ ] 16h9. Make a Fill in highlight, change its Colour row, move its Amount % keys. Select the highlight's group (or its shape), pick Pulse and press Change effect → "Highlight n now uses Pulse."; same group, number and name, the same colour on the ring, and the Amount % keys at the same frames (now on the group). The Extract controls now have a Speed row for it. Pick Fill in and press Change effect again → back to a fill with the same colour and timing. Press it once more with Fill in still picked → "Highlight n already uses Fill in."
+- [ ] 16h10. Change a highlight to Glow → its group moves just below the extracted place; change it back → above again. With nothing highlighted selected, Change effect says "Select a highlight in the Scene Window first."
 
 ## Label → Pins
 
@@ -323,6 +325,15 @@ adding street layers.
 - [ ] In a scene saved before this change, a leg whose Trim end you keyframed by hand, connected, or set below 100 is left alone (no helper added, still animates / keeps its value).
 - [ ] An old-style route (made where Bézier lines are not available, or by v0.5.0) gets the same four rows and a working Travel %.
 
+## Start here box
+
+- [ ] On a first open (no `showTips` in settings.json) the Map tab starts with a **Start here** box: four numbered steps and a line about the Map controls in the Scene Window, then a **Got it** button. Nothing in it is cut off (no `<` in any text).
+- [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
+- [ ] **Got it** is a green button (like Search). The **Tips** button sits at the bottom of the Map tab only (nothing above the status line on the other tabs); press it → the box shows again. Close and reopen → it is still shown.
+- [ ] Create map here with the name blank twice → "Map 1", then "Map 2" (and "Map 1 Map controls" in the Scene Window). Delete Map 1, press again → the new one is "Map 1". A typed name is used as typed; the name box hint reads "Map name (blank = the place's name, or Map 1, Map 2…)".
+- [ ] Layers tab: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
+- [ ] Layers tab: the note under the Controls buttons reads "Each map's settings in one place: select "(map name) Map controls" (or its Overlay, Data and Extract controls) in the Scene Window." in full.
+
 ## Previews
 
 - [ ] Map, Pins and Routes previews show the picked map's pins, labels and routes (curved like the real legs) in the map's style colours.
@@ -330,6 +341,8 @@ adding street layers.
 - [ ] Pins: a click fills Lat / Lon, shows a white ring and the place name; Pin at coordinates puts the pin there. Typed text is kept.
 - [ ] Routes: clicking three places adds three named stops and a dashed draft route; Create route makes it; the previews then show it.
 - [ ] Double-clicking on the Routes preview adds one stop and doesn't zoom; − / + still zoom; dragging moves without adding.
+- [ ] On all three previews, press the scroll wheel and drag up: it zooms in around the press point; drag down: it zooms out. A middle click with no drag changes nothing and picks nothing; left-drag still pans; a quick double middle-click doesn't jump a zoom level.
+- [ ] Moving the mouse over a preview with no button held changes nothing: no pan, no zoom, no flicker. Then middle-drag up and down: it really zooms (Cavalry only reports middle-button moves while hover events are on).
 - [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
 
 ## Scene persistence and install
