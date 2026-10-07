@@ -1659,13 +1659,14 @@ var GeoScene = (function () {
   }
 
   // ---- Callouts ------------------------------------------------------------------------------
-  // A callout is a group in the map group: a text label with Cavalry's own text background (a Custom
-  // Shape parented under it) that the user drags in the viewport, a dot at the place following the
+  // A callout is a group in the map group: a text label that the user drags in the viewport, with
+  // Cavalry's own text background (a Custom Shape fed by the text, sitting directly below it and
+  // following its position, rotation and scale), a dot at the place following the
   // camera, and two Basic Lines (label edge -> bend -> place) whose ends small helper scripts work out
   // every frame from the dot and a Bounding Box reading the label. Deleting the group removes it all.
   var CALLOUT_KEY = "geoCallout", CALLOUT_NUMBER_KEY = "geoCalloutNumber";
   var CALLOUT_NAMES = ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"];
-  var CALLOUT_OFFSET = [160, 100], CALLOUT_MARGIN = 40, CALLOUT_DOT = 6, CALLOUT_LINE_WIDTH = 3;
+  var CALLOUT_OFFSET = [160, 100], CALLOUT_MARGIN = 40, CALLOUT_DOT = 6, CALLOUT_LINE_WIDTH = 3, CALLOUT_LABEL_W = 240;
   var CALLOUT_PADDING = [12, 8], CALLOUT_CORNER = 6, CALLOUT_DOCUMENT_BACKGROUND = 4;
 
   function calloutNumber(groupId) { return numberOf(groupId, CALLOUT_NUMBER_KEY); }
@@ -1679,11 +1680,27 @@ var GeoScene = (function () {
   // Gives every callout a lasting number (a duplicated group copies its number and takes the next free one).
   function prepareCallouts(map) { numberGroups(calloutGroups(map), CALLOUT_NUMBER_KEY, "Callout"); }
 
+  // A callout group's own members. A recorded member counts only while it belongs to this group: the
+  // label, box, dot and lines are its children, the helpers children of a group inside it (a duplicated
+  // group copies the record, which still names the original's layers); anything else is null.
+  var CALLOUT_DIRECT = ["label", "box", "dot", "line1", "line2"];
+  function calloutMembers(g, rec) {
+    function own(id, direct) {
+      if (!id || !layerThere(id)) return null;
+      var parent = api.getParent(id);
+      if (direct) return parent === g ? id : null;
+      return parent && parent !== g && api.getParent(parent) === g ? id : null;
+    }
+    var out = {};
+    CALLOUT_NAMES.forEach(function (k) { out[k] = own(rec[k], CALLOUT_DIRECT.indexOf(k) >= 0); });
+    out.draws = (rec.draws || []).map(function (id) { return own(id, false); });
+    return out;
+  }
+
   function findCallouts(map) {
     return calloutGroups(map).map(function (g) {
-      var rec = userData(g, CALLOUT_KEY) || {}, out = { groupId: g, number: calloutNumber(g), text: String(rec.text == null ? "" : rec.text) };
-      CALLOUT_NAMES.forEach(function (k) { out[k] = there(rec[k]); });
-      out.draws = (rec.draws || []).map(there);
+      var rec = userData(g, CALLOUT_KEY) || {}, out = calloutMembers(g, rec);
+      out.groupId = g; out.number = calloutNumber(g); out.text = String(rec.text == null ? "" : rec.text);
       return out;
     });
   }
@@ -1732,13 +1749,14 @@ var GeoScene = (function () {
       setOne(label, A.TEXT_ATTR, words);
       applyStyle(label, { fill: look.colors.text });
       api.set(label, { backgroundMode: CALLOUT_DOCUMENT_BACKGROUND, backgroundPadding: CALLOUT_PADDING, cornerRadius: CALLOUT_CORNER });
+      // The box is the label's sibling (a child of the label would draw over the text); it follows the
+      // label through connections, so its own transform is never set.
       var box = track(api.create("customShape", label0 + " box"));
       api.connect(label, "backgroundShape", box, "inputShape", true);
       applyStyle(box, { fill: look.colors.ocean });
-      api.parent(box, label);
-      api.set(box, { position: [0, 0], "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
       var size = track(api.create("boundingBox", label0 + " size"));
       api.connect(label, A.DRIVER_OUTPUT_ATTR, size, "inputShapes");
+      api.connect(box, A.DRIVER_OUTPUT_ATTR, size, "inputShapes");
       api.parent(size, helpers);
 
       // The dot at the place, and the drivers that keep it (and the lines) on it.
@@ -1775,16 +1793,18 @@ var GeoScene = (function () {
         return line;
       });
 
-      // Bottom to top: lines, dot, label (a new layer lands on top). Parenting keeps the world
+      // Bottom to top: lines, dot, box, label (a new layer lands on top, so the box ends directly below the label). Parenting keeps the world
       // transform, so each layer is reset afterwards; the dot's position is driven, so it is left alone.
       lines.forEach(function (line) { api.parent(line, g); api.set(line, identityTransform()); });
       api.parent(dot, g);
       api.set(dot, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+      api.parent(box, g);
+      ["position", "rotation.z", "scale.x", "scale.y"].forEach(function (attr) { api.connect(label, attr, box, attr, true); });
       api.parent(label, g);
       var s = compSize(), p = GeoRuntime.projectPoint(lon, lat, readCamera(map.cameraId));
       api.set(label, {
         "rotation.z": 0, "scale.x": 1, "scale.y": 1,
-        position: [Math.max(-s.width / 2 + CALLOUT_MARGIN, Math.min(s.width / 2 - 240, p[0] + CALLOUT_OFFSET[0])),
+        position: [Math.max(-s.width / 2 + CALLOUT_MARGIN, Math.min(s.width / 2 - CALLOUT_LABEL_W, p[0] + CALLOUT_OFFSET[0])),
           Math.max(-s.height / 2 + CALLOUT_MARGIN, Math.min(s.height / 2 - CALLOUT_MARGIN, p[1] + CALLOUT_OFFSET[1]))]
       });
 
@@ -2039,8 +2059,8 @@ var GeoScene = (function () {
       if (p) out.labels.push({ lon: p.lon, lat: p.lat, text: text });
     });
     // A callout's place: read live from its place driver (like a label's), else from its record.
-    calloutGroups(map).forEach(function (g) {
-      var rec = userData(g, CALLOUT_KEY) || {}, drv = there(rec.place);
+    findCallouts(map).forEach(function (c) {
+      var rec = userData(c.groupId, CALLOUT_KEY) || {}, drv = c.place;
       var p = (drv ? lonLat(inputValue(drv, CA + "5"), inputValue(drv, CA + "6")) : null) || lonLat(Number(rec.lon), Number(rec.lat));
       if (p) out.pins.push(p);
     });

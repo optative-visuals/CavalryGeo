@@ -168,6 +168,8 @@ function makeFakeApi() {
     // Like Cavalry: connecting into a Component's "promotedAttributes" list appends a promotion.
     connect: function (a, b, c, d) {
       if (d === "promotedAttributes") { (promoted[c] = promoted[c] || []).push({ attribute: a + "." + b, name: "", notes: "" }); return; }
+      // Like Cavalry: a Bounding Box's shapes list appends each connection (inputShapes.0, inputShapes.1, ...).
+      if (d === "inputShapes") d = "inputShapes." + connections.filter(function (k) { return k[2] === c && /^inputShapes\.\d+$/.test(k[3]); }).length;
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
@@ -8619,8 +8621,9 @@ test("callouts: createCallout makes a numbered group with every member named and
   assert.equal(api.getLayerType(rec.size), "boundingBox");
   assert.equal(api.getLayerType(rec.line1), "basicLine"); assert.equal(api.getLayerType(rec.line2), "basicLine");
   [rec.label, rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getParent(id), g));
-  assert.equal(api.getParent(rec.box), rec.label, "the box moves with the label");
-  assert.deepEqual(plain(api.get(rec.box, "position")), [0, 0]);
+  assert.equal(api.getParent(rec.box), g, "the box is the label's sibling, not its child (a child would draw over the text)");
+  assert.ok(directlyAbove(api, rec.label, rec.box), "the box sits directly below the label");
+  ["position", "rotation.z", "scale.x", "scale.y"].forEach((attr) => assert.equal(api.getInConnection(rec.box, attr), rec.label + "." + attr, "the box follows the label's " + attr));
   const helpers = api.getParent(rec.size);
   assert.equal(api.getNiceName(helpers), "Callout 1 helpers");
   assert.equal(api.getParent(helpers), g);
@@ -8655,7 +8658,8 @@ test("callouts: the size utility reads the label; the place and fade drivers fol
   const { context, api } = buildSandbox();
   const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
   const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
-  assert.equal(api.getInConnection(rec.size, "inputShapes"), rec.label + ".id");
+  assert.equal(api.getInConnection(rec.size, "inputShapes.0"), rec.label + ".id");
+  assert.equal(api.getInConnection(rec.size, "inputShapes.1"), rec.box + ".id", "the size covers the label and its box");
   for (let i = 0; i < 5; i++) {
     assert.equal(api.getInConnection(rec.place, "array." + i), map.cameraId + ".array." + i);
     assert.equal(api.getInConnection(rec.fade, "array." + i), map.cameraId + ".array." + i);
@@ -8788,4 +8792,50 @@ test("callouts: a failure part way through leaves nothing behind and keeps the s
   assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
   assert.deepEqual(plain(api.getSelection()), keep);
   assert.equal(G.findCallouts(map).length, 0);
+});
+
+test("callouts: a duplicated group (a copied record and number, none of the members) resolves to nothing and is renumbered", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  const copy = api.create("group", "Callout 1: Paris");
+  api.parent(copy, map.groupId);
+  api.setUserData(copy, "geoCallout", api.getUserDataKey(a, "geoCallout"));
+  api.setUserData(copy, "geoCalloutNumber", 1);
+  const found = G.findCallouts(map).filter((c) => c.groupId === copy)[0];
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(found[k], null, k));
+  assert.deepEqual(plain(found.draws), [null, null]);
+  const parts = plain(G.calloutParts(map)), rec = coRec(api, a);
+  assert.equal(parts[copy], true);
+  assert.equal(parts[rec.label], true, "the original's own members are still parts");
+  G.prepareCallouts(map);
+  assert.equal(G.calloutNumber(a), 1);
+  assert.equal(G.calloutNumber(copy), 2);
+  assert.equal(api.getNiceName(copy), "Callout 2: Paris");
+  assert.deepEqual(G.findCallouts(map).filter((c) => c.groupId === a)[0].label, rec.label);
+});
+
+test("callouts: a late failure (a trim connection, or the record) removes the helpers group and every helper", () => {
+  ["stroke.trimEnd", "record"].forEach((late) => {
+    const { context, api } = buildSandbox();
+    const map = calloutMap(context), G = context.GeoScene;
+    const before = api.getCompLayers(false).slice().sort();
+    const realConnect = api.connect, realSet = api.setUserData;
+    api.connect = function (a, b, c, d) { if (late !== "record" && d === late) throw new Error("late " + late); return realConnect.apply(api, arguments); };
+    api.setUserData = function (id, key) { if (late === "record" && key === "geoCallout") throw new Error("late record"); return realSet.apply(api, arguments); };
+    assert.throws(() => G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), /late/);
+    api.connect = realConnect; api.setUserData = realSet;
+    assert.deepEqual(api.getCompLayers(false).slice().sort(), before, late);
+    assert.equal(G.findCallouts(map).length, 0);
+    assert.equal(api.getChildren(map.groupId).filter((id) => /Callout/.test(api.getNiceName(id))).length, 0);
+  });
+});
+
+test("callouts: the user's selection is put back after a successful build too", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const keep = [map.cameraId];
+  api.select(keep);
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.deepEqual(plain(api.getSelection()), keep);
 });
