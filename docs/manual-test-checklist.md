@@ -134,6 +134,25 @@ adding street layers.
       sides of the frame's centre line (two downloads merged into one layer).
 - [ ] 19c. Layers tab → **Clear download cache** → the status line reports how many
       files and how much space were freed; adding a street layer again re-downloads it.
+- [ ] 19e. Search "Eiffel Tower", pick the result, **Callout here** → a "Callout 1: Eiffel Tower" group:
+      a boxed text label, a dot on the tower and a line joining them; the status asks you to drag the
+      label and key Draw % in Overlay controls. **Callout at coordinates** with Lat 48.8606, Lon 2.3376
+      and text "Louvre" → "Callout 2: Louvre".
+- [ ] 19f. Drag the label to the left and right of the place → the line always leaves the side of the box
+      that faces the place. Switch **Callout 1 · Line style** between 1 (Elbow) and 0 (Straight) → the
+      line changes between a right-angled bend and a straight line.
+- [ ] 19g. Key **Callout 1 · Draw %** from 0 to 100 → the line draws on from the label to the dot, evenly,
+      in both styles.
+- [ ] 19h. Zoom and pan the camera → the label stays where it is on screen while the dot and line follow
+      the place. On a globe, spin the place to the far side → the line and dot fade out and come back.
+- [ ] 19i. Edit the label text, then change its Background padding / corner radius on the text layer → the
+      box follows the text and sits just below the label; **Hide box** hides it, **Box colour** recolours it.
+- [ ] 19j. Pick a different style and **Apply to map** (Map tab → Style) → the callout's line, dot, text and box recolour.
+- [ ] 19k. Select a callout's label, dot or line → **Bake** says "Callouts are already Cavalry layers, so
+      there's nothing to bake."; selected with a map layer, the layer bakes and the callout parts are skipped.
+- [ ] 19l. Select the Callout 1 group and press Ctrl+D, then **Refresh controls** → the copy is a "Callout 2: ..."
+      group with its own "Callout 2 · ..." rows in Overlay controls; dragging the copy's label moves only the copy,
+      and the copy's line and dot still follow its place when the camera moves.
 
 ## Label → Routes
 

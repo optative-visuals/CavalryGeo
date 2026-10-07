@@ -276,6 +276,58 @@ test("route draw helper: Travel % draws the legs one after another", () => {
   assert.deepEqual(legs(100), [100, 100, 100]);
 });
 
+test("callout geometry: edge, bend and the two draw-on lines", () => {
+  const GEOM = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
+  assert.deepEqual(E.CALLOUT_GEOM_INPUTS, GEOM);
+  assert.deepEqual(E.CALLOUT_DRAW_INPUTS, GEOM.concat([["draw", 100], ["index", 0]]));
+  const meta = { camera: "c", category: "callout" };
+  const exprs = { edge: E.calloutEdgeExpression(meta), bend: E.calloutBendExpression(meta), draw: E.calloutDrawExpression(meta) };
+  for (const k of Object.keys(exprs)) assert.deepEqual(E.readTag(exprs[k], "GEO_META"), meta);
+  const names = (inputs) => inputs.map((x) => x[0]);
+  const evalExpr = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"]))
+    .apply(null, names(inputs).map((n) => vals[n]));
+  const base = { placeX: 400, placeY: -110, boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, draw: 100, index: 0 };
+  const edge = (o) => evalExpr(exprs.edge, E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
+  const bend = (o) => evalExpr(exprs.bend, E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
+  const draw = (o) => evalExpr(exprs.draw, E.CALLOUT_DRAW_INPUTS, Object.assign({}, base, o));
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, a + " vs " + b);
+  // place right of the box
+  assert.deepEqual(edge({}), [200, 50]);
+  assert.deepEqual(bend({}), [240, 50]);
+  assert.deepEqual(bend({ style: 0 }), [200, 50]);
+  // place left of the box
+  assert.deepEqual(edge({ placeX: -300 }), [0, 50]);
+  assert.deepEqual(bend({ placeX: -300 }), [-40, 50]);
+  // the elbow never goes past the place: a place within 40 px of the edge puts the bend on the place's x, farther keeps 40
+  assert.deepEqual(bend({ placeX: 230 }), [230, 50]);
+  assert.deepEqual(bend({ placeX: 200 }), [200, 50]);
+  assert.deepEqual(bend({ placeX: 240 }), [240, 50]);
+  assert.deepEqual(bend({ placeX: 241 }), [240, 50]);
+  assert.deepEqual(bend({ placeX: -15 }), [-15, 50]);
+  assert.deepEqual(bend({ placeX: -15, style: 0 }), [0, 50]);
+  assert.deepEqual(bend({ placeX: 230, elbow: 10 }), [210, 50]);
+  // a place inside the box (the wrong side of the edge) keeps the bend on the edge
+  assert.deepEqual(bend({ placeX: 150 }), [200, 50]);
+  // draw split, Elbow: label to bend first (40 px), then bend to place
+  const len2 = Math.hypot(400 - 240, -110 - 50);
+  const both = (d) => [draw({ draw: d, index: 0 }), draw({ draw: d, index: 1 })];
+  assert.deepEqual(both(0), [0, 0]);
+  assert.deepEqual(both(100), [100, 100]);
+  const split = both(40 / (40 + len2) * 100);
+  close(split[0], 100); close(split[1], 0);
+  const half = both((40 + len2 / 2) / (40 + len2) * 100);
+  close(half[0], 100); close(half[1], 50);
+  // Straight: line 1 is zero length, so it is full once Draw % starts and empty at 0; line 2 follows Draw %
+  for (const d of [0, 25, 100]) {
+    const s = [draw({ style: 0, draw: d, index: 0 }), draw({ style: 0, draw: d, index: 1 })];
+    close(s[0], d > 0 ? 100 : 0); close(s[1], d);
+  }
+  // everything collapsed: both lines follow Draw %
+  const flat = { placeX: 200, placeY: 50, style: 0 };
+  close(draw(Object.assign({ draw: 30, index: 0 }, flat)), 30);
+  close(draw(Object.assign({ draw: 30, index: 1 }, flat)), 30);
+});
+
 test("highlight shape: Pulse grows the outline by phase × 40, Glow by 6, Fill in and Outline not at all", () => {
   assert.deepEqual(E.HIGHLIGHT_SHAPE_INPUTS, E.MAP_INPUTS.concat([["phase", 0]]));
   const enc = { kind: "polygon", features: [] };

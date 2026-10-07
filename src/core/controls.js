@@ -21,6 +21,7 @@ var GeoControls = (function () {
   var NAMES = { countries: "Countries", states: "States", lakes: "Lakes", coastlines: "Coastlines", rivers: "Rivers", cities: "Cities",
     buildings: "Buildings", water: "Water", parks: "Parks", roads: "Roads", railways: "Railways" };
   var SB = function (n) { return IN + E.inputIndex(E.SCALE_BAR_INPUTS, n); }, NA = function (n) { return IN + E.inputIndex(E.NORTH_ARROW_INPUTS, n); };
+  var CO_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "draw"), CO_STYLE = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style");
   function choice(max) { return { hardMin: 0, hardMax: max, step: 1 }; }
   var CORNERS = " (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)";
   // The attributes a values input may drive on each kind of member: the glue reads their
@@ -31,7 +32,8 @@ var GeoControls = (function () {
     stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
     dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
-    blur: ["amount.x", "amount.y"]
+    blur: ["amount.x", "amount.y"],
+    calloutDraw: [CO_DRAW, CO_STYLE], calloutBend: [CO_STYLE], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
@@ -172,6 +174,31 @@ var GeoControls = (function () {
       travellerRows(r.id, n);
       notes = "";
     });
+    // Callouts: Draw % and look as values on the helper scripts' inputs (never renamed there); text
+    // and box on their own attributes. A member that is gone just drops the rows it would have had.
+    (model.callouts || []).forEach(function (c) {
+      var n = "Callout " + c.number + SEP, k = "callout:" + c.id + ":", draws = (c.draws || []).filter(Boolean), lines = (c.lines || []).filter(Boolean);
+      var styleTargets = [];
+      notes = c.text || "";
+      if (draws.length) value(k + "draw", "double", n + "Draw %", draws, CO_DRAW, { hardMin: 0, hardMax: 100 });
+      if (c.bend) styleTargets.push({ m: c.bend, attr: CO_STYLE });
+      draws.forEach(function (d) { styleTargets.push({ m: d, attr: CO_STYLE }); });
+      valueTargets(k + "style", "double", n + "Line style (0 straight · 1 elbow)", styleTargets, choice(1));
+      if (lines.length) {
+        value(k + "color", "color", n + "Line colour", lines, STROKE);
+        value(k + "width", "double", n + "Line width", lines, WIDTH);
+      }
+      if (c.dot) valueTargets(k + "dot", "double", n + "Dot size", [{ m: c.dot, attr: RADIUS_X }, { m: c.dot, attr: RADIUS_Y }]);
+      if (c.label) {
+        direct(c.label, FILL, n + "Text colour");
+        direct(c.label, "fontSize", n + "Text size");
+      }
+      if (c.box) {
+        direct(c.box, FILL, n + "Box colour");
+        direct(c.box, "hidden", n + "Hide box");
+      }
+      notes = "";
+    });
     group = "data";
     var data = model.data || {};
     if (data.year && data.year.length) value("data:year", "double", "Data" + SEP + "Year", data.year, YEAR);
@@ -231,6 +258,7 @@ var GeoControls = (function () {
     (model.highlights || []).forEach(function (h) { add(h.id); add(h.shape); add(h.osc); add(h.blur); });
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
+    (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};

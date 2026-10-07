@@ -124,3 +124,21 @@ test("furniture takes the text colour and is a style target", () => {
   assert.deepEqual(S.layerStyle(S.builtIn("Vintage"), "furniture"), { fill: "#4a3423" });
   assert.deepEqual(S.targets({ furniture: ["f"] }), [{ layer: "f", attr: "material.materialColor", role: "text", kind: "color" }]);
 });
+
+test("callouts: lines take the accent stroke, dots the accent fill, boxes the lighter-ocean fill", () => {
+  assert.deepEqual(S.targets({ calloutLines: ["l1", "l2"], calloutDots: ["d"], calloutBoxes: ["b"] }), [
+    { layer: "l1", attr: "stroke.strokeColor", role: "accent", kind: "color" },
+    { layer: "l2", attr: "stroke.strokeColor", role: "accent", kind: "color" },
+    { layer: "d", attr: "material.materialColor", role: "accent", kind: "color" },
+    { layer: "b", attr: "material.materialColor", role: "calloutBox", kind: "color" }
+  ]);
+});
+
+test("calloutBox: the ocean colour mixed 15% toward white", () => {
+  assert.equal(S.CALLOUT_BOX_LIGHTEN, 0.15);
+  assert.equal(S.calloutBox(S.builtIn("Dark")), "#3f4a52");
+  assert.equal(S.calloutBox({ colors: { ocean: "#123a6b" } }), "#365881");
+  assert.equal(S.calloutBox({ colors: { ocean: "#123a6bff" } }), "#365881");
+  assert.equal(S.valueFor(S.builtIn("Dark"), { role: "calloutBox", kind: "color" }), "#3f4a52");
+  assert.equal(S.valueFor(S.builtIn("Dark"), { role: "land", kind: "color" }), S.builtIn("Dark").colors.land);
+});

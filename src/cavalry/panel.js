@@ -716,8 +716,8 @@ changeEffectBtn.onClick = guard(function () {
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, skippedHighlight = 0, other = 0;
-  var hlParts = {};
+  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, skippedHighlight = 0, skippedCallout = 0, other = 0;
+  var hlParts = {}, cParts = {};
   // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
   // so its parts are skipped with a message of their own rather than counted as "other".
   var routeParts = {};
@@ -737,11 +737,14 @@ bakeBtn.onClick = guard(function () {
       });
       var hp = GeoScene.highlightParts(m);
       Object.keys(hp).forEach(function (k) { hlParts[k] = true; });
+      var cp = GeoScene.calloutParts(m);
+      Object.keys(cp).forEach(function (k) { cParts[k] = true; });
     });
   } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
     if (routeParts[id]) { skippedRoute++; return; }
     if (hlParts[id]) { skippedHighlight++; return; }
+    if (cParts[id]) { skippedCallout++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "highlight") { skippedHighlight++; return; }
@@ -754,8 +757,9 @@ bakeBtn.onClick = guard(function () {
   if (baked === 0) {
     if (skippedFurniture && !skippedRoute && !skippedData && !other) {
       throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
-    } else if (skippedHighlight && !skippedRoute && !skippedData && !skippedFurniture && !other) {
-      throw new Error("Highlights can't be baked.");
+    } else if ((skippedHighlight || skippedCallout) && !skippedRoute && !skippedData && !skippedFurniture && !other) {
+      throw new Error(skippedHighlight && skippedCallout ? "Highlights and callouts can't be baked." :
+        skippedHighlight ? "Highlights can't be baked." : "Callouts are already Cavalry layers, so there's nothing to bake.");
     } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
@@ -769,6 +773,7 @@ bakeBtn.onClick = guard(function () {
   if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
   if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
   if (skippedHighlight) msg += " Skipped " + skippedHighlight + " highlight part(s).";
+  if (skippedCallout) msg += " Skipped " + skippedCallout + " callout part(s).";
   if (skippedFurniture) msg += " Skipped the scale bar / north arrow (they follow the camera).";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
@@ -852,10 +857,12 @@ var pinResultPicker = new ui.DropDown();
 var labelText = new ui.LineEdit(); labelText.setPlaceholder("Label text (blank = place name)");
 var pinHereBtn = GeoStyle.primaryButton("Pin here");
 var labelHereBtn = GeoStyle.primaryButton("Label here");
+var calloutHereBtn = GeoStyle.primaryButton("Callout here");
 var latField = new ui.NumericField(0); latField.setType(1); latField.setMin(-90); latField.setMax(90);
 var lonField = new ui.NumericField(0); lonField.setType(1); lonField.setMin(-180); lonField.setMax(180);
 var pinCoordBtn = GeoStyle.button("Pin at coordinates");
 var labelCoordBtn = GeoStyle.button("Label at coordinates");
+var calloutCoordBtn = GeoStyle.button("Callout at coordinates");
 
 // Label previews: the picked map, a click on Pins sets the spot, a click on Routes adds a stop.
 // No green frame or dim (those mark the Map tab's Jump / Fly target), no double-click zoom.
@@ -945,6 +952,17 @@ labelCoordBtn.onClick = guard(function () {
   var text = labelOr(coordName()), map = currentMap();
   GeoScene.createLabel(map, text, lonField.getValue(), latField.getValue());
   say("Label \"" + text + "\" added at " + coordName() + "." + syncControls(map));
+});
+function calloutSay(map, g, text) {
+  say("Callout " + GeoScene.calloutNumber(g) + " added for " + text + ". Drag its label in the viewport to place it; key its Draw % in Overlay controls." + syncControls(map));
+}
+calloutHereBtn.onClick = guard(function () {
+  var r = pinPlace(), text = labelOr(shortName(r)), map = currentMap();
+  calloutSay(map, GeoScene.createCallout(map, { lon: r.lon, lat: r.lat }, text), text);
+});
+calloutCoordBtn.onClick = guard(function () {
+  var text = labelOr(coordName()), map = currentMap();
+  calloutSay(map, GeoScene.createCallout(map, { lon: lonField.getValue(), lat: latField.getValue() }, text), text);
 });
 
 // ---- Routes (Label section) -------------------------------------------------
@@ -1126,11 +1144,13 @@ TAB_BUILDERS.push(function (tabs) {
     pinResultPicker,
     labelText,
     row(pinHereBtn, labelHereBtn),
+    row(calloutHereBtn),
     GeoStyle.heading("Preview (click to set the spot, drag to move)"),
     pinsPreview.layout,
     GeoStyle.heading("At coordinates"),
     row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
-    row(pinCoordBtn, labelCoordBtn)
+    row(pinCoordBtn, labelCoordBtn),
+    row(calloutCoordBtn)
   ]));
   labelPages.add(column([
     GeoStyle.heading("Stops"),

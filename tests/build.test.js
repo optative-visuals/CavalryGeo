@@ -168,6 +168,8 @@ function makeFakeApi() {
     // Like Cavalry: connecting into a Component's "promotedAttributes" list appends a promotion.
     connect: function (a, b, c, d) {
       if (d === "promotedAttributes") { (promoted[c] = promoted[c] || []).push({ attribute: a + "." + b, name: "", notes: "" }); return; }
+      // Like Cavalry: a Bounding Box's shapes list appends each connection (inputShapes.0, inputShapes.1, ...).
+      if (d === "inputShapes") d = "inputShapes." + connections.filter(function (k) { return k[2] === c && /^inputShapes\.\d+$/.test(k[3]); }).length;
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
@@ -523,7 +525,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
-    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
+    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
@@ -3680,10 +3682,10 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
-    "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
+    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
   const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
-    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
+    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
     assert.equal(context[n]._background, undefined, n + " keeps the native hover");
@@ -8589,4 +8591,484 @@ test("Add layers: a failed or cancelled add unticks nothing", () => {
   cancelled.context.addLayersBtn.onClick();
   assert.match(cancelled.context.statusLabel.getText(), /^Cancelled/);
   assert.equal(cancelled.context.checks.roads.getValue(), true);
+});
+
+// ---- Callouts ----------------------------------------------------------------------
+const calloutMap = controlsMap;
+const coRec = (api, g) => plain(api.getUserDataKey(g, "geoCallout"));
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+// Where a new callout's label starts: the place's screen point + (160, 100), clamped inside the comp (1920 x 1080, 40 px margin).
+function labelStart(context, map, lon, lat) {
+  const p = plain(context.GeoRuntime.projectPoint(lon, lat, context.GeoScene.readCamera(map.cameraId)));
+  return [Math.max(-960 + 40, Math.min(960 - 240, p[0] + 160)), Math.max(-540 + 40, Math.min(540 - 40, p[1] + 100))];
+}
+
+test("callouts: createCallout makes a numbered group with every member named and parented", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.equal(api.getNiceName(g), "Callout 1: Paris");
+  assert.equal(api.getParent(g), map.groupId);
+  assert.equal(api.getUserDataKey(g, "geoCalloutNumber"), 1);
+  const rec = coRec(api, g);
+  assert.equal(rec.camera, map.cameraId); assert.equal(rec.lon, 2.35); assert.equal(rec.lat, 48.85); assert.equal(rec.text, "Paris");
+  const names = { label: "Callout 1 label", box: "Callout 1 box", dot: "Callout 1 dot", line1: "Callout 1 line 1", line2: "Callout 1 line 2",
+    size: "Callout 1 size", place: "Callout 1 place", fade: "Callout 1 fade", edge: "Callout 1 edge", bend: "Callout 1 bend" };
+  Object.keys(names).forEach((k) => assert.equal(api.getNiceName(rec[k]), names[k], k));
+  assert.equal(api.getNiceName(rec.draws[0]), "Callout 1 draw 1"); assert.equal(api.getNiceName(rec.draws[1]), "Callout 1 draw 2");
+  assert.equal(api.getLayerType(rec.label), "textShape");
+  assert.equal(api.getLayerType(rec.box), "customShape");
+  assert.equal(api.getLayerType(rec.size), "boundingBox");
+  assert.equal(api.getLayerType(rec.line1), "basicLine"); assert.equal(api.getLayerType(rec.line2), "basicLine");
+  [rec.label, rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getParent(id), g));
+  assert.equal(api.getParent(rec.box), g, "the box is the label's sibling, not its child (a child would draw over the text)");
+  assert.ok(directlyAbove(api, rec.label, rec.box), "the box sits directly below the label");
+  ["position", "rotation.z", "scale.x", "scale.y"].forEach((attr) => assert.equal(api.getInConnection(rec.box, attr), rec.label + "." + attr, "the box follows the label's " + attr));
+  const helpers = api.getParent(rec.size);
+  assert.equal(api.getNiceName(helpers), "Callout 1 helpers");
+  assert.equal(api.getParent(helpers), g);
+  [rec.size, rec.place, rec.fade, rec.edge, rec.bend].concat(rec.draws).forEach((id) => assert.equal(api.getParent(id), helpers));
+  assert.equal(api.get(g, "position.x"), 0);
+});
+
+test("callouts: the label is a text layer with a Document background, its position free and starting by the place", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  assert.equal(api.get(rec.label, "text"), "Paris");
+  assert.equal(api.get(rec.label, "backgroundMode"), 4);
+  assert.deepEqual(plain(api.get(rec.label, "backgroundPadding")), [12, 8]);
+  assert.equal(api.get(rec.label, "cornerRadius"), 6);
+  assert.equal(api.getInConnection(rec.box, "inputShape"), rec.label + ".backgroundShape");
+  assert.equal(api.getInConnection(rec.label, "position"), "", "the label's position is the user's");
+  const at = plain(api.get(rec.label, "position")), want = labelStart(context, map, 2.35, 48.85);
+  assert.ok(near(at[0], want[0]) && near(at[1], want[1]), "label at " + at + ", wanted " + want);
+});
+
+test("callouts: a label starting past the comp's edge is clamped inside it", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const rec = coRec(api, G.createCallout(map, { lon: 170, lat: 70 }, "Far"));
+  const at = plain(api.get(rec.label, "position"));
+  assert.deepEqual(at, labelStart(context, map, 170, 70));
+  assert.ok(at[0] === 720 || at[1] === 500, "clamped: " + at);
+});
+
+test("callouts: the size utility reads the label; the place and fade drivers follow the camera", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  assert.equal(api.getInConnection(rec.size, "inputShapes.0"), rec.label + ".id");
+  assert.equal(api.getInConnection(rec.size, "inputShapes.1"), rec.box + ".id", "the size covers the label and its box");
+  for (let i = 0; i < 5; i++) {
+    assert.equal(api.getInConnection(rec.place, "array." + i), map.cameraId + ".array." + i);
+    assert.equal(api.getInConnection(rec.fade, "array." + i), map.cameraId + ".array." + i);
+  }
+  assert.equal(api.get(rec.place, "array.5"), 2.35); assert.equal(api.get(rec.place, "array.6"), 48.85);
+  assert.equal(api.getInConnection(rec.fade, "array.5"), rec.place + ".array.5", "the fade reads lon / lat from the place driver");
+  assert.equal(api.getInConnection(rec.fade, "array.6"), rec.place + ".array.6");
+  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN));
+  assert.equal(api.get(rec.fade, "expression"), E.labelVisibilityExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutFade" }));
+  assert.equal(api.getInConnection(rec.dot, "position"), rec.place + ".id");
+  [rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "opacity"), rec.fade + ".id"));
+  assert.equal(api.getInConnection(rec.label, "opacity"), "", "the label never fades by itself");
+});
+
+test("callouts: edge, bend and draw helpers are fed from the dot and the size utility and drive the lines", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  const sources = [[rec.dot, "position.x"], [rec.dot, "position.y"], [rec.size, "position.x"], [rec.size, "position.y"], [rec.size, "size.x"], [rec.size, "size.y"]];
+  [rec.edge, rec.bend, rec.draws[0], rec.draws[1]].forEach((h) => sources.forEach((s, i) => assert.equal(api.getInConnection(h, "array." + i), s[0] + "." + s[1], h + " input " + i)));
+  const meta = (category) => ({ camera: map.cameraId, category: category });
+  assert.equal(api.get(rec.edge, "expression"), E.calloutEdgeExpression(meta("calloutEdge")));
+  assert.equal(api.get(rec.bend, "expression"), E.calloutBendExpression(meta("calloutBend")));
+  assert.equal(api.get(rec.draws[0], "expression"), E.calloutDrawExpression(meta("calloutDraw")));
+  assert.equal(api.get(rec.draws[1], "expression"), E.calloutDrawExpression(meta("calloutDraw")));
+  const idx = (n) => "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, n);
+  assert.equal(api.get(rec.draws[0], idx("index")), 0); assert.equal(api.get(rec.draws[1], idx("index")), 1);
+  [rec.draws[0], rec.draws[1]].forEach((d) => { assert.equal(api.get(d, idx("draw")), 100); assert.equal(api.get(d, idx("style")), 1); assert.equal(api.get(d, idx("elbow")), 40); });
+  assert.equal(api.get(rec.bend, "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style")), 1);
+  assert.equal(api.getInConnection(rec.line1, "generator.startPosition"), rec.edge + ".id");
+  assert.equal(api.getInConnection(rec.line1, "generator.endPosition"), rec.bend + ".id");
+  assert.equal(api.getInConnection(rec.line2, "generator.startPosition"), rec.bend + ".id");
+  assert.equal(api.getInConnection(rec.line2, "generator.endPosition"), rec.place + ".id");
+  assert.equal(api.getInConnection(rec.line1, "stroke.trimEnd"), rec.draws[0] + ".id");
+  assert.equal(api.getInConnection(rec.line2, "stroke.trimEnd"), rec.draws[1] + ".id");
+  [rec.line1, rec.line2].forEach((l) => {
+    assert.equal(api.get(l, "generator"), "bezierLine");
+    assert.equal(api.get(l, "stroke.trim"), true);
+    assert.deepEqual(plain(api.get(l, "generator.startOffset")), [0, 0]); assert.deepEqual(plain(api.get(l, "generator.endOffset")), [0, 0]);
+    assert.equal(api.get(l, "stroke.capStyle"), 1);
+  });
+});
+
+test("callouts: colours come from the map's style", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, c = context.GeoStyles.builtIn("Dark").colors;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  [rec.line1, rec.line2].forEach((l) => {
+    assert.ok(api.hasStroke(l) && !api.hasFill(l));
+    assert.equal(api.get(l, "stroke.strokeColor"), c.accent); assert.equal(api.get(l, "stroke.width"), 3);
+  });
+  assert.ok(api.hasFill(rec.dot) && !api.hasStroke(rec.dot));
+  assert.equal(api.get(rec.dot, "material.materialColor"), c.accent);
+  assert.deepEqual(plain(api.get(rec.dot, "generator.radius")), [6, 6]);
+  assert.equal(api.get(rec.label, "material.materialColor"), c.text);
+  assert.equal(api.get(rec.box, "material.materialColor"), context.GeoStyles.calloutBox(context.GeoStyles.builtIn("Dark")));
+});
+
+test("callouts: numbers go up; findCallouts lists them top first with their members; prepareCallouts renumbers a duplicate", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  const b = G.createCallout(map, { lon: -0.12, lat: 51.5 }, "London");
+  assert.equal(api.getNiceName(b), "Callout 2: London");
+  assert.equal(G.calloutNumber(b), 2);
+  let found = G.findCallouts(map);
+  assert.deepEqual(found.map((c) => c.groupId), [b, a], "top first");
+  assert.deepEqual(found.map((c) => c.number), [2, 1]);
+  assert.deepEqual(found.map((c) => c.text), ["London", "Paris"]);
+  const rec = coRec(api, b), f = found[0];
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(f[k], rec[k], k));
+  assert.deepEqual(plain(f.draws), rec.draws);
+  api.setUserData(b, "geoCalloutNumber", 1);   // a duplicated group copies the number
+  G.prepareCallouts(map);
+  assert.deepEqual([G.calloutNumber(a), G.calloutNumber(b)], [1, 2]);
+  assert.equal(api.getNiceName(b), "Callout 2: London");
+  api.deleteLayer(rec.fade);
+  found = G.findCallouts(map);
+  assert.equal(found.filter((c) => c.groupId === b)[0].fade, null, "a missing member is null");
+});
+
+test("callouts: findCallouts reads only the map group's children", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  let scans = 0; const real = api.getCompLayers;
+  api.getCompLayers = function () { scans++; return real.apply(api, arguments); };
+  assert.equal(G.findCallouts(map).length, 1);
+  api.getCompLayers = real;
+  assert.equal(scans, 0);
+});
+
+test("callouts: calloutParts lists the group and every member; isMapPart covers the group and its members", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const parts = plain(G.calloutParts(map));
+  [g, rec.label, rec.box, rec.dot, rec.line1, rec.line2, rec.size, rec.place, rec.fade, rec.edge, rec.bend, rec.draws[0], rec.draws[1]].forEach((id) => assert.equal(parts[id], true, String(id)));
+  assert.ok(G.isMapPart(map, g)); assert.ok(G.isMapPart(map, rec.label)); assert.ok(G.isMapPart(map, rec.place));
+});
+
+test("callouts: applying a map style recolours the lines, dot, text and box", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, light = context.GeoStyles.builtIn("Light");
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  G.applyMapStyle(map, light);
+  assert.equal(api.get(rec.line1, "stroke.strokeColor"), light.colors.accent);
+  assert.equal(api.get(rec.line2, "stroke.strokeColor"), light.colors.accent);
+  assert.equal(api.get(rec.dot, "material.materialColor"), light.colors.accent);
+  assert.equal(api.get(rec.label, "material.materialColor"), light.colors.text);
+  assert.equal(api.get(rec.box, "material.materialColor"), context.GeoStyles.calloutBox(light));
+});
+
+test("callouts: the previews show a callout's place as a pin", () => {
+  const { context } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.deepEqual(plain(G.previewModel(map).pins), [{ lon: 2.35, lat: 48.85 }]);
+});
+
+test("callouts: a failure part way through leaves nothing behind and keeps the selection", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const before = api.getCompLayers(false).slice().sort(), keep = api.getCompLayers(false).slice(0, 1);
+  api.select(keep);
+  const real = api.connect;
+  api.connect = function (a, b) { if (b === "backgroundShape") throw new Error("no background"); return real.apply(api, arguments); };
+  assert.throws(() => G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), /no background/);
+  api.connect = real;
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+  assert.deepEqual(plain(api.getSelection()), keep);
+  assert.equal(G.findCallouts(map).length, 0);
+});
+
+// Mirrors Ctrl+D on a callout group: every layer in the group is copied (new ids, same names, types and
+// attributes), the copy's internal connections point at the copies, and the user data is copied as it
+// was (the record still names the original's layers). The copy lands on top of the map group's children.
+function duplicateCallout(api, groupId, parentId) {
+  const copies = {}, all = [];
+  const copyTree = (src) => {
+    const dst = api.create(api.getLayerType(src), api.getNiceName(src));
+    copies[src] = dst; all.push(src);
+    const attrs = ["expression", "text", "hidden"]; for (let i = 0; i < 12; i++) attrs.push("array." + i);
+    attrs.forEach((a) => {
+      if (!api.hasAttribute(src, a)) return;
+      api.set(dst, { [a]: api.get(src, a) });
+      const custom = api.getCustomAttributeName(src, a); if (custom) api.renameAttribute(dst, a, custom);
+    });
+    api.getChildren(src).slice().reverse().forEach((kid) => api.parent(copyTree(kid), dst));
+    return dst;
+  };
+  const copy = copyTree(groupId);
+  all.forEach((src) => {
+    api.getInConnectedAttributes(src).forEach((attr) => {
+      const from = api.getInConnection(src, attr), at = from.indexOf(".");
+      api.connect(copies[from.slice(0, at)] || from.slice(0, at), from.slice(at + 1), copies[src], attr, true);
+    });
+  });
+  ["geoCallout", "geoCalloutNumber"].forEach((k) => api.setUserData(copy, k, api.getUserDataKey(groupId, k)));
+  api.parent(copy, parentId);
+  return copy;
+}
+
+test("callouts: a duplicated callout adopts its own members, is renumbered, and a second sync changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, a);
+  const copy = duplicateCallout(api, a, map.groupId);
+  const found = G.findCallouts(map), mine = found.filter((c) => c.groupId === copy)[0], orig = found.filter((c) => c.groupId === a)[0];
+  assert.deepEqual(found.map((c) => c.groupId), [copy, a], "the copy sits on top");
+  const own = (id) => api.getParent(id) === copy || api.getParent(api.getParent(id)) === copy;
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => {
+    assert.ok(mine[k] && mine[k] !== rec[k] && own(mine[k]), k + " is the copy's own");
+    assert.equal(orig[k], rec[k], k + " of the original is unaffected");
+  });
+  assert.equal(api.getLayerType(mine.label), "textShape"); assert.equal(api.getLayerType(mine.box), "customShape");
+  assert.equal(api.getLayerType(mine.size), "boundingBox");
+  assert.equal(mine.draws.length, 2);
+  mine.draws.forEach((d, i) => { assert.ok(d && d !== rec.draws[i] && own(d)); assert.equal(api.get(d, "array.9"), i, "draw " + (i + 1) + " by its Index input"); });
+  assert.deepEqual(plain(orig.draws), rec.draws);
+  const parts = plain(G.calloutParts(map));
+  [copy, mine.label, mine.box, mine.place, mine.draws[0], mine.draws[1], api.getParent(mine.place)].forEach((id) => assert.equal(parts[id], true, String(id)));
+  // The record still names the original until prepareCallouts points it at the copy's own members.
+  assert.deepEqual(coRec(api, copy), rec);
+  G.prepareCallouts(map);
+  assert.deepEqual([G.calloutNumber(a), G.calloutNumber(copy)], [1, 2]);
+  assert.equal(api.getNiceName(copy), "Callout 2: Paris");
+  const fixed = coRec(api, copy);
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(fixed[k], mine[k], k));
+  assert.deepEqual(fixed.draws, plain(mine.draws));
+  assert.equal(fixed.lon, rec.lon); assert.equal(fixed.text, "Paris");
+  assert.deepEqual(coRec(api, a), rec, "the original's record is untouched");
+  // Stable: nothing is written the second time.
+  const writes = []; const real = api.setUserData;
+  api.setUserData = function (id, key) { writes.push(id + ":" + key); return real.apply(api, arguments); };
+  G.prepareCallouts(map);
+  api.setUserData = real;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(coRec(api, copy), fixed);
+  // A draw is told apart by its Index input, not by its name.
+  const names = mine.draws.map((d) => api.getNiceName(d));
+  api.rename(mine.draws[0], names[1]); api.rename(mine.draws[1], names[0]);
+  assert.deepEqual(plain(G.findCallouts(map)[0].draws), plain(mine.draws));
+});
+
+test("callouts: a duplicated callout gets its own Controls rows, and the original's stay as they were", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, a);
+  const before = context.GeoControlPanel.sync(map), slots0 = plain(slotsOf(api, before.valuesId));
+  const copy = duplicateCallout(api, a, map.groupId);
+  const r = context.GeoControlPanel.sync(map), slots = plain(slotsOf(api, r.valuesId));
+  assert.equal(G.calloutNumber(copy), 2);
+  const names = plain(promotedNames(api, r.components.overlay));
+  ["Draw %", "Line colour", "Line width", "Dot size", "Text colour", "Box colour", "Hide box"].forEach((n) => {
+    assert.ok(names.includes("Callout 1 · " + n), "Callout 1 · " + n);
+    assert.ok(names.includes("Callout 2 · " + n), "Callout 2 · " + n);
+  });
+  Object.keys(slots0).filter((k) => k.indexOf("callout:" + a + ":") === 0).forEach((k) => assert.equal(slots[k], slots0[k], k));
+  const mine = coRec(api, copy);
+  assert.notEqual(slots["callout:" + copy + ":draw"], slots["callout:" + a + ":draw"]);
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.8"), r.valuesId + "." + slots["callout:" + a + ":draw"]));
+  const list = api._promoted(r.components.overlay);
+  assert.ok(list.includes(mine.label + ".fontSize") && list.includes(rec.label + ".fontSize"));
+  // Moving the copy's label leaves the original's alone.
+  api.set(mine.label, { position: [-300, 200] });
+  assert.notDeepEqual(plain(api.get(rec.label, "position")), [-300, 200]);
+  // A second sync changes nothing.
+  const writes = []; const real = api.setUserData;
+  api.setUserData = function (id, key) { if (key === "geoCallout") writes.push(id); return real.apply(api, arguments); };
+  const again = context.GeoControlPanel.sync(map);
+  api.setUserData = real;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(plain(slotsOf(api, again.valuesId)), slots);
+  assert.deepEqual(plain(api._promoted(again.components.overlay)), plain(list));
+});
+
+test("callouts in Controls: the notes follow the label's words as they are now", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const notesOf = (r) => api.get(r.components.overlay, "promotedAttributes." + plain(promotedNames(api, r.components.overlay)).indexOf("Callout 1 · Draw %") + ".notes");
+  assert.equal(notesOf(context.GeoControlPanel.sync(map)), "Paris");
+  api.set(rec.label, { text: "Lutetia" });
+  assert.equal(G.findCallouts(map)[0].text, "Lutetia");
+  assert.equal(notesOf(context.GeoControlPanel.sync(map)), "Lutetia");
+  api.deleteLayer(rec.label);
+  assert.equal(G.findCallouts(map)[0].text, "Paris", "without the label, the recorded words");
+});
+
+test("callouts: a map style applied after a Controls sync lands on the Controls values, not the lines", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, light = context.GeoStyles.builtIn("Light"), dark = context.GeoStyles.builtIn("Dark");
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map), slot = slotsOf(api, r.valuesId)["callout:" + g + ":color"];
+  assert.ok(slot, "the Line colour row has a slot");
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "stroke.strokeColor"), r.valuesId + "." + slot));
+  G.applyMapStyle(map, light);
+  assert.equal(api.get(r.valuesId, slot), light.colors.accent, "the Controls value took the colour");
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.get(id, "stroke.strokeColor"), dark.colors.accent, "the line itself is untouched"));
+  assert.equal(api.get(rec.dot, "material.materialColor"), light.colors.accent, "an unconnected member is styled directly");
+});
+
+test("callouts: a late failure (a trim connection, or the record) removes the helpers group and every helper", () => {
+  ["stroke.trimEnd", "record"].forEach((late) => {
+    const { context, api } = buildSandbox();
+    const map = calloutMap(context), G = context.GeoScene;
+    const before = api.getCompLayers(false).slice().sort();
+    const realConnect = api.connect, realSet = api.setUserData;
+    api.connect = function (a, b, c, d) { if (late !== "record" && d === late) throw new Error("late " + late); return realConnect.apply(api, arguments); };
+    api.setUserData = function (id, key) { if (late === "record" && key === "geoCallout") throw new Error("late record"); return realSet.apply(api, arguments); };
+    assert.throws(() => G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), /late/);
+    api.connect = realConnect; api.setUserData = realSet;
+    assert.deepEqual(api.getCompLayers(false).slice().sort(), before, late);
+    assert.equal(G.findCallouts(map).length, 0);
+    assert.equal(api.getChildren(map.groupId).filter((id) => /Callout/.test(api.getNiceName(id))).length, 0);
+  });
+});
+
+test("callouts: the user's selection is put back after a successful build too", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const keep = [map.cameraId];
+  api.select(keep);
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.deepEqual(plain(api.getSelection()), keep);
+});
+
+// ---- Callouts in Controls ----
+test("callouts in Controls: a callout's rows land in Overlay controls with its text as notes; Draw % drives both draw helpers", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.components.overlay));
+  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
+  assert.deepEqual(names.filter((n) => /^Callout 1 · /.test(n)), wanted);
+  const list = api._promoted(r.components.overlay), at = names.indexOf("Callout 1 · Draw %");
+  assert.equal(api.get(r.components.overlay, "promotedAttributes." + at + ".notes"), "Paris");
+  const slots = slotsOf(api, r.valuesId);
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.8"), r.valuesId + "." + slots["callout:" + g + ":draw"]));
+  assert.equal(list[at], r.valuesId + "." + slots["callout:" + g + ":draw"]);
+  [rec.bend].concat(rec.draws).forEach((id) => assert.equal(api.getInConnection(id, "array.6"), r.valuesId + "." + slots["callout:" + g + ":style"]));
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "stroke.width"), r.valuesId + "." + slots["callout:" + g + ":width"]));
+  ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(rec.dot, a), r.valuesId + "." + slots["callout:" + g + ":dot"]));
+  assert.ok(list.includes(rec.label + ".fontSize") && list.includes(rec.box + ".hidden") && list.includes(rec.box + ".material.materialColor"));
+});
+
+test("callouts in Controls: a second sync adds no slots and changes no promotions; a callout without a box has no Box rows", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const first = context.GeoControlPanel.sync(map);
+  const slots1 = plain(slotsOf(api, first.valuesId)), promos1 = plain(api._promoted(first.components.overlay));
+  const second = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(slotsOf(api, second.valuesId)), slots1);
+  assert.deepEqual(plain(api._promoted(second.components.overlay)), promos1);
+  api.deleteLayer(rec.box);
+  const third = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, third.components.overlay));
+  assert.ok(!names.some((n) => /^Callout 1 · (Box colour|Hide box)/.test(n)));
+  assert.ok(names.includes("Callout 1 · Text colour"));
+});
+
+// ---- Callouts in the panel ----
+test("callouts: Callout here and Callout at coordinates are buttons on the Pins page, under the Label buttons' rows", () => {
+  const { context } = buildSandbox();
+  const page = context.sectionPages.pages[3];
+  assert.ok(holds(page, context.calloutHereBtn) && holds(page, context.calloutCoordBtn));
+  assert.equal(context.calloutHereBtn._background, "#1F8F4E");
+  assert.equal(context.calloutCoordBtn._background, undefined);
+  assert.equal(context.calloutHereBtn.getText(), "Callout here");
+  assert.equal(context.calloutCoordBtn.getText(), "Callout at coordinates");
+});
+
+test("callouts: Callout here makes the callout for the picked place and says how to place it", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.calloutHereBtn.onClick();
+  assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 1: Paris"));
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  context.labelText.setText("The capital");
+  context.calloutHereBtn.onClick();
+  assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 2: The capital"));
+  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+});
+
+test("callouts: Callout here with no search says where to search; a failed Controls update keeps the callout", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.calloutHereBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Search for a place under Label → Pins first.");
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.calloutHereBtn.onClick();
+  assert.equal(context.GeoScene.findCallouts(context.currentMap()).length, 1);
+  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Overlay controls\. Its controls couldn't be updated: boom\./);
+});
+
+test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordinate name unless text is typed", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.latField.setValue(48.8566); context.lonField.setValue(2.3522);
+  context.calloutCoordBtn.onClick();
+  const map = context.currentMap(), found = context.GeoScene.findCallouts(map);
+  assert.equal(found.length, 1);
+  const rec = plain(api.getUserDataKey(found[0].groupId, "geoCallout"));
+  assert.equal(rec.lat, 48.8566); assert.equal(rec.lon, 2.3522);
+  assert.equal(api.getNiceName(found[0].groupId), "Callout 1: 48.8566, 2.3522");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  context.labelText.setText("Home");
+  context.calloutCoordBtn.onClick();
+  assert.equal(api.getNiceName(context.GeoScene.findCallouts(map)[0].groupId), "Callout 2: Home");
+});
+
+test("Bake: highlight parts and callout parts together get one message of their own", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context);
+  context.highlightBtn.onClick();
+  const h = context.GeoScene.findHighlights(map)[0];
+  const rec = coRec(api, context.GeoScene.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  api.select([h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
+  api.select([h.shape, rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights and callouts can't be baked.");
+  api.select([rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
+});
+
+test("Bake: callout parts are skipped, with a message of their own", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  api.select([rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
+  api.select([rec.dot, rec.line1, rec.box, rec.size, rec.place]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, rec.label, rec.dot]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Skipped 2 callout part\(s\)\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
 });
