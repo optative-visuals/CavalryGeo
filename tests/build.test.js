@@ -6070,8 +6070,8 @@ test("routes: stops ride with the camera and legs are wired to them", () => {
   assert.deepEqual([IN(leg.fade, "array.0"), IN(leg.fade, "array.1")], [a.holder + ".opacity", b.holder + ".opacity"]);
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((i) => IN(leg.startHandle, "array." + i)),
     [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y", b.holder + ".position.x", b.holder + ".position.y", b.circle + ".position.x", b.circle + ".position.y"]);
-  assert.match(api.get(leg.startHandle, "expression"), /GeoCurve\.handles[\s\S]*\.start\);/);
-  assert.match(api.get(leg.endHandle, "expression"), /\.end\);/);
+  assert.match(api.get(leg.startHandle, "expression"), /GeoCurve\.handles[\s\S]*\.start\)\);/);
+  assert.match(api.get(leg.endHandle, "expression"), /\.end\)\);/);
 });
 
 test("routes: styles, trim, starting arc and hand values seeded with the plugin's shape", () => {

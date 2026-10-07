@@ -20,7 +20,8 @@ var GeoExpression = (function () {
   // with whichever of its stops is hidden.
   var END_POINT_INPUTS = [["holderX", 0], ["holderY", 0], ["stopX", 0], ["stopY", 0]];
   var HANDLE_INPUTS = [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
-    ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0]];
+    ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]];
   var FADE_INPUTS = [["fromOpacity", 100], ["toOpacity", 100]];
   function inputIndex(inputs, name) {
     for (var i = 0; i < inputs.length; i++) if (inputs[i][0] === name) return i;
@@ -163,7 +164,9 @@ var GeoExpression = (function () {
   function routeHandleExpression(curveSrc, meta, which) {
     if (which !== "start" && which !== "end") throw new Error("Unknown handle: " + which);
     return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) +
-      "(_i11 ? [_i12, _i13] : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + ");\n";
+      "(_i11 ? [_i12, _i13] : (_i14 >= 0.5 ? GeoCurve.greatCircleHandles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], " +
+      "{cam: {lat: _i15, lon: _i16, zoom: _i17, rotation: _i18, projection: _i19}, aLon: _i20, aLat: _i21, bLon: _i22, bLat: _i23, offA: [_i2, _i3], offB: [_i6, _i7]}, " +
+      "{arc: _i8, lean: _i9, flip: _i10})." + which + " : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + "));\n";
   }
 
   var ROUTE_DRAW_INPUTS = [["travel", 100], ["index", 0], ["count", 1]];

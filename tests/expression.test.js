@@ -184,7 +184,21 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   assert.throws(() => E.routeHandleExpression(curveSrc, {}, "middle"), /Unknown handle/);
   assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 0]), 0);
   assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
-  assert.deepEqual(E.HANDLE_INPUTS.map((i) => i[0]), ["aHolderX", "aHolderY", "aStopX", "aStopY", "bHolderX", "bHolderY", "bStopX", "bStopY", "arc", "lean", "flip", "hand", "handX", "handY"]);
+  assert.deepEqual(E.HANDLE_INPUTS, [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
+    ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]]);
+  // Great circle branch: shape 1 uses greatCircleHandles, shape 0 stays Arc, hand still wins.
+  const bundle = require("../tools/buildlib.js").buildCurveSource();
+  const gcIn = ins.concat([1, 20, 10, 3, 15, 2, 0, 51, 100, 35]);
+  const GC = require("../src/core/curve.js");
+  const gcWant = GC.greatCircleHandles([10, 0], [190, 0], { cam: { lat: 20, lon: 10, zoom: 3, rotation: 15, projection: 2 }, aLon: 0, aLat: 51, bLon: 100, bLat: 35, offA: [10, 0], offB: [-10, 0] }, { arc: 40, lean: 20, flip: 0 });
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(bundle, {}, "start"), gcIn)), gcWant.start);
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(bundle, {}, "end"), gcIn)), gcWant.end);
+  assert.notDeepEqual(gcWant.start, want.start);
+  const arcIn = gcIn.slice(); arcIn[14] = 0;
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(bundle, {}, "start"), arcIn)), want.start);
+  const gcHand = gcIn.slice(); gcHand[11] = 1;
+  assert.deepEqual(Array.from(run(E.routeHandleExpression(bundle, {}, "end"), gcHand)), [7, 8]);
 });
 
 test("traveller scale helper: size times the source layer's own scale", () => {

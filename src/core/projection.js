@@ -19,7 +19,8 @@ var GeoProjection = (function () {
     out[1] = t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2));
   }
 
-  function makeProjector(cam) {
+  // raw (orthographic only): back-side points keep their true position instead of being pushed to the limb.
+  function makeProjector(cam, raw) {
     var proj = Math.max(MERCATOR, Math.min(ORTHOGRAPHIC, Math.round(cam.projection || 0)));
     var R = worldScale(Math.max(0, Math.min(MAX_ZOOM, cam.zoom)));
     var rot = (cam.rotation || 0) * D2R, cr = Math.cos(rot), sr = Math.sin(rot);
@@ -42,7 +43,7 @@ var GeoProjection = (function () {
       var cp = Math.cos(p), sp = Math.sin(p), cdl = Math.cos(dl);
       var x = cp * Math.sin(dl), y = cosLat0 * sp - sinLat0 * cp * cdl;
       var visible = sinLat0 * sp + cosLat0 * cp * cdl >= 0;
-      if (!visible) { var len = Math.sqrt(x * x + y * y) || 1; x /= len; y /= len; }
+      if (!visible && !raw) { var len = Math.sqrt(x * x + y * y) || 1; x /= len; y /= len; }
       finish(x, y, out);
       return visible;
     };

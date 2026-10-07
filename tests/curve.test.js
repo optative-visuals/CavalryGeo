@@ -47,3 +47,66 @@ test("the shape scales with the stops (zooming keeps the curve's shape)", () => 
   const a = C.handles([10, 20], [110, 70], { arc: 30, lean: 20 }), b = C.handles([20, 40], [220, 140], { arc: 30, lean: 20 });
   close(b.start[0], 2 * a.start[0]); close(b.start[1], 2 * a.start[1]); close(b.end[0], 2 * a.end[0]); close(b.end[1], 2 * a.end[1]);
 });
+
+const P = require("../src/core/projection.js");
+const cams = [
+  [{ lat: 40, lon: 60, zoom: 1.5, rotation: 0, projection: 0 }, { lat: 10, lon: -20, zoom: 2.5, rotation: 30, projection: 0 }],
+  [{ lat: 20, lon: 50, zoom: 1.5, rotation: 0, projection: 1 }, { lat: 0, lon: 80, zoom: 2, rotation: -20, projection: 1 }],
+  [{ lat: 45, lon: 40, zoom: 1, rotation: 0, projection: 2 }, { lat: 30, lon: 70, zoom: 1.5, rotation: 25, projection: 2 }]
+];
+const L = [-0.13, 51.51], T = [139.69, 35.68];
+function setup(cam, opts, offA = [0, 0], offB = [0, 0]) {
+  const proj = P.makeProjector(cam, true), p0 = [0, 0], p1 = [0, 0];
+  proj(L[0], L[1], p0); proj(T[0], T[1], p1);
+  p0[0] += offA[0]; p0[1] += offA[1]; p1[0] += offB[0]; p1[1] += offB[1];
+  const h = C.greatCircleHandles(p0, p1, { cam, aLon: L[0], aLat: L[1], bLon: T[0], bLat: T[1], offA, offB }, opts);
+  return { proj, p0, p1, h };
+}
+
+test("greatCirclePoint: endpoints and the equator midpoint", () => {
+  const a = C.greatCirclePoint(0, 0, 90, 0, 0), m = C.greatCirclePoint(0, 0, 90, 0, 0.5), b = C.greatCirclePoint(0, 0, 90, 0, 1);
+  close(a[0], 0, 1e-9); close(b[0], 90, 1e-9); close(m[0], 45, 1e-9); close(m[1], 0, 1e-9);
+});
+
+test("greatCircleHandles: the Bézier passes through the projected great-circle points", () => {
+  cams.forEach((pair) => pair.forEach((cam) => {
+    const { proj, p0, p1, h } = setup(cam, { arc: 0 });
+    [1 / 3, 2 / 3].forEach((t) => {
+      const g = C.greatCirclePoint(L[0], L[1], T[0], T[1], t), want = [0, 0];
+      proj(g[0], g[1], want);
+      const got = at(p0, p1, h, t);
+      close(got[0], want[0], 1e-6); close(got[1], want[1], 1e-6);
+    });
+  }));
+});
+
+test("greatCircleHandles: arc lifts the middle on Arc's side, flip mirrors, lean makes it uneven", () => {
+  const cam = cams[0][0];
+  const flat = setup(cam, { arc: 0 }), up = setup(cam, { arc: 50 }), dn = setup(cam, { arc: 50, flip: 1 });
+  const dx = flat.p1[0] - flat.p0[0], dy = flat.p1[1] - flat.p0[1], len = Math.hypot(dx, dy);
+  const nrm = [-dy / len, dx / len];
+  const m0 = at(flat.p0, flat.p1, flat.h, 0.5), m1 = at(up.p0, up.p1, up.h, 0.5), m2 = at(dn.p0, dn.p1, dn.h, 0.5);
+  const lift1 = (m1[0] - m0[0]) * nrm[0] + (m1[1] - m0[1]) * nrm[1], lift2 = (m2[0] - m0[0]) * nrm[0] + (m2[1] - m0[1]) * nrm[1];
+  assert.ok(Math.abs(lift1 - 0.25 * len) < 0.05 * 0.25 * len, lift1 + " vs " + 0.25 * len);
+  close(lift2, -lift1, 1e-6);
+  const lean = setup(cam, { arc: 50, lean: 60 });
+  const l1 = at(lean.p0, lean.p1, lean.h, 1 / 3), l2 = at(lean.p0, lean.p1, lean.h, 2 / 3), f1 = at(flat.p0, flat.p1, flat.h, 1 / 3), f2 = at(flat.p0, flat.p1, flat.h, 2 / 3);
+  const a = (l1[0] - f1[0]) * nrm[0] + (l1[1] - f1[1]) * nrm[1], b = (l2[0] - f2[0]) * nrm[0] + (l2[1] - f2[1]) * nrm[1];
+  assert.ok(b > a + 1, "positive lean lifts nearer the end stop more");
+});
+
+test("greatCircleHandles: drag offsets blend into the thirds", () => {
+  const cam = cams[0][0];
+  const base = setup(cam, { arc: 0 }), drag = setup(cam, { arc: 0 }, [30, 0], [0, 0]);
+  const b = at(base.p0, base.p1, base.h, 1 / 3), d = at(drag.p0, drag.p1, drag.h, 1 / 3);
+  close(d[0] - b[0], 20, 1e-6); close(d[1] - b[1], 0, 1e-6);
+});
+
+test("greatCircleHandles: identical and antipodal stops fall back to Arc", () => {
+  const cam = cams[0][0], opts = { arc: 30, lean: 10, flip: 0 };
+  const p0 = [10, 20], p1 = [210, -40];
+  const same = C.greatCircleHandles(p0, p1, { cam, aLon: 5, aLat: 5, bLon: 5, bLat: 5, offA: [0, 0], offB: [0, 0] }, opts);
+  assert.deepEqual(same, C.handles(p0, p1, opts));
+  const anti = C.greatCircleHandles(p0, p1, { cam, aLon: 10, aLat: 20, bLon: -170, bLat: -20, offA: [0, 0], offB: [0, 0] }, opts);
+  assert.deepEqual(anti, C.handles(p0, p1, opts));
+});
