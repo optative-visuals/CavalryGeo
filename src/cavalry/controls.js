@@ -274,6 +274,13 @@ var GeoControlPanel = (function () {
       return { id: h.groupId, number: h.number, name: h.name, effect: h.effect, shape: h.shape, osc: h.osc,
         blur: h.blur ? { id: h.blur, state: linkState(h.blur, S.blur) } : null };
     });
+    // Callouts: values go on the helper scripts' inputs, so those members carry their link state; a missing member is left out.
+    model.callouts = GeoScene.findCallouts(map).map(function (c) {
+      var member = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
+      return { id: c.groupId, number: c.number, text: c.text, label: c.label, box: c.box, dot: member(c.dot, S.calloutDot), bend: member(c.bend, S.calloutBend),
+        lines: [c.line1, c.line2].filter(Boolean).map(function (id) { return member(id, S.calloutLine); }),
+        draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
+    });
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -459,6 +466,8 @@ var GeoControlPanel = (function () {
       keepSelection(function () { removed = GeoScene.prepareHighlights(map, found.mapLayers, found.order); });
       if (removed > 0) found.mapLayers = GeoScene.findMapLayers(map);
     });
+    // Callouts are numbered the same way (a duplicate takes the next free number).
+    attempt(function () { keepSelection(function () { GeoScene.prepareCallouts(map); }); });
     var model = readModel(map, V, found), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {

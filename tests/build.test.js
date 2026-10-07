@@ -8839,3 +8839,39 @@ test("callouts: the user's selection is put back after a successful build too", 
   G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
   assert.deepEqual(plain(api.getSelection()), keep);
 });
+
+// ---- Callouts in Controls ----
+test("callouts in Controls: a callout's rows land in Overlay controls with its text as notes; Draw % drives both draw helpers", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, r.components.overlay));
+  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
+  assert.deepEqual(names.filter((n) => /^Callout 1 · /.test(n)), wanted);
+  const list = api._promoted(r.components.overlay), at = names.indexOf("Callout 1 · Draw %");
+  assert.equal(api.get(r.components.overlay, "promotedAttributes." + at + ".notes"), "Paris");
+  const slots = slotsOf(api, r.valuesId);
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.8"), r.valuesId + "." + slots["callout:" + g + ":draw"]));
+  assert.equal(list[at], r.valuesId + "." + slots["callout:" + g + ":draw"]);
+  [rec.bend].concat(rec.draws).forEach((id) => assert.equal(api.getInConnection(id, "array.6"), r.valuesId + "." + slots["callout:" + g + ":style"]));
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "stroke.width"), r.valuesId + "." + slots["callout:" + g + ":width"]));
+  ["generator.radius.x", "generator.radius.y"].forEach((a) => assert.equal(api.getInConnection(rec.dot, a), r.valuesId + "." + slots["callout:" + g + ":dot"]));
+  assert.ok(list.includes(rec.label + ".fontSize") && list.includes(rec.box + ".hidden") && list.includes(rec.box + ".material.materialColor"));
+});
+
+test("callouts in Controls: a second sync adds no slots and changes no promotions; a callout without a box has no Box rows", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const first = context.GeoControlPanel.sync(map);
+  const slots1 = plain(slotsOf(api, first.valuesId)), promos1 = plain(api._promoted(first.components.overlay));
+  const second = context.GeoControlPanel.sync(map);
+  assert.deepEqual(plain(slotsOf(api, second.valuesId)), slots1);
+  assert.deepEqual(plain(api._promoted(second.components.overlay)), promos1);
+  api.deleteLayer(rec.box);
+  const third = context.GeoControlPanel.sync(map);
+  const names = plain(promotedNames(api, third.components.overlay));
+  assert.ok(!names.some((n) => /^Callout 1 · (Box colour|Hide box)/.test(n)));
+  assert.ok(names.includes("Callout 1 · Text colour"));
+});

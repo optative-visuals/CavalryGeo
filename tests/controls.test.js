@@ -363,3 +363,50 @@ test("highlight rows: a highlight whose shape is gone shows only the rows it can
   const p = G.plan({ valuesId: "V", highlights: [{ id: "g1", number: 1, name: "France", effect: "pulse", shape: null, osc: "o1", blur: null }] });
   assert.deepEqual(p.rows.map((r) => r.label), ["Highlight 1 · Amount %", "Highlight 1 · Speed"]);
 });
+
+// ---- Callouts ----
+const calloutModel = (extra) => Object.assign({ id: "g1", number: 1, text: "Paris", label: "lb", box: "bx", dot: { id: "dt", state: {} },
+  bend: { id: "bd", state: {} }, lines: [{ id: "l1", state: {} }, { id: "l2", state: {} }], draws: [{ id: "d1", state: {} }, { id: "d2", state: {} }] }, extra || {});
+
+test("callout rows: nine rows in order, in the overlay group, with the callout's text as notes", () => {
+  const model = { valuesId: "V", callouts: [calloutModel()] };
+  const p = G.plan(model);
+  assert.deepEqual(p.rows.map((r) => r.label), ["Callout 1 · Draw %", "Callout 1 · Line style (0 straight · 1 elbow)", "Callout 1 · Line colour", "Callout 1 · Line width",
+    "Callout 1 · Dot size", "Callout 1 · Text colour", "Callout 1 · Text size", "Callout 1 · Box colour", "Callout 1 · Hide box"]);
+  p.groups.forEach((g) => assert.equal(g, "overlay"));
+  p.rows.forEach((r) => assert.equal(r.notes, "Paris"));
+  const row = (label) => p.rows.find((r) => r.label === "Callout 1 · " + label);
+  const E = require("../src/core/expression.js");
+  const DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "draw"), STYLE = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style");
+  assert.equal(row("Draw %").kind, "value"); assert.equal(row("Draw %").key, "callout:g1:draw");
+  assert.deepEqual(row("Draw %").link, [{ layer: "d1", attr: DRAW }, { layer: "d2", attr: DRAW }]);
+  assert.deepEqual(row("Draw %").overrides, { hardMin: 0, hardMax: 100 });
+  const style = row("Line style (0 straight · 1 elbow)");
+  assert.deepEqual(style.link, [{ layer: "bd", attr: STYLE }, { layer: "d1", attr: STYLE }, { layer: "d2", attr: STYLE }]);
+  assert.deepEqual(style.overrides, { hardMin: 0, hardMax: 1, step: 1 });
+  assert.deepEqual(row("Line colour").link, [{ layer: "l1", attr: "stroke.strokeColor" }, { layer: "l2", attr: "stroke.strokeColor" }]);
+  assert.equal(row("Line colour").type, "color");
+  assert.deepEqual(row("Line width").link, [{ layer: "l1", attr: "stroke.width" }, { layer: "l2", attr: "stroke.width" }]);
+  assert.deepEqual(row("Dot size").link, [{ layer: "dt", attr: "generator.radius.x" }, { layer: "dt", attr: "generator.radius.y" }]);
+  [["Text colour", "lb", "material.materialColor"], ["Text size", "lb", "fontSize"], ["Box colour", "bx", "material.materialColor"], ["Hide box", "bx", "hidden"]].forEach(([label, layer, attr]) => {
+    assert.equal(row(label).kind, "direct"); assert.equal(row(label).layer, layer); assert.equal(row(label).attr, attr);
+  });
+  assert.deepEqual(G.STATE_ATTRS.calloutDraw, [DRAW, STYLE]);
+  assert.deepEqual(G.STATE_ATTRS.calloutBend, [STYLE]);
+  assert.deepEqual(G.STATE_ATTRS.calloutLine, ["stroke.strokeColor", "stroke.width"]);
+  assert.deepEqual(G.STATE_ATTRS.calloutDot, ["generator.radius.x", "generator.radius.y"]);
+  const ids = G.ids(model);
+  ["lb", "bx", "dt", "bd", "l1", "l2", "d1", "d2"].forEach((id) => assert.ok(ids[id], id));
+});
+
+test("callout rows: a callout whose box is gone has no Box rows, and rows come after the routes' (callouts numbered apart)", () => {
+  const p = G.plan({ valuesId: "V", routes: [], newRoutes: [{ id: "r1", number: 1, title: "A", legs: [{ id: "lg", start: { id: "s" }, end: { id: "e" } }], draws: [] }],
+    callouts: [calloutModel({ box: null }), calloutModel({ id: "g2", number: 2, text: "Rome", lines: [{ id: "l3", state: {} }, null], dot: null })] });
+  const labels = p.rows.map((r) => r.label);
+  assert.ok(labels.indexOf("Callout 1 · Draw %") > labels.indexOf("Route 1 · Width"));
+  assert.ok(!labels.some((l) => /^Callout 1 · (Box colour|Hide box)/.test(l)));
+  assert.ok(labels.includes("Callout 1 · Text colour"));
+  assert.ok(!labels.includes("Callout 2 · Dot size"));
+  assert.deepEqual(p.rows.find((r) => r.label === "Callout 2 · Line colour").link, [{ layer: "l3", attr: "stroke.strokeColor" }]);
+  assert.equal(p.rows.find((r) => r.label === "Callout 2 · Draw %").notes, "Rome");
+});
