@@ -916,6 +916,11 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.note("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
     refreshControlsBtn,
     clearCacheBtn,
+    GeoStyle.heading("Day & night"),
+    row(new ui.Label("Day"), dayNightDayField, dayNightMonthPicker),
+    row(new ui.Label("UTC time (0-24)"), dayNightTimeField),
+    row(timeLabelCheck, new ui.Label("Time label")),
+    addDayNightBtn,
     GeoStyle.heading("Map furniture"),
     row(addScaleBarBtn, addNorthArrowBtn)
   ]));
@@ -1065,7 +1070,7 @@ calloutCoordBtn.onClick = guard(function () {
   calloutSay(map, GeoScene.createCallout(map, { lon: lonField.getValue(), lat: latField.getValue() }, text), text);
 });
 
-// ---- Day & night (Label section, under Pins) ------------------------------------
+// ---- Day & night (Layers section, before Map furniture) -----------------------------------
 // The date and time start at now (UTC), the time rounded to a quarter hour. Pressing the button again
 // on a map that has the overlay sets its date and time instead of making another.
 var DAYNIGHT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1292,12 +1297,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("At coordinates"),
     row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
     row(pinCoordBtn, labelCoordBtn),
-    row(calloutCoordBtn),
-    GeoStyle.heading("Day & night"),
-    row(new ui.Label("Day"), dayNightDayField, dayNightMonthPicker),
-    row(new ui.Label("UTC time (0-24)"), dayNightTimeField),
-    row(timeLabelCheck, new ui.Label("Time label")),
-    addDayNightBtn
+    row(calloutCoordBtn)
   ]));
   labelPages.add(column([
     GeoStyle.heading("Stops"),

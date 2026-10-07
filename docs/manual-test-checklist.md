@@ -154,9 +154,9 @@ adding street layers.
       group with its own "Callout 2 · ..." rows in Overlay controls; dragging the copy's label moves only the copy,
       and the copy's line and dot still follow its place when the camera moves.
 
-## Label → Day & night
+## Layers → Day & night
 
-- [ ] 19m. Label → Pins → Day & night: the day, month and UTC time boxes show today's date and the current time
+- [ ] 19m. Layers → Day & night: the day, month and UTC time boxes show today's date and the current time
       (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
       layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
       in <map> Time controls.", and the night side is shaded.

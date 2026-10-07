@@ -4154,9 +4154,9 @@ test("each section has grey headings in order", () => {
   const pages = context.sectionPages.pages;
   const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
   assert.deepEqual(headings(pages[0]), ["Start here", "Search", "Preview (drag to move)", "Style"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
+  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Day & night", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Day & night", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
 });
 
@@ -10260,9 +10260,9 @@ function dayNightSandbox() {
   return buildSandbox({ globals: { Date: FixedDate } });
 }
 
-test("day & night: the Label page has a Day & night section with its widgets, defaulting to now (UTC)", () => {
+test("day & night: the Layers page has a Day & night section (before Map furniture) with its widgets, defaulting to now (UTC)", () => {
   const { context } = dayNightSandbox();
-  const page = context.sectionPages.pages[3];
+  const page = context.sectionPages.pages[1];
   [context.dayNightDayField, context.dayNightMonthPicker, context.dayNightTimeField, context.timeLabelCheck, context.addDayNightBtn].forEach((w) => assert.ok(holds(page, w)));
   let heading = false;
   walkUi(page, (n) => { if (n.getText && n.getText() === "Day & night") heading = true; });
