@@ -199,8 +199,8 @@ var GeoExpression = (function () {
   // The fade only asks whether anything is in front.
   var CLIP_SRC = "var _gl = Math.round(_i15) === 2;\n" +
     "var _gc = {cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19};\n" +
-    "var _sp = _gl ? GeoCurve.visibleSpan([_i2, _i3], [_i4, _i5], [_i6, _i7], [_i8, _i9], " +
-    "_gc) : {s0: 0, s1: 1};\n";
+    "var _sp = _gl ? GeoCurve.legSpan([_i2, _i3], [_i4, _i5], [_i6, _i7], [_i8, _i9], " +
+    "_gc, _i10) : {s0: 0, s1: 1};\n";
   function clipExpression(curveSrc, meta, body, src) {
     return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(CLIP_INPUTS) + (src || CLIP_SRC) + body + "\n";
   }

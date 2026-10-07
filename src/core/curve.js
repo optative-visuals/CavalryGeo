@@ -142,6 +142,50 @@ var GeoCurve = (function () {
     return { s0: s0, s1: s1 };
   }
 
-  return { handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles, visibleSpan: visibleSpan, anyVisible: anyVisible };
+  // An Arc-shaped leg on the globe: the hidden stop's end is already pushed onto the limb, so the
+  // visible part runs from the visible stop along the leg's own Bézier until it first leaves the
+  // globe's disc (radius worldScale(zoom), centred on the map origin), refined by bisection. If it
+  // never leaves, the cut is the hidden stop's end. Both visible: whole; both hidden: as visibleSpan.
+  function arcSpan(p0, p1, startOff, endOff, gc) {
+    var cam = gc && gc.cam;
+    if (!cam || Math.round(cam.projection || 0) !== 2) return { s0: 0, s1: 1 };
+    var project = GeoProjection.makeProjector(cam, true), tmp = [0, 0];
+    var aVis = project(gc.aLon, gc.aLat, tmp), bVis = project(gc.bLon, gc.bLat, tmp);
+    if (aVis && bVis) return { s0: 0, s1: 1 };
+    if (!aVis && !bVis) return visibleSpan(p0, p1, startOff, endOff, gc);
+    var R = GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, Number(cam.zoom) || 0)));
+    var c1 = [p0[0] + startOff[0], p0[1] + startOff[1]], c2 = [p1[0] + endOff[0], p1[1] + endOff[1]];
+    function pt(t) {
+      var u = 1 - t;
+      return [u * u * u * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * p1[0],
+        u * u * u * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * p1[1]];
+    }
+    function out(t) { var q = pt(t); return Math.sqrt(q[0] * q[0] + q[1] * q[1]) > R; }
+    var M = 128, i, cum = [0], prev = pt(0), cur;
+    for (i = 1; i <= M; i++) { cur = pt(i / M); cum.push(cum[i - 1] + Math.sqrt(Math.pow(cur[0] - prev[0], 2) + Math.pow(cur[1] - prev[1], 2))); prev = cur; }
+    var total = cum[M];
+    if (!(total > 1e-9)) return { s0: 0, s1: 1 };
+    // t of the first departure from the disc walking from the visible stop (dir 1: from t = 0, -1: from t = 1).
+    var cut = -1;
+    for (i = 1; i <= M && cut < 0; i++) {
+      var ta = aVis ? (i - 1) / M : 1 - (i - 1) / M, tb = aVis ? i / M : 1 - i / M;
+      if (out(tb)) {
+        var lo = ta, hi = tb;
+        for (var k = 0; k < 20; k++) { var m = (lo + hi) / 2; if (out(m)) hi = m; else lo = m; }
+        cut = lo;
+      }
+    }
+    if (cut < 0) return { s0: 0, s1: 1 };
+    var base = Math.floor(cut * M + 1e-9), q0 = pt(base / M), q1 = pt(cut);
+    var along = (cum[base] + Math.sqrt(Math.pow(q1[0] - q0[0], 2) + Math.pow(q1[1] - q0[1], 2))) / total;
+    along = Math.max(0, Math.min(1, along));
+    return aVis ? { s0: 0, s1: along } : { s0: along, s1: 1 };
+  }
+  // The span for a leg of this Shape (0 = Arc, else Great circle).
+  function legSpan(p0, p1, startOff, endOff, gc, shape) {
+    return Number(shape) < 0.5 ? arcSpan(p0, p1, startOff, endOff, gc) : visibleSpan(p0, p1, startOff, endOff, gc);
+  }
+
+  return { arcSpan: arcSpan, legSpan: legSpan, handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles, visibleSpan: visibleSpan, anyVisible: anyVisible };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoCurve;

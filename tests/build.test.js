@@ -10588,7 +10588,7 @@ test("clipped legs: a new leg gets clip start / clip end / fade helpers wired to
       assert.equal(api.getParent(h), d.helpers);
       assert.equal(api.hasAttribute(h, "array.20"), true);
       assert.equal(api.hasAttribute(h, "array.21"), false);
-      assert.match(api.get(h, "expression"), /GeoCurve\.(visibleSpan|anyVisible)/);
+      assert.match(api.get(h, "expression"), /GeoCurve\.(legSpan|anyVisible)/);
       assert.deepEqual([IN(h, CIN("aX")), IN(h, CIN("aY")), IN(h, CIN("bX")), IN(h, CIN("bY"))],
         [l.line + ".generator.startPosition.x", l.line + ".generator.startPosition.y", l.line + ".generator.endPosition.x", l.line + ".generator.endPosition.y"]);
       assert.deepEqual([IN(h, CIN("startX")), IN(h, CIN("startY")), IN(h, CIN("endX")), IN(h, CIN("endY"))],

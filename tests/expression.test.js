@@ -512,7 +512,7 @@ test("route clip helpers: trim start / trim end / fade follow GeoCurve.visibleSp
   assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, far)), 0);
   near(run(expr.end, Object.assign({ draw: 70 }, far)), 70);
   // An Arc-shaped leg on the globe is clipped too.
-  near(run(expr.end, Object.assign({ draw: 100 }, inputs, { shape: 0 })), span.s1 * 100);
+  near(run(expr.end, Object.assign({ draw: 100 }, inputs, { shape: 0 })), Curve.arcSpan(p0, p1, h.start, h.end, gc).s1 * 100);
   assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, far, { shape: 0 })), 0);
   assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, inputs, { shape: 0 })), 100);
   // Flat map / Equal Earth: identical to today.

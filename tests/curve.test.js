@@ -233,3 +233,41 @@ test("anyVisible: agrees with visibleSpan", () => {
   });
   assert.equal(C.anyVisible({ cam: { projection: 0, lat: 0, lon: 0, zoom: 1 }, aLon: 0, aLat: 0, bLon: 90, bLat: 0 }), true);
 });
+
+test("arcSpan: an Arc-shaped globe leg is cut on the globe's edge, or at the hidden stop when the bow stays inside the disc", () => {
+  const NY = [-74, 40.7], BKK = [100.5, 13.75], R = P.worldScale(2);
+  let edge = 0, ends = 0;
+  [[10, -60], [10, 110], [0, -30], [0, 110], [30, -100]].forEach(([lat, lon]) => [[NY, BKK], [BKK, NY], [L, T]].forEach(([A, B]) => [0, 30, 100].forEach((arc) => [0, 1].forEach((flip) => {
+    const cam = { lat, lon, zoom: 2, rotation: 0, projection: 2 }, proj = P.makeProjector(cam, false), raw = P.makeProjector(cam, true), tmp = [0, 0];
+    const p0 = [0, 0], p1 = [0, 0];
+    proj(A[0], A[1], p0); proj(B[0], B[1], p1);
+    const h = C.handles(p0, p1, { arc, flip });
+    const gc = { cam, aLon: A[0], aLat: A[1], bLon: B[0], bLat: B[1] };
+    const aVis = raw(A[0], A[1], tmp), bVis = raw(B[0], B[1], tmp);
+    const span = C.arcSpan(p0, p1, h.start, h.end, gc);
+    const tag = [lat, lon, arc, flip, A[0], B[0]].join("/");
+    if (aVis === bVis) return;
+    if (aVis) {
+      assert.equal(span.s0, 0, tag);
+      if (span.s1 === 1) { ends++; for (let i = 0; i <= 100; i++) assert.ok(Math.hypot.apply(null, at(p0, p1, h, i / 100)) <= R + 2, tag + " bow inside"); }
+      else { edge++; const q = alongLeg(p0, p1, h, span.s1); assert.ok(Math.abs(Math.hypot(q[0], q[1]) - R) < 2, tag + " cut at " + Math.hypot(q[0], q[1])); }
+    } else {
+      assert.equal(span.s1, 1, tag);
+      if (span.s0 === 0) { ends++; }
+      else { edge++; const q = alongLeg(p0, p1, h, span.s0); assert.ok(Math.abs(Math.hypot(q[0], q[1]) - R) < 2, tag + " cut at " + Math.hypot(q[0], q[1])); }
+    }
+    assert.deepEqual(plainSpan(C.legSpan(p0, p1, h.start, h.end, gc, 0)), plainSpan(span));
+  }))));
+  assert.ok(edge > 10, "edge cuts " + edge);
+});
+
+test("arcSpan: both stops in front is whole, both hidden follows visibleSpan, flat maps whole; legSpan picks by shape", () => {
+  const cam = { lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 }, l = leg(cam, [-60, 10], [20, 30]);
+  assert.deepEqual(plainSpan(C.arcSpan(l.p0, l.p1, l.h.start, l.h.end, l.gc)), { s0: 0, s1: 1 });
+  const far = { lat: -65, lon: -100, zoom: 2, rotation: 0, projection: 2 }, f = leg(far);
+  assert.equal(C.arcSpan(f.p0, f.p1, f.h.start, f.h.end, f.gc), null);
+  const flat = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, g = leg(flat);
+  assert.deepEqual(plainSpan(C.legSpan(g.p0, g.p1, g.h.start, g.h.end, g.gc, 0)), { s0: 0, s1: 1 });
+  const w = leg({ lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 });
+  assert.deepEqual(plainSpan(C.legSpan(w.p0, w.p1, w.h.start, w.h.end, w.gc, 1)), plainSpan(w.span));
+});
