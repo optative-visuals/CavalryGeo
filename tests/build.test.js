@@ -8877,7 +8877,7 @@ test("callouts in Controls: a second sync adds no slots and changes no promotion
 });
 
 // ---- Callouts in the panel ----
-test("callouts: Callout here and Callout at coordinates sit beside Label here / Label at coordinates", () => {
+test("callouts: Callout here and Callout at coordinates are buttons on the Pins page, under the Label buttons' rows", () => {
   const { context } = buildSandbox();
   const page = context.sectionPages.pages[3];
   assert.ok(holds(page, context.calloutHereBtn) && holds(page, context.calloutCoordBtn));
@@ -8928,6 +8928,23 @@ test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordin
   context.labelText.setText("Home");
   context.calloutCoordBtn.onClick();
   assert.equal(api.getNiceName(context.GeoScene.findCallouts(map)[0].groupId), "Callout 2: Home");
+});
+
+test("Bake: highlight parts and callout parts together get one message of their own", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context);
+  context.highlightBtn.onClick();
+  const h = context.GeoScene.findHighlights(map)[0];
+  const rec = coRec(api, context.GeoScene.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  api.select([h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights can't be baked.");
+  api.select([h.shape, rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights and callouts can't be baked.");
+  api.select([rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
 });
 
 test("Bake: callout parts are skipped, with a message of their own", () => {

@@ -757,10 +757,9 @@ bakeBtn.onClick = guard(function () {
   if (baked === 0) {
     if (skippedFurniture && !skippedRoute && !skippedData && !other) {
       throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
-    } else if (skippedHighlight && !skippedRoute && !skippedData && !skippedFurniture && !skippedCallout && !other) {
-      throw new Error("Highlights can't be baked.");
-    } else if (skippedCallout && !skippedRoute && !skippedData && !skippedFurniture && !skippedHighlight && !other) {
-      throw new Error("Callouts are already Cavalry layers, so there's nothing to bake.");
+    } else if ((skippedHighlight || skippedCallout) && !skippedRoute && !skippedData && !skippedFurniture && !other) {
+      throw new Error(skippedHighlight && skippedCallout ? "Highlights and callouts can't be baked." :
+        skippedHighlight ? "Highlights can't be baked." : "Callouts are already Cavalry layers, so there's nothing to bake.");
     } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
