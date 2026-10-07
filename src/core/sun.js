@@ -192,6 +192,15 @@ var GeoSun = (function () {
     return Math.round(num(step, 0)) === 0 ? n : 0;
   }
 
+  // Fast Blur amount (pixels, both axes) that smooths the four stacked steps into one gradient:
+  // half a twilight step (6 degrees of arc) on the screen at this zoom, at most 200; none for a
+  // hard edge (twilight under 0.5).
+  function blurAmount(zoom, twilight) {
+    if (num(twilight, 1) < 0.5) return 0;
+    var z = Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(zoom, 2)));
+    return Math.min(200, 0.5 * 6 * Math.PI / 180 * GeoProjection.worldScale(z));
+  }
+
   function two(n) { return (n < 10 ? "0" : "") + n; }
   function timeText(doy, utc) {
     var d = Math.max(1, Math.min(365, Math.round(num(doy, 1)))), m = 0;
@@ -218,6 +227,6 @@ var GeoSun = (function () {
     return p;
   }
 
-  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, stepOpacity: stepOpacity, timeText: timeText, timeLabel: timeLabel };
+  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, stepOpacity: stepOpacity, blurAmount: blurAmount, timeText: timeText, timeLabel: timeLabel };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoSun;

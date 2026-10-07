@@ -200,3 +200,18 @@ test("Mercator over the Pacific shades land past the antimeridian", () => {
     assert.ok(insideEvenOdd(contours, out[0], out[1]), "lon " + lon);
   });
 });
+
+test("blurAmount: half a twilight step (3 degrees) on the screen, clamped, and zero for a hard edge", () => {
+  const ws = (z) => 256 * Math.pow(2, z) / (2 * Math.PI);
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, a + " vs " + b);
+  near(S.blurAmount(2, 1), 3 * Math.PI / 180 * ws(2));
+  near(S.blurAmount(4, 1), 3 * Math.PI / 180 * ws(4));
+  assert.ok(S.blurAmount(4, 1) > 4 * S.blurAmount(2, 1) - 1e-9);
+  assert.equal(S.blurAmount(10, 1), 200);
+  assert.equal(S.blurAmount(22, 0.5), 200);
+  assert.equal(S.blurAmount(4, 0), 0);
+  assert.equal(S.blurAmount(4, 0.49), 0);
+  near(S.blurAmount(-3, 1), S.blurAmount(0, 1));
+  near(S.blurAmount(NaN, 1), S.blurAmount(2, 1));
+  near(S.blurAmount(4, undefined), S.blurAmount(4, 1));
+});

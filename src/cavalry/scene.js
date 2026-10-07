@@ -2143,8 +2143,9 @@ var GeoScene = (function () {
   // ---- Day & night ---------------------------------------------------------------------------
   // One overlay per map: a group "Day & night" in the map group holding four night layers (one per
   // twilight depression, since a Cavalry shape has a single opacity) and a helpers group with one
-  // opacity helper per layer. An optional "Time label" sits in the map group like map furniture.
-  // The group's user data records every member (geoDayNight).
+  // opacity helper per layer, plus a Fast Blur per layer (all four driven by one "Night blur" helper)
+  // that smooths the steps into a gradient. An optional "Time label" sits in the map group like map
+  // furniture. The group's user data records every member (geoDayNight).
   var DAYNIGHT_KEY = "geoDayNight", TIME_LABEL_NAME = "Time label", NIGHT_DEPRESSIONS = [0, 6, 12, 18];
 
   // This map's day & night group, straight from the map group's children (top first).
@@ -2166,7 +2167,7 @@ var GeoScene = (function () {
   // group's own member of that kind is used: the child night layer with that depression, the helper
   // with that step (a missing one reads as null). recorded / adopted count how each was found.
   function dayNightMembers(map, g, rec) {
-    var out = { layers: [], helpers: [], recorded: 0, adopted: 0 }, kids = null, inner = null;
+    var out = { layers: [], helpers: [], blurs: [], blurHelper: null, blurAdopted: false, recorded: 0, adopted: 0 }, kids = null, inner = null;
     function children() { if (!kids) { try { kids = api.getChildren(g) || []; } catch (e) { kids = []; } } return kids; }
     function grandchildren() {
       if (!inner) {
@@ -2197,9 +2198,29 @@ var GeoScene = (function () {
       }
       out.layers.push(id || null); out.helpers.push(h || null);
     });
+    // The blurs and their helper (made after the first release): a recorded one counts while it sits in
+    // a group inside this one; otherwise the Fast Blur on the layer's filters, or the helper tagged
+    // dayNightBlur, among the group's own members. Not part of the score that picks between copies.
+    NIGHT_DEPRESSIONS.forEach(function (a, i) {
+      var b = (rec.blurs || [])[i], bp = b && layerThere(b) ? api.getParent(b) : null;
+      if (!(bp && bp !== g && api.getParent(bp) === g)) {
+        b = null;
+        var lay = out.layers[i], from = "";
+        try { from = lay ? String(api.getInConnection(lay, "filters") || "") : ""; } catch (e) { from = ""; }
+        var fid = from.indexOf(".") > 0 ? from.slice(0, from.indexOf(".")) : "";
+        if (fid && layerThere(fid) && grandchildren().indexOf(fid) >= 0 && typeof api.getLayerType === "function" && api.getLayerType(fid) === "blurFilter") { b = fid; out.blurAdopted = true; }
+      }
+      out.blurs.push(b || null);
+    });
+    var bh = rec.blurHelper, bhp = bh && layerThere(bh) ? api.getParent(bh) : null;
+    if (!(bhp && bhp !== g && api.getParent(bhp) === g)) {
+      bh = tagged(grandchildren(), A.CAMERA_EXPR_ATTR, function (m) { return m.category === "dayNightBlur"; });
+      if (bh) out.blurAdopted = true;
+    }
+    out.blurHelper = bh || null;
     return out;
   }
-  // { groupId, layers: [4], helpers: [4], label } or null. With more than one group (a duplicate), the
+  // { groupId, layers: [4], helpers: [4], blurs: [4], blurHelper, label } or null. With more than one group (a duplicate), the
   // one whose record names its own children wins, then the one owning the most members of its own;
   // a tie goes to the top one. A copy's record is pointed at the members it adopted.
   function findDayNight(map) {
@@ -2210,14 +2231,15 @@ var GeoScene = (function () {
     });
     if (!best) return null;
     var g = best.g, rec = best.rec, m = best.m;
-    if (m.adopted && typeof api.setUserData === "function") {
+    if ((m.adopted || m.blurAdopted) && typeof api.setUserData === "function") {
       var fixed = {};
       Object.keys(rec).forEach(function (k) { fixed[k] = rec[k]; });
       fixed.layers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.layers[i] || (rec.layers || [])[i] || null; });
       fixed.helpers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.helpers[i] || (rec.helpers || [])[i] || null; });
+      if (m.blurAdopted) { fixed.blurs = m.blurs; fixed.blurHelper = m.blurHelper; }
       try { api.setUserData(g, DAYNIGHT_KEY, fixed); } catch (e) { /* read again next time */ }
     }
-    return { groupId: g, layers: m.layers, helpers: m.helpers, label: ownTimeLabel(map, rec.label) };
+    return { groupId: g, layers: m.layers, helpers: m.helpers, blurs: m.blurs, blurHelper: m.blurHelper, label: ownTimeLabel(map, rec.label) };
   }
   // Time labels of this map in the map group that the overlay's record doesn't name (left behind when
   // their group was deleted).
@@ -2229,7 +2251,7 @@ var GeoScene = (function () {
     var out = {}, f = findDayNight(map);
     if (!f) return out;
     out[f.groupId] = true;
-    f.layers.concat(f.helpers, [f.label]).forEach(function (id) { if (id) out[id] = true; });
+    f.layers.concat(f.helpers, f.blurs, [f.blurHelper, f.label]).forEach(function (id) { if (id) out[id] = true; });
     f.helpers.forEach(function (id) { var p = id ? api.getParent(id) : ""; if (p && p !== f.groupId) out[p] = true; });
     return out;
   }
@@ -2311,6 +2333,72 @@ var GeoScene = (function () {
     if (isNew(track, layer)) { api.parent(layer, g); api.set(layer, identityTransform()); }
     return [layer, helper];
   }
+  // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
+  // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
+  // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
+  // Everything it makes goes through track.
+  function ensureNightBlur(map, g, layers, helpers, blurs, blurHelper, track) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, out = { blurs: blurs.slice(), blurHelper: blurHelper && layerThere(blurHelper) ? blurHelper : null };
+    var holder = null;
+    helpers.forEach(function (h) { if (h && !holder && layerThere(h)) holder = api.getParent(h); });
+    if (!holder) holder = api.getChildren(g).filter(function (id) { return api.getNiceName(id) === "Day & night helpers"; })[0] || null;
+    if (!out.blurHelper) {
+      if (!holder) holder = makeHelperGroup(g, track);
+      var bh = track(api.create(A.CAMERA_LAYER_TYPE, "Night blur"));
+      addInputs(bh, CA, E.NIGHT_BLUR_INPUTS, { zoom: readCamera(map.cameraId).zoom });
+      setOne(bh, A.CAMERA_EXPR_ATTR, E.nightBlurExpression({ camera: map.cameraId, category: "dayNightBlur" }));
+      api.parent(bh, holder);
+      api.connect(map.cameraId, CA + ".2", bh, CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "zoom"), true);
+      var src = helpers.filter(function (h) { return h && layerThere(h); })[0];
+      if (src) {
+        var from = "", at = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight"), to = CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight");
+        try { from = String(api.getInConnection(src, at) || ""); } catch (e) { from = ""; }
+        if (from.indexOf(".") > 0) api.connect(from.slice(0, from.indexOf(".")), from.slice(from.indexOf(".") + 1), bh, to, true);
+        else setOne(bh, to, api.get(src, at));
+      }
+      out.blurHelper = bh;
+    }
+    layers.forEach(function (layer, i) {
+      if (!layer || !layerThere(layer)) return;
+      var b = out.blurs[i] && layerThere(out.blurs[i]) ? out.blurs[i] : null;
+      if (!b) {
+        if (!holder) holder = makeHelperGroup(g, track);
+        b = track(api.create("blurFilter", "Night blur " + NIGHT_DEPRESSIONS[i] + "°"));
+        setOne(b, "amount", { x: 0, y: 0 });
+        api.parent(b, holder);
+      }
+      var onLayer = "", driven = "";
+      try { onLayer = String(api.getInConnection(layer, "filters") || ""); } catch (e) { onLayer = ""; }
+      try { driven = String(api.getInConnection(b, "amount") || ""); } catch (e) { driven = ""; }
+      if (onLayer.indexOf(b + ".") !== 0) api.connect(b, "id", layer, "filters");
+      if (driven.indexOf(out.blurHelper + ".") !== 0) api.connect(out.blurHelper, A.DRIVER_OUTPUT_ATTR, b, "amount", true);
+      out.blurs[i] = b;
+    });
+    return out;
+  }
+
+  // The Controls refresh: an overlay made before the blur gets its blurs and helper; one that has them
+  // is left as it is. What was made is deleted again if the work fails.
+  function prepareDayNight(map) {
+    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return;
+    var f = findDayNight(map);
+    if (!f) return;
+    var made = [];
+    function track(id) { made.push(id); return id; }
+    try {
+      var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
+      if (made.length) {
+        var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
+        Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
+        fixed.blurs = res.blurs; fixed.blurHelper = res.blurHelper;
+        api.setUserData(f.groupId, DAYNIGHT_KEY, fixed);
+      }
+    } catch (e) {
+      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
+      throw e;
+    }
+  }
+
   // True when id was made by this call (track keeps the list).
   function isNew(track, id) { return track.made.indexOf(id) >= 0; }
 
@@ -2349,14 +2437,15 @@ var GeoScene = (function () {
           layers[k] = pair[0]; helpers[k] = pair[1];
         }
         var restored = made.filter(function (id) { return id !== holder; }).length;
+        var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
         found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
         if (label && !isNew(track, label)) setDayNightTime(map, label, E.TIME_LABEL_INPUTS, given, kept);
-        if (label !== found.label || restored) {
+        if (label !== found.label || restored || made.length > madeBefore) {
           var old = userData(found.groupId, DAYNIGHT_KEY) || {}, fixed = {};
           Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label;
+          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label; fixed.blurs = blur.blurs; fixed.blurHelper = blur.blurHelper;
           api.setUserData(found.groupId, DAYNIGHT_KEY, fixed);
         }
         return { groupId: found.groupId, created: false, restored: restored, kept: keptNames() };
@@ -2371,10 +2460,11 @@ var GeoScene = (function () {
         var p = makeNightPair(map, i, null, null, g, box, day, time, colour, track);
         made4.push(p[0]); helpers4.push(p[1]);
       });
+      var blur4 = ensureNightBlur(map, g, made4, helpers4, [], null, track);
       label = null;
       if (opts.label && strays.length) { label = strays.shift(); setDayNightTime(map, label, E.TIME_LABEL_INPUTS, { dayOfYear: day, utcTime: time }, kept); }
       else if (opts.label) label = createTimeLabel(map, day, time, track);
-      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, label: label });
+      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, blurs: blur4.blurs, blurHelper: blur4.blurHelper, label: label });
       try { stackDayNight(map, g); } catch (e1) { /* cosmetic: it stays where it landed */ }
       // Without the label option, labels left behind by a deleted overlay go (so they're never doubled).
       if (!opts.label) strays.forEach(function (id) { try { deleteIfThere(id); } catch (e4) { /* left in place */ } });
@@ -2664,7 +2754,7 @@ var GeoScene = (function () {
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
-    addDayNight: addDayNight, findDayNight: findDayNight, dayNightParts: dayNightParts,
+    addDayNight: addDayNight, prepareDayNight: prepareDayNight, findDayNight: findDayNight, dayNightParts: dayNightParts,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };

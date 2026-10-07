@@ -506,3 +506,18 @@ test("traveller show helper: also hides before the leg's clip start and after it
   assert.equal(run(show, Object.assign({}, base, { drawFull: 40 })), 100);
   assert.equal(run(show, Object.assign({}, base, { later1: 5 })), 0);
 });
+
+test("the night blur expression is GeoSun.blurAmount, for both axes", () => {
+  const S = require("../src/core/sun.js");
+  assert.deepEqual(E.NIGHT_BLUR_INPUTS.map((i) => i[0]), ["zoom", "twilight"]);
+  assert.equal(E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight"), E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight"));
+  const expr = E.nightBlurExpression({ camera: "c", category: "dayNightBlur" });
+  assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "dayNightBlur" });
+  [0, 1.5, 2, 4, 6.5, 8, 22, 30].forEach((zoom) => [0, 0.3, 0.5, 1, 2].forEach((twilight) => {
+    const got = vm.runInNewContext(expr, { zoom, twilight });
+    const want = S.blurAmount(zoom, twilight);
+    assert.ok(Math.abs(got[0] - want) < 1e-9 && Math.abs(got[1] - want) < 1e-9, zoom + "/" + twilight);
+  }));
+  const odd = vm.runInNewContext(expr, { zoom: NaN, twilight: undefined });
+  assert.ok(Math.abs(odd[0] - S.blurAmount(2, 1)) < 1e-9);
+});

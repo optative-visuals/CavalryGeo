@@ -9748,7 +9748,7 @@ test("day & night: findDayNight lists the group, its layers, helpers and label; 
   assert.deepEqual(plain(f.layers), rec.layers); assert.deepEqual(plain(f.helpers), rec.helpers); assert.equal(f.label, rec.label);
   const parts = plain(G.dayNightParts(map));
   [r.groupId, rec.label, api.getParent(rec.helpers[0])].concat(rec.layers, rec.helpers).forEach((id) => assert.equal(parts[id], true, id));
-  assert.equal(Object.keys(parts).length, 1 + 1 + 1 + 4 + 4);
+  assert.equal(Object.keys(parts).length, 1 + 1 + 1 + 4 + 4 + 4 + 1, "group, label, helpers group, layers, helpers, blurs, blur helper");
   assert.deepEqual(plain(G.dayNightParts({ groupId: "none", cameraId: "none" })), {});
 });
 
@@ -10354,4 +10354,125 @@ test("clipped legs: deleting a route takes the clip helpers with it", () => {
   const d = routeData(api, r.groupId), helpers = d.legs.reduce((a, l) => a.concat([l.clipStart, l.clipEnd, l.fade]), []);
   api.deleteLayer(r.groupId);
   helpers.forEach((h) => assert.equal(api.layerExists(h), false));
+});
+
+// ---- Day & night: the night steps blurred into a smooth gradient ----
+const dnBlurIn = (context, name) => "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_BLUR_INPUTS, name);
+
+test("day & night blur: a new overlay gets four Fast Blurs on the night layers, driven by one Night blur helper", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 14.5 }), rec = dnRec(api, r.groupId);
+  assert.equal(rec.blurs.length, 4);
+  assert.ok(rec.blurHelper);
+  const holder = api.getParent(rec.helpers[0]);
+  assert.equal(api.getNiceName(rec.blurHelper), "Night blur");
+  assert.equal(api.getLayerType(rec.blurHelper), "javaScript");
+  assert.equal(api.getParent(rec.blurHelper), holder);
+  assert.deepEqual(plain(E.readTag(api.get(rec.blurHelper, "expression"), "GEO_META")), { camera: map.cameraId, category: "dayNightBlur" });
+  E.NIGHT_BLUR_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(rec.blurHelper, "array." + k), inp[0]));
+  assert.equal(api.getInConnection(rec.blurHelper, dnBlurIn(context, "zoom")), map.cameraId + ".array.2");
+  assert.equal(api.getInConnection(rec.blurHelper, dnBlurIn(context, "twilight")), "");
+  assert.equal(api.get(rec.blurHelper, dnBlurIn(context, "twilight")), 1);
+  [0, 6, 12, 18].forEach((a, i) => {
+    const b = rec.blurs[i];
+    assert.equal(api.getLayerType(b), "blurFilter");
+    assert.equal(api.getNiceName(b), "Night blur " + a + "°");
+    assert.equal(api.getParent(b), holder);
+    assert.equal(api.getInConnection(rec.layers[i], "filters"), b + ".id");
+    assert.equal(api.getInConnection(b, "amount"), rec.blurHelper + ".id");
+  });
+  const f = G.findDayNight(map);
+  assert.deepEqual(plain(f.blurs), rec.blurs); assert.equal(f.blurHelper, rec.blurHelper);
+  const parts = plain(G.dayNightParts(map));
+  rec.blurs.concat([rec.blurHelper]).forEach((id) => assert.equal(parts[id], true, id));
+});
+
+test("day & night blur: the helper's output is GeoSun.blurAmount for both axes", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const expr = api.get(rec.blurHelper, "expression"), vm = require("node:vm");
+  [[2, 1], [4, 1], [4, 0], [8, 1]].forEach(([zoom, twilight]) => {
+    const got = vm.runInNewContext(expr, { zoom, twilight });
+    const want = require("../src/core/sun.js").blurAmount(zoom, twilight);
+    assert.deepEqual([got[0], got[1]], [want, want]);
+  });
+});
+
+test("day & night blur: Add again makes a deleted blur or helper once, wired like the rest, and says nothing more", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const full = api.getCompLayers(false).length;
+  api.deleteLayer(rec.blurs[1]); api.deleteLayer(rec.blurHelper);
+  const r = G.addDayNight(map, { dayOfYear: 90, utcTime: 6 });
+  assert.equal(r.restored, 0, "blurs are not night layers or opacity helpers");
+  const now = dnRec(api, g);
+  assert.equal(now.blurs[0], rec.blurs[0]); assert.notEqual(now.blurs[1], rec.blurs[1]);
+  assert.notEqual(now.blurHelper, rec.blurHelper);
+  now.blurs.forEach((b, i) => {
+    assert.equal(api.getInConnection(now.layers[i], "filters"), b + ".id");
+    assert.equal(api.getInConnection(b, "amount"), now.blurHelper + ".id");
+  });
+  assert.equal(api.getInConnection(now.blurHelper, dnBlurIn(context, "zoom")), map.cameraId + ".array.2");
+  assert.equal(api.getCompLayers(false).length, full, "one blur and the helper are back, nothing else");
+  const again = G.addDayNight(map, { dayOfYear: 90, utcTime: 6 });
+  assert.equal(again.restored, 0);
+  assert.deepEqual(dnRec(api, g), now, "nothing changes the second time");
+  // Night layers deleted: the blurs that stayed are connected to the remade layers.
+  now.layers.forEach((id) => api.deleteLayer(id));
+  const back = G.addDayNight(map, { dayOfYear: 90, utcTime: 6 }), fresh = dnRec(api, g);
+  assert.equal(back.restored, 4);
+  assert.deepEqual(fresh.blurs, now.blurs);
+  fresh.blurs.forEach((b, i) => assert.equal(api.getInConnection(fresh.layers[i], "filters"), b + ".id"));
+});
+
+test("day & night blur: a Controls refresh gives an older overlay its blurs, once, and the Twilight row drives the blur helper", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  // As made before the blur: no blurs, no blur helper, no record of them.
+  rec.blurs.forEach((b) => api.deleteLayer(b)); api.deleteLayer(rec.blurHelper);
+  const old = Object.assign({}, rec); delete old.blurs; delete old.blurHelper;
+  api.setUserData(g, "geoDayNight", old);
+  rec.layers.forEach((id) => assert.equal(api.getInConnection(id, "filters"), ""));
+  const s = context.GeoControlPanel.sync(map), now = dnRec(api, g);
+  assert.equal(now.blurs.length, 4); assert.ok(now.blurHelper);
+  now.blurs.forEach((b, i) => {
+    assert.equal(api.getInConnection(now.layers[i], "filters"), b + ".id");
+    assert.equal(api.getInConnection(b, "amount"), now.blurHelper + ".id");
+    assert.equal(api.getParent(b), api.getParent(now.helpers[0]));
+  });
+  const slots = slotsOf(api, s.valuesId), V = s.valuesId;
+  now.helpers.forEach((h) => assert.equal(api.getInConnection(h, "array.1"), V + "." + slots["dn:twilight"]));
+  assert.equal(api.getInConnection(now.blurHelper, dnBlurIn(context, "twilight")), V + "." + slots["dn:twilight"]);
+  const count = api.getCompLayers(false).length;
+  context.GeoControlPanel.sync(map);
+  assert.equal(api.getCompLayers(false).length, count, "a second refresh makes nothing");
+  assert.deepEqual(dnRec(api, g), now);
+  // A blur made later follows the opacity helpers' twilight source.
+  api.deleteLayer(now.blurHelper);
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const later = dnRec(api, g);
+  assert.equal(api.getInConnection(later.blurHelper, dnBlurIn(context, "twilight")), V + "." + slots["dn:twilight"]);
+});
+
+test("day & night blur: deleting the overlay removes the blurs and the helper", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  api.deleteLayer(g);
+  rec.blurs.concat([rec.blurHelper]).forEach((id) => assert.equal(api.layerExists(id), false, id));
+});
+
+test("day & night blur: a failure while making an overlay leaves no blur behind", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const before = api.getCompLayers(false).length, real = api.setUserData;
+  api.setUserData = function (id, key) { if (key === "geoDayNight") throw new Error("no"); return real.apply(this, arguments); };
+  assert.throws(() => G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }));
+  api.setUserData = real;
+  assert.equal(api.getCompLayers(false).length, before);
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "blurFilter").length, 0);
 });

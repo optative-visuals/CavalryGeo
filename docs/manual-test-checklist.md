@@ -169,10 +169,25 @@ adding street layers.
       edges, with nothing drawn outside it. Globe: the shadow's edge follows the rim of the globe; turn the camera
       to the sunlit side and no night shows; point it at the spot where it is midnight and nearly the whole
       disc is shaded, darkest in the middle. Set UTC time to 24 → the label reads 00:00 of the same date.
+- [ ] 19o2. Day & night: the edge of the night is a soft gradient rather than four visible bands, at zoom 2
+      and at zoom 4 (the blur keeps its width on screen as you zoom), and the Fast Blur amount on the
+      "Night blur" layers is the same number for x and y. In Time controls set **Twilight** to 0 → a single hard
+      edge and the blur amount goes to 0; set it back to 1 → soft again. Delete the four "Night blur" layers and the
+      "Night blur" helper, then press **Refresh controls** → they come back once (a second refresh adds
+      nothing) and Twilight still drives them. Check the blur looks right at a very high zoom (amount is capped at 200).
 - [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
       baked."; Extract's layer list does not show them.
 
 ## Label → Routes
+
+- [ ] 21z. Globe, Shape = Great circle, London → Tokyo, camera centred on London: the leg runs from London and
+      stops exactly at the edge of the globe (no gap, no hairline across the disc); rotate the camera towards
+      Tokyo → the visible part slides along the leg until the whole leg shows, then the London end is cut off
+      at the edge; rotate to the far side → the leg is gone. Animate Travel % with a Plane traveller → it
+      rides the visible part and disappears at the edge instead of travelling round the back. Flat and
+      Equal Earth: legs look exactly as before. An older route: Refresh controls → it clips the same way, and a
+      second refresh changes nothing (if the legs look different afterwards, check the clip helpers
+      read the line's start / end positions and offsets).
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
       → a "Route 1: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each

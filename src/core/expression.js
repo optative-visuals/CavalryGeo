@@ -284,6 +284,16 @@ var GeoExpression = (function () {
       "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1, _s = isFinite(Number(_i2)) ? Math.round(Number(_i2)) : 0;\n" +
       "(_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n";
   }
+  // Fast Blur amount for the night layers' blurs: the same formula as GeoSun.blurAmount (a unit test
+  // keeps them equal); the [x, y] it returns drives every blur's Amount.
+  var NIGHT_BLUR_INPUTS = [["zoom", 2], ["twilight", 1]];
+  function nightBlurExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_BLUR_INPUTS) +
+      "var _z = Math.max(0, Math.min(22, isFinite(Number(_i0)) ? Number(_i0) : 2));\n" +
+      "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1;\n" +
+      "var _a = _t >= 0.5 ? Math.min(200, 0.5 * 6 * Math.PI / 180 * (256 * Math.pow(2, _z) / (2 * Math.PI))) : 0;\n" +
+      "[_a, _a];\n";
+  }
   function timeLabelExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
       "GeoSun.timeLabel({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, dayOfYear: _i5, utcTime: _i6, compW: _i7, compH: _i8, corner: _i9, margin: _i10, size: _i11}, cavalry);\n";
@@ -291,7 +301,7 @@ var GeoExpression = (function () {
 
   return {
     NIGHT_INPUTS: NIGHT_INPUTS, NIGHT_OPACITY_INPUTS: NIGHT_OPACITY_INPUTS, TIME_LABEL_INPUTS: TIME_LABEL_INPUTS,
-    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, timeLabelExpression: timeLabelExpression,
+    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, NIGHT_BLUR_INPUTS: NIGHT_BLUR_INPUTS, nightBlurExpression: nightBlurExpression, timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
