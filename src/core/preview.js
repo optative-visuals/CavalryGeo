@@ -203,7 +203,14 @@ var GeoPreview = (function () {
   // own length, so no scaling is needed. 17 points (16 steps).
   function legCurve(view, from, to, opts) {
     var p0 = toPx(view, from.lon, from.lat), p1 = toPx(view, to.lon, to.lat);
-    var h = GeoCurve.handles([p0[0], -p0[1]], [p1[0], -p1[1]], opts || {});
+    opts = opts || {};
+    var q0 = [p0[0], -p0[1]], q1 = [p1[0], -p1[1]];
+    // Great circle: the same maths as the real leg, through a flat Mercator camera on this view
+    // (stops measured from the view centre, like the camera's own projection).
+    var cx = view.width / 2, cy = view.height / 2;
+    var h = opts.shape >= 0.5
+      ? GeoCurve.greatCircleHandles([q0[0] - cx, q0[1] + cy], [q1[0] - cx, q1[1] + cy], { cam: { lat: view.lat, lon: view.lon, zoom: view.zoom, rotation: 0, projection: 0 }, aLon: from.lon, aLat: from.lat, bLon: to.lon, bLat: to.lat, offA: [0, 0], offB: [0, 0] }, opts)
+      : GeoCurve.handles(q0, q1, opts);
     var c0 = [p0[0] + h.start[0], p0[1] - h.start[1]], c1 = [p1[0] + h.end[0], p1[1] - h.end[1]], out = [];
     for (var i = 0; i <= 16; i++) {
       var t = i / 16, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;

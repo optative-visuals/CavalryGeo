@@ -1104,6 +1104,20 @@ var stopsList = new ui.List(); stopsList.setSelectionMode("extended");
 var removeStopBtn = GeoStyle.button("Remove selected");
 var clearStopsBtn = GeoStyle.button("Clear");
 var arcField = new ui.NumericField(30); arcField.setType(1); arcField.setMin(0); arcField.setMax(100);
+var routeShapePicker = new ui.DropDown();
+["Arc", "Great circle"].forEach(function (s) { routeShapePicker.addEntry(s); });
+(function () { // Arc unless settings.json remembers Great circle.
+  var s = {};
+  try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
+  routeShapePicker.setValue(s.routeShape === 1 ? 1 : 0);
+})();
+routeShapePicker.onValueChanged = guard(function () {
+  var shape = routeShapePicker.getValue() === 1 ? 1 : 0;
+  GeoNet.updateSettings({ routeShape: shape });
+  // Great circle starts with no extra bow; back to Arc restores the default one.
+  if (shape === 1) arcField.setValue(0);
+  else if (arcField.getValue() === 0) arcField.setValue(30);
+});
 var labelsAtStops = new ui.Checkbox(false);
 var TRAVELLER_KINDS = [null, "plane", "arrow", "dot", "layer"];
 var travellerPicker = new ui.DropDown();
@@ -1213,7 +1227,7 @@ createRouteBtn.onClick = guard(function () {
   if (stops.length < 2) throw new Error("Add at least 2 stops to make a route.");
   // Decide the traveller first, so a bad selection refuses before anything is built.
   var kind = TRAVELLER_KINDS[travellerPicker.getValue()], layer = kind === "layer" ? travellerLayer(map) : null;
-  var r = GeoScene.createRoute(map, stops, { arc: arcField.getValue(), labels: labelsAtStops.getValue() });
+  var r = GeoScene.createRoute(map, stops, { arc: arcField.getValue(), labels: labelsAtStops.getValue(), shape: routeShapePicker.getValue() === 1 ? 1 : 0 });
   var travNote = "";
   if (kind) {
     try { GeoScene.addTraveller(map, r.groupId, kind, layer); }
@@ -1294,6 +1308,7 @@ TAB_BUILDERS.push(function (tabs) {
     stopsList,
     row(removeStopBtn, clearStopsBtn),
     GeoStyle.heading("Style"),
+    row(new ui.Label("Shape"), routeShapePicker),
     row(new ui.Label("Arc height %"), arcField),
     row(labelsAtStops, new ui.Label("Labels at stops")),
     row(new ui.Label("Traveller"), travellerPicker, addTravellerBtn),

@@ -15,7 +15,7 @@ var GeoControls = (function () {
   var MIDDLE = IN + E.inputIndex(E.REGION_INPUTS, "middle"), NO_DATA = IN + E.inputIndex(E.REGION_INPUTS, "noData");
   var MAX_RADIUS = IN + E.inputIndex(E.BUBBLE_INPUTS, "maxRadius"), TEXT_SIZE = IN + E.inputIndex(E.VALUE_LABEL_INPUTS, "textSize");
   var H = function (name) { return "array." + E.inputIndex(E.HANDLE_INPUTS, name); };
-  var H_ARC = H("arc"), H_LEAN = H("lean"), H_FLIP = H("flip"), H_HAND = H("hand"), H_X = H("handX"), H_Y = H("handY");
+  var H_SHAPE = H("shape"), H_ARC = H("arc"), H_LEAN = H("lean"), H_FLIP = H("flip"), H_HAND = H("hand"), H_X = H("handX"), H_Y = H("handY");
   var RADIUS_X = "generator.radius.x", RADIUS_Y = "generator.radius.y";
   var BASE = ["countries", "states", "lakes", "coastlines", "rivers", "cities", "buildings", "water", "parks", "roads", "railways"];
   var NAMES = { countries: "Countries", states: "States", lakes: "Lakes", coastlines: "Coastlines", rivers: "Rivers", cities: "Cities",
@@ -32,7 +32,7 @@ var GeoControls = (function () {
   var STATE_ATTRS = {
     layer: [DETAIL, RADIUS], pin: ["hidden", FILL, RADIUS], label: ["hidden", FILL, "fontSize"], leg: [STROKE, WIDTH, LIFT],
     regions: [YEAR, LOW, HIGH, MIDDLE, NO_DATA], bubbles: [YEAR, MAX_RADIUS], valueLabels: [YEAR, TEXT_SIZE],
-    stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y],
+    stop: ["hidden", FILL, RADIUS_X, RADIUS_Y], newLeg: [STROKE, WIDTH], handle: [H_ARC, H_LEAN, H_FLIP, H_HAND, H_X, H_Y, H_SHAPE],
     dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
@@ -172,6 +172,7 @@ var GeoControls = (function () {
       notes = r.title || r.name || "";
       if ((r.draws || []).length) value(k + "travel", "double", n + "Travel %", r.draws, "array.0", { hardMin: 0, hardMax: 100 });
       value(k + "arc", "double", n + "Arc height", handles, H_ARC);
+      value(k + "shape", "double", n + "Shape (0 arc · 1 great circle)", handles, H_SHAPE, { hardMin: 0, hardMax: 1, step: 1 });
       value(k + "color", "color", n + "Colour", r.legs, STROKE);
       value(k + "width", "double", n + "Width", r.legs, WIDTH);
       r.legs.forEach(function (leg) { out.trim.push(leg.id); });
