@@ -767,10 +767,18 @@ var GeoScene = (function () {
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
     var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
     // Any Equal Earth or globe frame makes the whole build bent (see "Bent imagery" below).
-    var bent = samples.some(function (c) { return Math.round(c.projection) !== 0; });
+    var bent = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
     if (bent && !reprojectAvailable()) throw new Error(REPROJECT_MISSING);
+    // Each sample's region is worked out once, however many times the level drops.
+    var regions = [];
+    function regionOf(cam, width, height) {
+      var k = samples.indexOf(cam);
+      if (k < 0) return GeoReproject.visibleRegion(cam, width, height);
+      if (!(k in regions)) regions[k] = GeoReproject.visibleRegion(cam, width, height);
+      return regions[k];
+    }
     function tilesUpTo(maxZoom) {
-      return bent ? GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, GeoReproject.visibleRegion)
+      return bent ? GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf)
         : GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, maxZoom);
     }
     var set = tilesUpTo(src.maxZoom);
@@ -1244,8 +1252,31 @@ var GeoScene = (function () {
   // layer's out frame is one past its last frame); layers trimmed to end earlier are left alone.
   // The play range follows only when it reached the old end. Returns null when nothing is needed.
   function extendComp(newEnd) {
-    var comp = api.getActiveComp(), oldEnd = compFrameRange().end, layers = 0;
+    var comp = api.getActiveComp(), oldEnd = compFrameRange().end;
     if (!(newEnd > oldEnd)) return null;
+    // Bent imagery lives in its own source composition(s), which must be as long.
+    var sources = [];
+    api.getCompLayers(false).forEach(function (id) {
+      try {
+        var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
+        if (meta && meta.category === "imagery" && meta.bent && meta.sourceComp && sources.indexOf(meta.sourceComp) < 0) sources.push(meta.sourceComp);
+      } catch (e) { /* one layer that can't be read never stops the rest */ }
+    });
+    var layers = extendOne(comp, oldEnd, newEnd);
+    sources.forEach(function (sc) {
+      try {
+        if (!layerThere(sc)) return;
+        withComp(sc, comp, function () { extendOne(sc, compFrameRange().end, newEnd); });
+      } catch (e) { /* a missing source comp never stops the rest */ }
+    });
+    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+  }
+
+  // Moves the layers that reached oldEnd, the comp's end and (when it reached oldEnd) its play range
+  // to newEnd in the active comp; returns how many layers moved.
+  function extendOne(comp, oldEnd, newEnd) {
+    var layers = 0;
+    if (!(newEnd > oldEnd)) return 0;
     if (typeof api.getOutFrame === "function" && typeof api.setOutFrame === "function") {
       api.getCompLayers(false).forEach(function (id) {
         try {
@@ -1259,7 +1290,7 @@ var GeoScene = (function () {
     end[A.COMP_END_ATTR] = newEnd;
     api.set(comp, end);
     if (playsToEnd) { play[A.COMP_PLAYBACK_END_ATTR] = newEnd; api.set(comp, play); } // after the comp is long enough to hold it
-    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+    return layers;
   }
 
   function flyCamera(map, points, startFrame) {

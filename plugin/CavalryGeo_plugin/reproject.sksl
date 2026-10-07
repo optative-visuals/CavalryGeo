@@ -19,10 +19,17 @@ const float A2 = -0.081106;
 const float A3 = 0.000893;
 const float A4 = 0.003796;
 const float EM = 0.8660254037844386;
+const float SIN_MAX = 0.9962720762207499; // sin(MAX_LAT) = tanh(PI)
 
 float mercY(float lat) {
   float p = clamp(lat, -MAX_LAT, MAX_LAT) * D2R;
   return log(tan(PI / 4.0 + p / 2.0));
+}
+
+// atanh for the globe branch: a series for small arguments, where the logarithm loses digits.
+float atanhU(float u) {
+  if (abs(u) < 0.05) { float u2 = u * u; return u * (1.0 + u2 / 3.0 + u2 * u2 / 5.0); }
+  return 0.5 * log((1.0 + u) / (1.0 - u));
 }
 
 float wrapLon(float d) { return d - 360.0 * floor((d + 180.0) / 360.0); }
@@ -42,9 +49,11 @@ half4 main(float2 p) {
   float my = 0.0;
   float edge = 1.0;
   if (proj < 0.5) {
-    // Web Mercator: the source is this map, unrotated (latitude held at the map's edge).
+    // Web Mercator: the source is this map, unrotated; one world, see-through past its top,
+    // bottom and sides (as the vector map).
+    if (abs(y + mercY(camLat)) > PI || abs(camLon + x / D2R) > 180.0) { return half4(0.0); }
     dlon = wrapLon(x / D2R);
-    my = clamp(y + mercY(camLat), -PI, PI) - mercY(camLat);
+    my = y;
   } else if (proj < 1.5) {
     // Equal Earth: Newton's method for the parametric latitude, as GeoProjection.unproject.
     float l0 = camLon * D2R;
@@ -58,6 +67,8 @@ half4 main(float2 p) {
     float lonRel = ex * EM * fp / cos(t) / D2R;
     if (abs(lonRel) > 180.0) { return half4(0.0); }
     edge = clamp((180.0 - abs(lonRel)) * D2R * R * cos(t) / (EM * fp), 0.0, 1.0);
+    // The same one-pixel soft edge along the pole lines (filter only).
+    edge *= clamp((asin(EM) - abs(t)) * R * fp, 0.0, 1.0);
     float lat = asin(clamp(sin(t) / EM, -1.0, 1.0)) / D2R;
     dlon = wrapLon(lonRel - camLon);
     my = mercY(lat) - mercY(camLat);
@@ -70,8 +81,16 @@ half4 main(float2 p) {
     float sp0 = sin(camLat * D2R);
     float cp0 = cos(camLat * D2R);
     dlon = wrapLon(atan(x, z * cp0 - y * sp0) / D2R);
-    float lat = asin(clamp(z * sp0 + y * cp0, -1.0, 1.0)) / D2R;
-    my = mercY(lat) - mercY(camLat);
+    // Latitude relative to the camera's, without subtracting two large numbers:
+    // dS = sin(lat) - sin(camLat), then atanh(sin(lat)) - atanh(sin(camLat)) = atanh(dS / (1 - sp0 * sphi)).
+    float dS = y * cp0 - sp0 * rho2 / (1.0 + z);
+    float sphi = sp0 + dS;
+    if (abs(sphi) > SIN_MAX || abs(sp0) > SIN_MAX) {
+      float lat = asin(clamp(sphi, -1.0, 1.0)) / D2R;
+      my = mercY(lat) - mercY(camLat);
+    } else {
+      my = atanhU(dS / (1.0 - sp0 * sphi));
+    }
   }
   float2 m = float2(dlon * D2R, my) * R;
   float2 src = (m - viewOffset) * viewScale;

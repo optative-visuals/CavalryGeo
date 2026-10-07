@@ -159,3 +159,66 @@ test("viewTransform: the region's Mercator box, its centre and the 4096 px cap",
   const shown = RP.view({ lat: 0, lon: 0, zoom: 4.5, rotation: 0, projection: 1 }, 3840, 2160);
   assert.ok(shown.scale < 1 && Math.abs(Math.max(shown.w, shown.h) * shown.scale - 4096) < 1e-6, JSON.stringify(shown));
 });
+
+test("visibleRegion: the Mercator box covers the frame's rotated bounding box (Equal Earth is taller than Mercator)", () => {
+  const W = 1920, H = 1080;
+  for (const projection of [0, 1, 2]) {
+    for (const zoom of [5, 8, 12]) {
+      for (const rotation of [0, 40]) {
+        const cam = { lat: 0, lon: 0, zoom, rotation, projection }, v = RP.view(cam, W, H), s = v.scale;
+        const c = Math.abs(Math.cos(rotation * D2R)), sn = Math.abs(Math.sin(rotation * D2R));
+        const bw = W * c + H * sn, bh = W * sn + H * c;
+        assert.ok(v.w * s >= bw - 1e-6, projection + " zoom " + zoom + " rot " + rotation + ": width " + v.w * s + " < " + bw);
+        assert.ok(v.h * s >= bh - 1e-6, projection + " zoom " + zoom + " rot " + rotation + ": height " + v.h * s + " < " + bh);
+      }
+    }
+  }
+});
+
+test("visibleRegion: brute force on Equal Earth near the poles and the date line", () => {
+  const W = 1920, H = 1080, N = 61, failures = [];
+  for (const [lat, lon, zoom] of [[70, 0, 5], [80, 0, 8], [0, 179, 9], [-75, -178, 4], [85, 30, 3]]) {
+    for (const rotation of [0, 35]) {
+      const cam = { lat, lon, zoom, rotation, projection: 1 }, r = RP.visibleRegion(cam, W, H);
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          const p = P.unproject(cam, -W / 2 + W * i / (N - 1), -H / 2 + H * j / (N - 1));
+          if (!p) continue;
+          const d = wrap(p.lon - cam.lon), la = clampLat(p.lat);
+          if (!r || d < r.dlon0 - 1e-9 || d > r.dlon1 + 1e-9 || la < r.lat0 - 1e-9 || la > r.lat1 + 1e-9) { failures.push(JSON.stringify(cam) + " " + d + "," + la + " " + JSON.stringify(r)); break; }
+        }
+      }
+    }
+  }
+  assert.deepEqual(failures.slice(0, 5), []);
+});
+
+test("visibleRegion: Equal Earth at lat 70 zoom 5 no longer widens to every longitude", () => {
+  const r = RP.visibleRegion({ lat: 70, lon: 0, zoom: 5, rotation: 0, projection: 1 }, 1920, 1080);
+  assert.ok(r.dlon1 - r.dlon0 < 200, JSON.stringify(r));
+});
+
+test("sourcePoint: Web Mercator is see-through past the map's top / bottom and its single world's sides", () => {
+  const cam = { lat: 80, lon: 170, zoom: 3, rotation: 0, projection: 0 }, r = R(cam), v = { scale: 1, cx: 0, cy: 0 };
+  assert.ok(RP.sourcePoint(cam, v, 0, 0));
+  assert.equal(RP.sourcePoint(cam, v, 0, (Math.PI - mercY(80) + 0.01) * r), null, "beyond the top");
+  assert.ok(RP.sourcePoint(cam, v, 0, (Math.PI - mercY(80) - 0.01) * r));
+  assert.equal(RP.sourcePoint(cam, v, (10.5 * D2R) * r, 0), null, "past lon 180");
+  assert.ok(RP.sourcePoint(cam, v, (9.5 * D2R) * r, 0));
+  assert.equal(RP.sourcePoint(cam, v, (-350.5 * D2R) * r, 0), null, "past lon -180");
+  const rot = { lat: 0, lon: 0, zoom: 3, rotation: 90, projection: 0 };
+  assert.equal(RP.sourcePoint(rot, v, 0, 181 * D2R * R(rot)), null, "rotated: x is the map's y axis");
+});
+
+test("sourcePoint: the globe's cancellation-free latitude matches the plain formula, also near the poles and at the series switch", () => {
+  const plain = (cam, X, Y) => { const p = P.unproject(cam, X, Y); return p && [wrap(p.lon - cam.lon), mercY(p.lat) - mercY(cam.lat)]; };
+  for (const cam of [{ lat: 0, lon: 5, zoom: 3 }, { lat: 45, lon: -170, zoom: 4 }, { lat: -70, lon: 90, zoom: 2.5 }, { lat: 85, lon: 0, zoom: 3 }, { lat: 89.5, lon: 10, zoom: 3 }]) {
+    const c = Object.assign({ rotation: 20, projection: 2 }, cam), r = R(c);
+    for (let i = -9; i <= 9; i++) for (let j = -9; j <= 9; j++) {
+      const X = r * i / 10, Y = r * j / 10, want = plain(c, X, Y), got = RP.sourcePoint(c, { scale: 1, cx: 0, cy: 0 }, X, Y);
+      if (!want) { assert.equal(got, null); continue; }
+      if (Math.abs(want[1]) > 3.1) continue; // clamped at the map's edge
+      assert.ok(Math.abs(got[0] - want[0] * D2R * r) < 1e-6 * Math.max(1, r) && Math.abs(got[1] - want[1] * r) < 1e-6 * Math.max(1, r), JSON.stringify(c) + " " + X + "," + Y + ": " + got + " vs " + want);
+    }
+  }
+});

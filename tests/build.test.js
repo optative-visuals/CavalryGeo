@@ -1193,6 +1193,24 @@ test("GeoScene.extendComp: one layer failing never stops the rest, and a Cavalry
   assert.equal(api.get(comp, "endFrame"), 15);
 });
 
+test("GeoScene.extendComp: a bent imagery source comp is lengthened too, and the map comp is active again", () => {
+  const { context, api, map, src } = bentFixture();
+  const r = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const comp = context.GeoScene.findImagery(map)[0].meta.sourceComp;
+  const inner = inComp(api, comp, () => api.create("group", "Tile"));
+  api.setActiveComp(comp); api.set(comp, { playbackEnd: 9 }); api.setActiveComp("comp#1");
+  const mapLayer = api.create("group", "Map layer");
+  const ext = context.GeoScene.extendComp(20);
+  assert.equal(ext.oldEnd, 9);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.equal(api.get("comp#1", "endFrame"), 20);
+  assert.equal(api.get(comp, "endFrame"), 20, "the source comp reaches the new end");
+  assert.equal(api.get(comp, "playbackEnd"), 20, "its play range followed");
+  assert.equal(api.getOutFrame(inner), 21, "its layers were extended");
+  assert.equal(api.getOutFrame(mapLayer), 21);
+  assert.ok(r.groupId);
+});
+
 // F13: newly added base layers must not bury an existing pin/label/extract - restack
 // base layers below all overlays, ordered countries (lowest) ... cities (highest).
 test("GeoScene.restackBaseLayers moves base layers to back in draw-order-descending order, never touching overlays", () => {

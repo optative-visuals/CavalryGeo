@@ -175,7 +175,8 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
   more, the sharpest zoom level is capped and the status says so — imagery then gets softer as the
   camera zooms in past that level.
 - **Zooming:** like web maps, each sharper level fades in just before its own zoom. The imagery
-  turns with the camera.
+  turns with the camera. Flat imagery (built on Web Mercator) hides itself when the map is switched
+  to Equal Earth or the globe: build again there to get bent imagery.
 - **Downloads** run in the background, so Cavalry stays usable. **Cancel** stops waiting and
   leaves any earlier imagery as it was; files that finish anyway are kept, and pressing Build
   again picks them up. Background downloads need curl 7.75 or newer (built into current
@@ -202,7 +203,7 @@ Geo bends them to fit the map. Build imagery notices this on its own — you don
   again replaces it.
 - **Poles:** the images stop at about 85° north and south, so the last row is stretched out to
   fill the caps.
-- **Date line:** flights across the date line work, on every projection.
+- **Date line:** flights across the date line work on the globe and Equal Earth. Flat Web Mercator imagery doesn't wrap around the date line, as before.
 - **Same as before:** the same sources, limits, saved-image reuse and Cancel. Building a flat and a
   bent version of the same source replaces the other one.
 
@@ -368,7 +369,8 @@ can't be baked: Bake skips them.
   shows. The download cache grows as you work in new areas (high-detail world data is 10–40 MB per
   category).
 - Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin installed once, and
-  the area beyond about 85° latitude is stretched. Check each
+  the area beyond about 85° latitude is stretched. Equal Earth imagery is exact up to about zoom 15
+  (Equal Earth shows the whole world, so deeper zooms lose precision). Check each
   imagery provider's licence for your use (EOX and MapTiler's free plan are non‑commercial).
 - Data maps colour whole countries only (not states or provinces), value labels use Cavalry's
   default font, and private sheets can't be read.
