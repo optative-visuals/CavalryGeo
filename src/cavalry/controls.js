@@ -9,7 +9,7 @@ var GeoControlPanel = (function () {
   var CONTROLS_KEY = "geoControls", VALUES_KEY = "geoValues", SLOTS_KEY = "geoSlots", LINKS_KEY = "geoLinks", PROMOTED_KEY = "geoPromoted";
   var NOTES_KEY = "geoNotes";
   var GROUP_KEY = "geoControlsGroup", GROUP_ORDER = G.GROUPS;
-  var GROUP_SUFFIX = { main: " Map controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls" };
+  var GROUP_SUFFIX = { main: " Map controls", overlay: " Overlay controls", data: " Data controls", extract: " Extract controls", time: " Time controls" };
   var OLD_MAIN_SUFFIX = " Controls"; // the main component's name before it became "<Map> Map controls"
   var INPUT_TYPES = { double: "double", bool: "bool", color: A.COLOR_INPUT_TYPE };
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
@@ -281,6 +281,9 @@ var GeoControlPanel = (function () {
         lines: [c.line1, c.line2].filter(Boolean).map(function (id) { return member(id, S.calloutLine); }),
         draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
     });
+    var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
+    model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
+      helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), label: dnMember(dn.label, S.timeLabel) } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -474,7 +477,7 @@ var GeoControlPanel = (function () {
       var fu = model.furniture;
       GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null });
     });
-    var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [] };
+    var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [], time: [] };
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
       attempt(function () { retireHandleSlots(V, slots, found.routes); });
@@ -508,7 +511,7 @@ var GeoControlPanel = (function () {
       attempt(function () { setUserData(V, SLOTS_KEY, slots); });
     }
     p.trim.forEach(function (id) { attempt(function () { if (!api.get(id, "stroke.trim")) api.set(id, { "stroke.trim": true }); }); });
-    var components = { main: made.id, overlay: null, data: null, extract: null };
+    var components = { main: made.id, overlay: null, data: null, extract: null, time: null };
     // Names and notes typed on any row of any of the map's Controls, so a row that moves keeps them.
     var typed = {};
     GROUP_ORDER.forEach(function (g) {

@@ -5158,7 +5158,7 @@ test("controls split: a plain map has only the main component", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);
   const r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(plain(r.components), { main: r.componentId, overlay: null, data: null, extract: null });
+  assert.deepEqual(plain(r.components), { main: r.componentId, overlay: null, data: null, extract: null, time: null });
   assert.equal(controlsOf(api, map, "overlay"), undefined);
 });
 
@@ -9670,4 +9670,60 @@ test("day & night: the overlay's group and layers are map parts", () => {
   const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
   assert.ok(G.isMapPart(map, r.groupId));
   assert.ok(G.isMapPart(map, rec.layers[0]));
+});
+
+// ---- Day & night in Controls ----
+const TIME_ROWS = ["Day & night · Day of year (1–365)", "Day & night · UTC time (0–24)", "Day & night · Night colour", "Day & night · Night opacity", "Day & night · Twilight (0 hard · 1 soft)",
+  "Day & night · Hide", "Time label · Hide", "Time label · Colour", "Time label · Size", "Time label · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)"];
+
+test("day & night in Controls: a Time controls component after Extract controls, with exactly the time rows, driving the four layers and the label", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), E = context.GeoExpression;
+  const r0 = context.GeoControlPanel.sync(map);
+  assert.equal(r0.components.time, null);
+  const dn = context.GeoScene.addDayNight(map, { dayOfYear: 172, utcTime: 14.5, label: true }), rec = dnRec(api, dn.groupId);
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(r.components.time, "made");
+  assert.equal(api.getNiceName(r.components.time), "Map Time controls");
+  assert.equal(api.getUserDataKey(r.components.time, "geoControlsGroup"), "time");
+  const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp());
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(r.components.extract) + 1);
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(map.groupId) - 1);
+  assert.deepEqual(plain(promotedNames(api, r.components.time)), TIME_ROWS);
+  const slots = slotsOf(api, r.valuesId), V = r.valuesId;
+  const dayIn = V + "." + slots["dn:day"], timeIn = V + "." + slots["dn:time"];
+  rec.layers.forEach((id) => {
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear")), dayIn);
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "utcTime")), timeIn);
+  });
+  assert.equal(api.getInConnection(rec.label, "generator.array." + E.inputIndex(E.TIME_LABEL_INPUTS, "dayOfYear")), dayIn);
+  assert.equal(api.getInConnection(rec.label, "generator.array." + E.inputIndex(E.TIME_LABEL_INPUTS, "utcTime")), timeIn);
+  rec.helpers.forEach((id) => assert.equal(api.getInConnection(id, "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night")), V + "." + slots["dn:night"]));
+  assert.equal(api.get(V, slots["dn:day"]), 172);
+  // the script inputs keep their own names
+  rec.layers.forEach((id) => E.NIGHT_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(id, "generator.array." + k), inp[0])));
+  // a second sync changes nothing
+  const promos = plain(api._promoted(r.components.time)), slots1 = plain(slots);
+  const again = context.GeoControlPanel.sync(map);
+  assert.equal(again.components.time, r.components.time);
+  assert.deepEqual(plain(api._promoted(again.components.time)), promos);
+  assert.deepEqual(slotsOf(api, again.valuesId), slots1);
+  // deleting the overlay removes the Time controls component
+  api.deleteLayer(dn.groupId);
+  const gone = context.GeoControlPanel.sync(map);
+  assert.equal(gone.components.time, null);
+  assert.ok(!api.getChildren(api.getParent(map.groupId) || api.getActiveComp()).includes(r.components.time));
+});
+
+test("day & night in Controls: with no Extract controls it stacks after Overlay controls, and without a label has only the day & night rows", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin && context.GeoScene.addPin(map, "Here", 1, 1);
+  context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.components.extract, null);
+  assert.ok(r.components.overlay && r.components.time);
+  const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp());
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(r.components.overlay) + 1);
+  assert.deepEqual(plain(promotedNames(api, r.components.time)), TIME_ROWS.slice(0, 6));
 });

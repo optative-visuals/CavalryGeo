@@ -873,9 +873,9 @@ bakeBtn.onClick = guard(function () {
 
 refreshControlsBtn.onClick = guard(function () {
   var map = currentMap(), r = GeoControlPanel.sync(map);
-  // N spans the Map controls and any Overlay / Data / Extract controls that exist.
+  // N spans the Map controls and any Overlay / Data / Extract / Time controls that exist.
   var names = [map.name + " Map controls"];
-  [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
+  [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"], ["time", "Time"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
   var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
   say("Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".");
 });
