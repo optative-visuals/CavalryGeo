@@ -1816,7 +1816,7 @@ var GeoScene = (function () {
       // label through connections, so its own transform is never set.
       var box = track(api.create("customShape", label0 + " box"));
       api.connect(label, "backgroundShape", box, "inputShape", true);
-      applyStyle(box, { fill: look.colors.ocean });
+      applyStyle(box, { fill: GeoStyles.calloutBox(look) });
       var size = track(api.create("boundingBox", label0 + " size"));
       api.connect(label, A.DRIVER_OUTPUT_ATTR, size, "inputShapes");
       api.connect(box, A.DRIVER_OUTPUT_ATTR, size, "inputShapes");

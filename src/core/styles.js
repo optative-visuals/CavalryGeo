@@ -7,6 +7,7 @@ var GeoStyles = (function () {
   var WIDTH_ROLES = ["borders", "states", "coast", "rivers", "roads", "railways", "routes"];
   var FILL = "material.materialColor", STROKE = "stroke.strokeColor", WIDTH = "stroke.width";
   var HEX = /^#[0-9a-fA-F]{6}$/;
+  var CALLOUT_BOX_LIGHTEN = 0.15;
 
   // Colours in ROLES order, widths in WIDTH_ROLES order.
   function make(name, colors, widths) {
@@ -81,11 +82,24 @@ var GeoStyles = (function () {
     each(parts.regions, STROKE, "ocean");
     each(parts.calloutLines, STROKE, "accent");
     each(parts.calloutDots, FILL, "accent");
-    each(parts.calloutBoxes, FILL, "ocean");
+    each(parts.calloutBoxes, FILL, "calloutBox");
     return out;
   }
 
-  function valueFor(style, t) { return t.kind === "width" ? style.widths[t.role] : style.colors[t.role]; }
+  // A callout's box: the style's ocean colour mixed a little toward white, so it stands out from the water.
+  function calloutBox(style) {
+    var h = String(style.colors.ocean).slice(1, 7), out = "#";
+    for (var i = 0; i < 3; i++) {
+      var c = parseInt(h.slice(i * 2, i * 2 + 2), 16), s = Math.round(c + (255 - c) * CALLOUT_BOX_LIGHTEN).toString(16);
+      out += s.length < 2 ? "0" + s : s;
+    }
+    return out;
+  }
+
+  function valueFor(style, t) {
+    if (t.role === "calloutBox") return calloutBox(style);
+    return t.kind === "width" ? style.widths[t.role] : style.colors[t.role];
+  }
 
   function toHex(v) {
     if (v && typeof v === "object" && v.r !== undefined) {
@@ -150,7 +164,7 @@ var GeoStyles = (function () {
 
   return {
     ROLES: ROLES, WIDTH_ROLES: WIDTH_ROLES, BUILT_IN: BUILT_IN, DARK: BUILT_IN[0],
-    layerStyle: layerStyle, targets: targets, valueFor: valueFor, toHex: toHex, clean: clean, fromReadings: fromReadings,
+    layerStyle: layerStyle, targets: targets, valueFor: valueFor, calloutBox: calloutBox, CALLOUT_BOX_LIGHTEN: CALLOUT_BOX_LIGHTEN, toHex: toHex, clean: clean, fromReadings: fromReadings,
     normalise: normalise, builtIn: builtIn, isBuiltIn: isBuiltIn, find: find, names: names, previewColors: previewColors
   };
 })();

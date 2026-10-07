@@ -8715,7 +8715,7 @@ test("callouts: colours come from the map's style", () => {
   assert.equal(api.get(rec.dot, "material.materialColor"), c.accent);
   assert.deepEqual(plain(api.get(rec.dot, "generator.radius")), [6, 6]);
   assert.equal(api.get(rec.label, "material.materialColor"), c.text);
-  assert.equal(api.get(rec.box, "material.materialColor"), c.ocean);
+  assert.equal(api.get(rec.box, "material.materialColor"), context.GeoStyles.calloutBox(context.GeoStyles.builtIn("Dark")));
 });
 
 test("callouts: numbers go up; findCallouts lists them top first with their members; prepareCallouts renumbers a duplicate", () => {
@@ -8770,7 +8770,7 @@ test("callouts: applying a map style recolours the lines, dot, text and box", ()
   assert.equal(api.get(rec.line2, "stroke.strokeColor"), light.colors.accent);
   assert.equal(api.get(rec.dot, "material.materialColor"), light.colors.accent);
   assert.equal(api.get(rec.label, "material.materialColor"), light.colors.text);
-  assert.equal(api.get(rec.box, "material.materialColor"), light.colors.ocean);
+  assert.equal(api.get(rec.box, "material.materialColor"), context.GeoStyles.calloutBox(light));
 });
 
 test("callouts: the previews show a callout's place as a pin", () => {
