@@ -31,6 +31,11 @@ function copyDirSync(src, dest) {
   }
 }
 
+// Copies the Cavalry Geo Reproject plugin (definitions, strings, shader) to <destDir>/CavalryGeo_plugin.
+function copyPlugin(destDir) {
+  copyDirSync(path.join(ROOT, "plugin", "CavalryGeo_plugin"), path.join(destDir, "CavalryGeo_plugin"));
+}
+
 function buildRuntimeSource() { return RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildDataRuntimeSource() { return DATA_RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildImageryRuntimeSource() { return IMAGERY_RUNTIME_FILES.map(read).join("\n;\n"); }
@@ -59,4 +64,4 @@ function buildPanel(options = {}) {
   ].join("\n;\n");
 }
 
-module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildFurnitureSource, buildSunSource, buildReprojectSource, buildPanel, copyDirSync };
+module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildFurnitureSource, buildSunSource, buildReprojectSource, buildPanel, copyDirSync, copyPlugin };

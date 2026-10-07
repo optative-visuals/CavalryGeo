@@ -1,0 +1,79 @@
+// Cavalry Geo Reproject: bends a flat Web Mercator source (a Cavalry Geo "Imagery source"
+// composition, north up and centred on the camera) onto the map's projection.
+// Copyright (C) 2026 optative-visuals. Licensed under GPL-3.0-or-later; see LICENSE.txt.
+// Mirrors GeoReproject.sourcePoint in src/core/reproject.js: change both together.
+uniform float camLat;
+uniform float camLon;
+uniform float camZoom;
+uniform float camRotation;
+uniform float camProjection;
+uniform float viewScale;
+uniform float2 viewOffset;
+uniform shader image;
+
+const float PI = 3.14159265358979;
+const float D2R = 0.0174532925199433;
+const float MAX_LAT = 85.0511287798;
+const float A1 = 1.340264;
+const float A2 = -0.081106;
+const float A3 = 0.000893;
+const float A4 = 0.003796;
+const float EM = 0.8660254037844386;
+
+float mercY(float lat) {
+  float p = clamp(lat, -MAX_LAT, MAX_LAT) * D2R;
+  return log(tan(PI / 4.0 + p / 2.0));
+}
+
+float wrapLon(float d) { return d - 360.0 * floor((d + 180.0) / 360.0); }
+
+float eeY(float t) { float t2 = t * t; float t6 = t2 * t2 * t2; return t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2)); }
+float eeD(float t) { float t2 = t * t; float t6 = t2 * t2 * t2; return A1 + 3.0 * A2 * t2 + t6 * (7.0 * A3 + 9.0 * A4 * t2); }
+
+half4 main(float2 p) {
+  float R = 256.0 * exp2(clamp(camZoom, 0.0, 22.0)) / (2.0 * PI);
+  float rot = camRotation * D2R;
+  float cr = cos(rot);
+  float sr = sin(rot);
+  float x = (p.x * cr + p.y * sr) / R;
+  float y = (-p.x * sr + p.y * cr) / R;
+  float proj = floor(clamp(camProjection, 0.0, 2.0) + 0.5);
+  float dlon = 0.0;
+  float my = 0.0;
+  float edge = 1.0;
+  if (proj < 0.5) {
+    // Web Mercator: the source is this map, unrotated (latitude held at the map's edge).
+    dlon = wrapLon(x / D2R);
+    my = clamp(y + mercY(camLat), -PI, PI) - mercY(camLat);
+  } else if (proj < 1.5) {
+    // Equal Earth: Newton's method for the parametric latitude, as GeoProjection.unproject.
+    float l0 = camLon * D2R;
+    float t0 = asin(EM * sin(camLat * D2R));
+    float ex = x + l0 * cos(t0) / (EM * eeD(t0));
+    float ey = y + eeY(t0);
+    float t = ey / A1;
+    for (int i = 0; i < 8; i++) { t -= (eeY(t) - ey) / eeD(t); }
+    if (abs(t) > asin(EM)) { return half4(0.0); }
+    float fp = eeD(t);
+    float lonRel = ex * EM * fp / cos(t) / D2R;
+    if (abs(lonRel) > 180.0) { return half4(0.0); }
+    edge = clamp((180.0 - abs(lonRel)) * D2R * R * cos(t) / (EM * fp), 0.0, 1.0);
+    float lat = asin(clamp(sin(t) / EM, -1.0, 1.0)) / D2R;
+    dlon = wrapLon(lonRel - camLon);
+    my = mercY(lat) - mercY(camLat);
+  } else {
+    // Globe (orthographic): off the disc is see-through, with a one-pixel soft edge.
+    float rho2 = x * x + y * y;
+    if (rho2 > 1.0) { return half4(0.0); }
+    edge = clamp((1.0 - sqrt(rho2)) * R, 0.0, 1.0);
+    float z = sqrt(1.0 - rho2);
+    float sp0 = sin(camLat * D2R);
+    float cp0 = cos(camLat * D2R);
+    dlon = wrapLon(atan(x, z * cp0 - y * sp0) / D2R);
+    float lat = asin(clamp(z * sp0 + y * cp0, -1.0, 1.0)) / D2R;
+    my = mercY(lat) - mercY(camLat);
+  }
+  float2 m = float2(dlon * D2R, my) * R;
+  float2 src = (m - viewOffset) * viewScale;
+  return image.eval(src) * half(edge);
+}
