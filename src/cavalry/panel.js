@@ -841,6 +841,7 @@ bakeBtn.onClick = guard(function () {
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "highlight") { skippedHighlight++; return; }
+    if (meta.category === "dayNight" || meta.category === "timeLabel") { skippedDayNight++; return; }
     if (meta.category === "data") { skippedData++; return; }
     if (meta.category === "scaleBar" || meta.category === "northArrow") { skippedFurniture++; return; }
     GeoScene.bake(id);
@@ -853,8 +854,11 @@ bakeBtn.onClick = guard(function () {
     } else if (skippedDayNight && !skippedHighlight && !skippedCallout && !skippedRoute && !skippedData && !skippedFurniture && !other) {
       throw new Error("Day & night redraws from its time, so it can't be baked.");
     } else if ((skippedHighlight || skippedCallout) && !skippedRoute && !skippedData && !skippedFurniture && !other) {
-      throw new Error(skippedHighlight && skippedCallout ? "Highlights and callouts can't be baked." :
-        skippedHighlight ? "Highlights can't be baked." : "Callouts are already Cavalry layers, so there's nothing to bake.");
+      if (!skippedHighlight && !skippedDayNight) throw new Error("Callouts are already Cavalry layers, so there's nothing to bake.");
+      // e.g. "Highlights and callouts", "Callouts and day & night", "Highlights, callouts and day & night"
+      var kinds = [skippedHighlight ? "highlights" : "", skippedCallout ? "callouts" : "", skippedDayNight ? "day & night" : ""].filter(Boolean);
+      var list = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0];
+      throw new Error(list.charAt(0).toUpperCase() + list.slice(1) + " can't be baked.");
     } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
@@ -1082,7 +1086,11 @@ addDayNightBtn.onClick = guard(function () {
   var r = GeoScene.addDayNight(map, { dayOfYear: day, utcTime: time, label: !!timeLabelCheck.getValue() });
   var when = dayNightWhen(day, time);
   if (r.created) say("Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map));
-  else say("Day & night updated to " + when + "." + syncControls(map));
+  else {
+    var note = r.restored ? " Its missing night layers were made again." : "";
+    if (r.kept && r.kept.length) note += " It kept your animated " + r.kept.join(" and ") + ".";
+    say("Day & night updated to " + when + "." + note + syncControls(map));
+  }
 });
 
 // ---- Routes (Label section) -------------------------------------------------

@@ -475,7 +475,8 @@ var GeoControlPanel = (function () {
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {
       var fu = model.furniture;
-      GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null });
+      GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null,
+        timeLabel: model.dayNight && model.dayNight.label ? model.dayNight.label.id : null });
     });
     var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [], time: [] };
     // A failing row only drops its own promotion; the inputs added so far are always recorded.

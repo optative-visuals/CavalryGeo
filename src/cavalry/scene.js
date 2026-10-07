@@ -1959,24 +1959,69 @@ var GeoScene = (function () {
     var m = GeoExpression.readTag(readExpr(id, A.MAP_EXPR_ATTR), "GEO_META");
     return m && m.category === "timeLabel" && m.camera === map.cameraId ? id : null;
   }
-  // { groupId, layers: [4], helpers: [4], label } or null. A recorded layer counts while it is a child
-  // of the group, a helper while it is a child of a group inside it (a missing one reads as null).
-  function findDayNight(map) {
-    var g = dayNightGroups(map)[0];
-    if (!g) return null;
-    var rec = userData(g, DAYNIGHT_KEY) || {};
-    function own(id, depth) {
-      if (!id || !layerThere(id)) return null;
-      var p = api.getParent(id);
-      if (depth === 1) return p === g ? id : null;
-      return p && p !== g && api.getParent(p) === g ? id : null;
+  // One day & night group's members: { layers: [4], helpers: [4], recorded, adopted }. A recorded layer
+  // counts while it is a child of the group, a helper while it is a child of a group inside it. A
+  // duplicated group copies the record, which still names the original's layers, so otherwise the
+  // group's own member of that kind is used: the child night layer with that depression, the helper
+  // with that step (a missing one reads as null). recorded / adopted count how each was found.
+  function dayNightMembers(map, g, rec) {
+    var out = { layers: [], helpers: [], recorded: 0, adopted: 0 }, kids = null, inner = null;
+    function children() { if (!kids) { try { kids = api.getChildren(g) || []; } catch (e) { kids = []; } } return kids; }
+    function grandchildren() {
+      if (!inner) {
+        inner = [];
+        children().forEach(function (k) { try { (api.getChildren(k) || []).forEach(function (x) { inner.push(x); }); } catch (e) { /* not a group */ } });
+      }
+      return inner;
     }
-    return {
-      groupId: g,
-      layers: NIGHT_DEPRESSIONS.map(function (a, i) { return own((rec.layers || [])[i], 1); }),
-      helpers: NIGHT_DEPRESSIONS.map(function (a, i) { return own((rec.helpers || [])[i], 2); }),
-      label: ownTimeLabel(map, rec.label)
-    };
+    function tagged(list, attr, test) {
+      for (var i = 0; i < list.length; i++) {
+        var m = GeoExpression.readTag(readExpr(list[i], attr), "GEO_META");
+        if (m && m.camera === map.cameraId && test(m)) return list[i];
+      }
+      return null;
+    }
+    NIGHT_DEPRESSIONS.forEach(function (a, i) {
+      var id = (rec.layers || [])[i], h = (rec.helpers || [])[i];
+      if (id && layerThere(id) && api.getParent(id) === g) out.recorded++;
+      else {
+        id = tagged(children(), A.MAP_EXPR_ATTR, function (m) { return m.category === "dayNight" && Number(m.depression) === a; });
+        if (id) out.adopted++;
+      }
+      var hp = h && layerThere(h) ? api.getParent(h) : null;
+      if (hp && hp !== g && api.getParent(hp) === g) out.recorded++;
+      else {
+        h = tagged(grandchildren(), A.CAMERA_EXPR_ATTR, function (m) { return m.category === "dayNightOpacity" && Number(m.step) === i; });
+        if (h) out.adopted++;
+      }
+      out.layers.push(id || null); out.helpers.push(h || null);
+    });
+    return out;
+  }
+  // { groupId, layers: [4], helpers: [4], label } or null. With more than one group (a duplicate), the
+  // one whose record names its own children wins, then the one owning the most members of its own;
+  // a tie goes to the top one. A copy's record is pointed at the members it adopted.
+  function findDayNight(map) {
+    var best = null;
+    dayNightGroups(map).forEach(function (g) {
+      var rec = userData(g, DAYNIGHT_KEY) || {}, m = dayNightMembers(map, g, rec), score = 2 * m.recorded + m.adopted;
+      if (!best || score > best.score) best = { g: g, rec: rec, m: m, score: score };
+    });
+    if (!best) return null;
+    var g = best.g, rec = best.rec, m = best.m;
+    if (m.adopted && typeof api.setUserData === "function") {
+      var fixed = {};
+      Object.keys(rec).forEach(function (k) { fixed[k] = rec[k]; });
+      fixed.layers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.layers[i] || (rec.layers || [])[i] || null; });
+      fixed.helpers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.helpers[i] || (rec.helpers || [])[i] || null; });
+      try { api.setUserData(g, DAYNIGHT_KEY, fixed); } catch (e) { /* read again next time */ }
+    }
+    return { groupId: g, layers: m.layers, helpers: m.helpers, label: ownTimeLabel(map, rec.label) };
+  }
+  // Time labels of this map in the map group that the overlay's record doesn't name (left behind when
+  // their group was deleted).
+  function strayTimeLabels(map, keep) {
+    return api.getChildren(map.groupId).filter(function (id) { return id !== keep && ownTimeLabel(map, id) === id; });
   }
   // Every part of the overlay (group, layers, helpers group and helpers, label): what a style colours and Bake leaves alone.
   function dayNightParts(map) {
@@ -1994,12 +2039,23 @@ var GeoScene = (function () {
   }
   function clampNumber(v, lo, hi, dflt) { var n = Number(v); return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; }
 
-  // Sets a layer's day of year and UTC time; an input a Controls value drives is set on that value.
-  function setDayNightTime(map, id, inputs, arrayAttr, day, time) {
-    [["dayOfYear", day], ["utcTime", time]].forEach(function (p) {
-      var attr = arrayAttr + "." + GeoExpression.inputIndex(inputs, p[0]), d = drivenBy(map, { layer: id, attr: attr });
-      if (d.src) setOne(d.src, d.attr, p[1]); else setOne(id, attr, p[1]);
+  var DAYNIGHT_TIME_NAMES = { dayOfYear: "Day of year", utcTime: "UTC time" };
+  // Sets a layer's day of year and UTC time (each one given in values); an input a Controls value
+  // drives is set on that value. One that is keyed, or driven by anything else (or whose Controls
+  // value is), is left alone and marked in kept.
+  function setDayNightTime(map, id, inputs, values, kept) {
+    ["dayOfYear", "utcTime"].forEach(function (name) {
+      if (values[name] == null) return;
+      var slot = styleSlot(map, { layer: id, attr: A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(inputs, name) });
+      if (slot.skip) { kept[name] = true; return; }
+      setOne(slot.layer, slot.attr, values[name]);
     });
+  }
+  // A layer's current day of year or UTC time (read from the Controls value that drives it, if any).
+  function readDayNightTime(map, id, inputs, name, dflt) {
+    var attr = A.MAP_ARRAY_ATTR + "." + GeoExpression.inputIndex(inputs, name), d = drivenBy(map, { layer: id, attr: attr }), v;
+    try { v = Number(d.src ? api.get(d.src, d.attr) : api.get(id, attr)); } catch (e) { v = NaN; }
+    return isFinite(v) ? v : dflt;
   }
 
   // The time label: a script shape in the map group, in the style's text colour, fed the camera.
@@ -2027,57 +2083,101 @@ var GeoScene = (function () {
     else if (typeof api.moveToBack === "function" && typeof api.select === "function") sendToBack(groupId);
   }
 
+  function makeHelperGroup(g, track) {
+    var holder = track(api.create("group", "Day & night helpers"));
+    api.parent(holder, g);
+    api.set(holder, identityTransform());
+    return holder;
+  }
+  // Night layer i (in group g) and/or its opacity helper (in holder), whichever is missing; a new one
+  // is wired to the other. Returns [layer, helper].
+  function makeNightPair(map, i, layer, helper, g, holder, day, time, colour, track) {
+    var E = GeoExpression, MA = A.MAP_ARRAY_ATTR, a = NIGHT_DEPRESSIONS[i];
+    if (!layer) {
+      layer = track(api.create(A.MAP_LAYER_TYPE, "Night " + a + "°"));
+      addInputs(layer, MA, E.NIGHT_INPUTS, { dayOfYear: day, utcTime: time, depression: a });
+      setOne(layer, A.MAP_EXPR_ATTR, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: a }));
+      connectCamera(map.cameraId, layer, MA);
+      applyStyle(layer, { fill: colour });
+    }
+    if (!helper) {
+      helper = track(api.create(A.CAMERA_LAYER_TYPE, "Night opacity " + a + "°"));
+      addInputs(helper, A.CAMERA_ARRAY_ATTR, E.NIGHT_OPACITY_INPUTS, { step: i });
+      setOne(helper, A.CAMERA_EXPR_ATTR, E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i }));
+      api.parent(helper, holder);
+    }
+    if (isNew(track, layer) || isNew(track, helper)) api.connect(helper, A.DRIVER_OUTPUT_ATTR, layer, "opacity", true);
+    if (isNew(track, layer)) { api.parent(layer, g); api.set(layer, identityTransform()); }
+    return [layer, helper];
+  }
+  // True when id was made by this call (track keeps the list).
+  function isNew(track, id) { return track.made.indexOf(id) >= 0; }
+
   // opts: { dayOfYear, utcTime, label }. Makes the overlay, or (one per map) sets the existing one's
-  // time on every layer and the label, adding the label when asked and missing. Returns { groupId, created }.
+  // time on every layer and the label (an omitted value is left as it is), remaking any night layer or
+  // helper that was deleted and adding the label when asked and missing. A time label left behind by a
+  // deleted overlay is used again (or, without the label option, removed) rather than doubled.
+  // Returns { groupId, created, restored (layers and helpers remade), kept (["Day of year", "UTC time"]
+  // left alone because they are animated or driven by something else) }.
   // Whatever it made is deleted again if it fails, and the user's selection is put back.
   function addDayNight(map, opts) {
     if (typeof api.setUserData !== "function") throw new Error("This Cavalry can't make a day & night overlay.");
     opts = opts || {};
-    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, MA = A.MAP_ARRAY_ATTR, today = utcToday();
-    var day = Math.round(clampNumber(opts.dayOfYear, 1, 365, today.dayOfYear)), time = clampNumber(opts.utcTime, 0, 24, today.utcTime);
-    var found = findDayNight(map), made = [], previous = null;
+    var E = GeoExpression, today = utcToday(), kept = {};
+    var given = { dayOfYear: opts.dayOfYear == null ? null : Math.round(clampNumber(opts.dayOfYear, 1, 365, today.dayOfYear)),
+      utcTime: opts.utcTime == null ? null : clampNumber(opts.utcTime, 0, 24, today.utcTime) };
+    var found = findDayNight(map), made = [], previous = null, strays = [];
     function track(id) { made.push(id); return id; }
+    track.made = made;
+    function keptNames() { return ["dayOfYear", "utcTime"].filter(function (k) { return kept[k]; }).map(function (k) { return DAYNIGHT_TIME_NAMES[k]; }); }
     try { previous = api.getSelection(); } catch (e0) { previous = null; }
     try {
+      try { strays = strayTimeLabels(map, found ? found.label : null); } catch (es) { strays = []; }
+      var colour = GeoStyles.nightColour(styleOf(map)), day, time, label, k;
       if (found) {
-        var label = found.label || (opts.label ? createTimeLabel(map, day, time, track) : null);
-        found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, MA, day, time); });
-        if (found.label) setDayNightTime(map, found.label, E.TIME_LABEL_INPUTS, MA, day, time);
-        if (label !== found.label) {
+        var live = found.layers.filter(Boolean)[0];
+        day = given.dayOfYear != null ? given.dayOfYear : live ? Math.round(readDayNightTime(map, live, E.NIGHT_INPUTS, "dayOfYear", today.dayOfYear)) : today.dayOfYear;
+        time = given.utcTime != null ? given.utcTime : live ? readDayNightTime(map, live, E.NIGHT_INPUTS, "utcTime", today.utcTime) : today.utcTime;
+        var layers = found.layers.slice(), helpers = found.helpers.slice(), holder = null;
+        helpers.forEach(function (h) { if (h && !holder) holder = api.getParent(h); });
+        if (!holder) holder = api.getChildren(found.groupId).filter(function (id) { return api.getNiceName(id) === "Day & night helpers"; })[0] || null;
+        for (k = 0; k < layers.length; k++) {
+          if (layers[k] && helpers[k]) continue;
+          if (!holder) holder = makeHelperGroup(found.groupId, track);
+          var pair = makeNightPair(map, k, layers[k], helpers[k], found.groupId, holder, day, time, colour, track);
+          layers[k] = pair[0]; helpers[k] = pair[1];
+        }
+        var restored = made.filter(function (id) { return id !== holder; }).length;
+        label = found.label;
+        if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
+        found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
+        if (label && !isNew(track, label)) setDayNightTime(map, label, E.TIME_LABEL_INPUTS, given, kept);
+        if (label !== found.label || restored) {
           var old = userData(found.groupId, DAYNIGHT_KEY) || {}, fixed = {};
-          Object.keys(old).forEach(function (k) { fixed[k] = old[k]; });
-          fixed.label = label;
+          Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
+          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label;
           api.setUserData(found.groupId, DAYNIGHT_KEY, fixed);
         }
-        return { groupId: found.groupId, created: false };
+        return { groupId: found.groupId, created: false, restored: restored, kept: keptNames() };
       }
-      var look = styleOf(map), colour = GeoStyles.nightColour(look);
+      day = given.dayOfYear != null ? given.dayOfYear : today.dayOfYear;
+      time = given.utcTime != null ? given.utcTime : today.utcTime;
       var g = track(api.create("group", "Day & night"));
       api.parent(g, map.groupId);
       api.set(g, identityTransform());
-      var holder = track(api.create("group", "Day & night helpers"));
-      api.parent(holder, g);
-      api.set(holder, identityTransform());
-      var layers = [], helpers = [];
+      var box = makeHelperGroup(g, track), made4 = [], helpers4 = [];
       NIGHT_DEPRESSIONS.forEach(function (a, i) {
-        var id = track(api.create(A.MAP_LAYER_TYPE, "Night " + a + "°"));
-        addInputs(id, MA, E.NIGHT_INPUTS, { dayOfYear: day, utcTime: time, depression: a });
-        setOne(id, A.MAP_EXPR_ATTR, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: a }));
-        connectCamera(map.cameraId, id, MA);
-        applyStyle(id, { fill: colour });
-        var h = track(api.create(A.CAMERA_LAYER_TYPE, "Night opacity " + a + "°"));
-        addInputs(h, CA, E.NIGHT_OPACITY_INPUTS, { step: i });
-        setOne(h, A.CAMERA_EXPR_ATTR, E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i }));
-        api.connect(h, A.DRIVER_OUTPUT_ATTR, id, "opacity", true);
-        api.parent(h, holder);
-        api.parent(id, g);
-        api.set(id, identityTransform());
-        layers.push(id); helpers.push(h);
+        var p = makeNightPair(map, i, null, null, g, box, day, time, colour, track);
+        made4.push(p[0]); helpers4.push(p[1]);
       });
-      var tl = opts.label ? createTimeLabel(map, day, time, track) : null;
-      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: layers, helpers: helpers, label: tl });
+      label = null;
+      if (opts.label && strays.length) { label = strays.shift(); setDayNightTime(map, label, E.TIME_LABEL_INPUTS, { dayOfYear: day, utcTime: time }, kept); }
+      else if (opts.label) label = createTimeLabel(map, day, time, track);
+      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, label: label });
       try { stackDayNight(map, g); } catch (e1) { /* cosmetic: it stays where it landed */ }
-      return { groupId: g, created: true };
+      // Without the label option, labels left behind by a deleted overlay go (so they're never doubled).
+      if (!opts.label) strays.forEach(function (id) { try { deleteIfThere(id); } catch (e4) { /* left in place */ } });
+      return { groupId: g, created: true, restored: 0, kept: keptNames() };
     } catch (e) {
       made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
       throw e;
@@ -2163,11 +2263,13 @@ var GeoScene = (function () {
     return makeFurniture(map, "northArrow", E.NORTH_ARROW_INPUTS, { compW: s.width, compH: s.height },
       E.northArrowExpression(GEO_FURNITURE_SRC, { camera: map.cameraId, category: "northArrow" })).id;
   }
-  // Keeps the furniture's comp size in step with the composition (it can't read it itself).
-  // found is { scaleBar, northArrow } when the caller already knows them (no comp scan then).
+  // Keeps the furniture's and the time label's comp size in step with the composition (they can't
+  // read it themselves). found is { scaleBar, northArrow, timeLabel } when the caller already knows
+  // them (no comp scan then).
   function fitFurniture(map, found) {
-    var f = found || findFurniture(map), s = compSize(), E = GeoExpression;
-    [[f.scaleBar, E.SCALE_BAR_INPUTS], [f.northArrow, E.NORTH_ARROW_INPUTS]].forEach(function (x) {
+    var f = found || findFurniture(map), s = compSize(), E = GeoExpression, tl = f.timeLabel;
+    if (!found) { try { var dn = findDayNight(map); tl = dn ? dn.label : null; } catch (e) { tl = null; } }
+    [[f.scaleBar, E.SCALE_BAR_INPUTS], [f.northArrow, E.NORTH_ARROW_INPUTS], [tl, E.TIME_LABEL_INPUTS]].forEach(function (x) {
       if (!x[0]) return;
       var o = {}, w = A.MAP_ARRAY_ATTR + "." + E.inputIndex(x[1], "compW"), h = A.MAP_ARRAY_ATTR + "." + E.inputIndex(x[1], "compH");
       if (Number(api.get(x[0], w)) !== s.width) o[w] = s.width;
