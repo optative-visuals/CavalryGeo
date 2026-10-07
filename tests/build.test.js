@@ -525,7 +525,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
-    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "pinCoordBtn", "labelCoordBtn",
+    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
@@ -3682,10 +3682,10 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
-    "pinHereBtn", "labelHereBtn", "createRouteBtn", "addDataBtn"];
+    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
   const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
-    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
+    "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
     assert.equal(context[n]._background, undefined, n + " keeps the native hover");
@@ -8874,4 +8874,76 @@ test("callouts in Controls: a second sync adds no slots and changes no promotion
   const names = plain(promotedNames(api, third.components.overlay));
   assert.ok(!names.some((n) => /^Callout 1 · (Box colour|Hide box)/.test(n)));
   assert.ok(names.includes("Callout 1 · Text colour"));
+});
+
+// ---- Callouts in the panel ----
+test("callouts: Callout here and Callout at coordinates sit beside Label here / Label at coordinates", () => {
+  const { context } = buildSandbox();
+  const page = context.sectionPages.pages[3];
+  assert.ok(holds(page, context.calloutHereBtn) && holds(page, context.calloutCoordBtn));
+  assert.equal(context.calloutHereBtn._background, "#1F8F4E");
+  assert.equal(context.calloutCoordBtn._background, undefined);
+  assert.equal(context.calloutHereBtn.getText(), "Callout here");
+  assert.equal(context.calloutCoordBtn.getText(), "Callout at coordinates");
+});
+
+test("callouts: Callout here makes the callout for the picked place and says how to place it", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.calloutHereBtn.onClick();
+  assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 1: Paris"));
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  context.labelText.setText("The capital");
+  context.calloutHereBtn.onClick();
+  assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 2: The capital"));
+  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+});
+
+test("callouts: Callout here with no search says where to search; a failed Controls update keeps the callout", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.calloutHereBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Search for a place under Label → Pins first.");
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  context.GeoControlPanel.sync = () => { throw new Error("boom"); };
+  context.calloutHereBtn.onClick();
+  assert.equal(context.GeoScene.findCallouts(context.currentMap()).length, 1);
+  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Overlay controls\. Its controls couldn't be updated: boom\./);
+});
+
+test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordinate name unless text is typed", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.latField.setValue(48.8566); context.lonField.setValue(2.3522);
+  context.calloutCoordBtn.onClick();
+  const map = context.currentMap(), found = context.GeoScene.findCallouts(map);
+  assert.equal(found.length, 1);
+  const rec = plain(api.getUserDataKey(found[0].groupId, "geoCallout"));
+  assert.equal(rec.lat, 48.8566); assert.equal(rec.lon, 2.3522);
+  assert.equal(api.getNiceName(found[0].groupId), "Callout 1: 48.8566, 2.3522");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  context.labelText.setText("Home");
+  context.calloutCoordBtn.onClick();
+  assert.equal(api.getNiceName(context.GeoScene.findCallouts(map)[0].groupId), "Callout 2: Home");
+});
+
+test("Bake: callout parts are skipped, with a message of their own", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  api.select([rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
+  api.select([rec.dot, rec.line1, rec.box, rec.size, rec.place]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts are already Cavalry layers, so there's nothing to bake.");
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, rec.label, rec.dot]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Skipped 2 callout part\(s\)\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
 });

@@ -42,7 +42,7 @@ then animate them through the years.
 ### And more
 A **Controls** layer for every map that gathers its camera, colours, layers, routes and data
 settings in one place, a map preview in the panel to find and frame a place before the camera
-moves, pins and labels for places, **Extract** to pull one country or street into its own layer,
+moves, pins, labels and **callouts** (a boxed label with a line to its place) for places, **Extract** to pull one country or street into its own layer,
 **Highlights** (Fill in, Outline draw-on, Pulse and Glow on any extracted place), and **Bake**
 to turn any map layer into a plain editable shape. The panel tells you when a new version is out.
 
