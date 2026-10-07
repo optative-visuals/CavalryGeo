@@ -2476,7 +2476,7 @@ test("an error in a build step tears down the new group and keeps the old imager
 
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
 const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
-const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
+const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset", "padding"];
 // A globe camera at lon 170 sees across the date line (tiles east of it are shifted by one world).
 function bentFixture(cam) {
   const { context, api } = buildSandbox();
@@ -2600,11 +2600,12 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
   assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
   assert.equal(api.getParent(p.filter), r.groupId, "the filter is kept in the Imagery group");
   assert.equal(api.get(p.filter, "allowViewportClipping"), false);
+  assert.equal(api.get(p.filter, "autoPadding"), false);
   assert.equal(api.get(p.filter, "samplingQuality"), 1);
   ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((a, i) => assert.equal(inConn(api, p.filter, a), map.cameraId + ".array." + i, a));
   // View drivers in the map comp, parented to the group.
   const size = { width: 1920, height: 1080 };
-  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"] };
+  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"], padding: [p.filter, "padding"] };
   VIEW_WHICH.forEach((which) => {
     const from = inConn(api, targets[which][0], targets[which][1]);
     assert.ok(from, which + " is driven");

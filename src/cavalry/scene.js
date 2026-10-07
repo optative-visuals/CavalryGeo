@@ -933,7 +933,7 @@ var GeoScene = (function () {
   var REPROJECT_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
   var REFERENCE_NAME = "Imagery source", VIEW_NAME = "View", VIEW_MASK_NAME = "View mask";
   var FILTER_CAMERA_ATTRS = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
-  var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"]];
+  var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"], ["padding", "filter padding"]];
 
   function reprojectAvailable() {
     if (typeof api.getAllLayerTypes !== "function") return false;
@@ -1106,7 +1106,7 @@ var GeoScene = (function () {
       api.parent(ref, outer);
       api.set(ref, identityTransform());
       filter = api.create(REPROJECT_TYPE, "Cavalry Geo Reproject");
-      api.set(filter, { allowViewportClipping: false, samplingQuality: 1 });
+      api.set(filter, { allowViewportClipping: false, autoPadding: false, samplingQuality: 1 });
       api.connect(filter, "id", ref, "filters");
       api.parent(filter, outer); // kept with its imagery (like the highlight glow), not loose at the comp root
       FILTER_CAMERA_ATTRS.forEach(function (attr, i) { api.connect(map.cameraId, A.CAMERA_ARRAY_ATTR + "." + i, filter, attr, true); });
@@ -1115,7 +1115,7 @@ var GeoScene = (function () {
 
     function viewDriver(k, meta) {
       var which = VIEW_DRIVERS[k][0];
-      var target = { position: [view, "position"], scale: [view, "scale"], maskSize: [mask, "generator.dimensions"], viewScale: [filter, "viewScale"], viewOffset: [filter, "viewOffset"] }[which];
+      var target = { position: [view, "position"], scale: [view, "scale"], maskSize: [mask, "generator.dimensions"], viewScale: [filter, "viewScale"], viewOffset: [filter, "viewOffset"], padding: [filter, "padding"] }[which];
       imageryDriver(map, outer, "Imagery driver: " + VIEW_DRIVERS[k][1], GeoExpression.imageryViewExpression(GEO_REPROJECT_SRC, which, size, meta), target[0], target[1]);
     }
 

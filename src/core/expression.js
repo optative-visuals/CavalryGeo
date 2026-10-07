@@ -162,10 +162,17 @@ var GeoExpression = (function () {
     position: "[-_v.cx * _v.scale, -_v.cy * _v.scale];", scale: "[_v.scale, _v.scale];",
     maskSize: "[_v.w * _v.scale + 4, _v.h * _v.scale + 4];", viewScale: "_v.scale;", viewOffset: "[_v.cx, _v.cy];"
   };
+  // Filter padding: the filter's output area is its input bounds (+ padding), so grow it to
+  // cover the frame's rotated bounding box wherever the masked box (w*s x h*s) falls short.
+  function paddingResult(size) {
+    var W = Number(size.width), H = Number(size.height);
+    return "var _r = _i3 * Math.PI / 180, _fw = Math.abs(" + W + " * Math.cos(_r)) + Math.abs(" + H + " * Math.sin(_r)), _fh = Math.abs(" + W + " * Math.sin(_r)) + Math.abs(" + H + " * Math.cos(_r));\n" +
+      "[Math.min(4096, Math.max(0, Math.ceil((_fw - _v.w * _v.scale) / 2)) + 2), Math.min(4096, Math.max(0, Math.ceil((_fh - _v.h * _v.scale) / 2)) + 2)];\n";
+  }
   function imageryViewExpression(runtimeSrc, which, size, meta) {
-    if (!Object.prototype.hasOwnProperty.call(IMAGERY_VIEW_RESULTS, which)) throw new Error("Unknown imagery view driver: " + which);
+    if (which !== "padding" && !Object.prototype.hasOwnProperty.call(IMAGERY_VIEW_RESULTS, which)) throw new Error("Unknown imagery view driver: " + which);
     return (meta ? writeTag("GEO_META", meta) + "\n" : "") + runtimeSrc + "\n;\n" + inputPrelude(IMAGERY_INPUTS) +
-      "var _v = GeoReproject.view(" + CAM + ", " + Number(size.width) + ", " + Number(size.height) + ");\n" + IMAGERY_VIEW_RESULTS[which] + "\n";
+      "var _v = GeoReproject.view(" + CAM + ", " + Number(size.width) + ", " + Number(size.height) + ");\n" + (which === "padding" ? paddingResult(size) : IMAGERY_VIEW_RESULTS[which] + "\n");
   }
 
   function routeEndPointExpression(meta) {
