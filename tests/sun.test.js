@@ -262,3 +262,22 @@ test("earthOutline: Web Mercator is the world rectangle, lon +-180 and lat +-85.
     assert.ok(Math.abs(pts[i][1] - o[0]) < 1e-9 && Math.abs(pts[i][2] - o[1]) < 1e-9, "corner " + i);
   });
 });
+
+test("earthOutline: the Mercator rectangle spans the night's longitudes, so night past the date line is inside it", () => {
+  const P = require("../src/core/projection.js");
+  const inside = (pts, x, y) => { let n = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { if ((pts[i][2] > y) !== (pts[j][2] > y) && x < (pts[j][1] - pts[i][1]) * (y - pts[i][2]) / (pts[j][2] - pts[i][2]) + pts[i][1]) n = !n; } return n; };
+  const hi = { lat: 0, lon: 170, zoom: 1, rotation: 0, projection: 0 }, o = [0, 0];
+  const pts = S.earthOutline(hi, cav).cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+  P.makeProjector(hi)(203, 21, o);
+  assert.ok(o[0] > 40 && inside(pts, o[0], o[1]), "Hawaii");
+  [[0, 0], [170, 0], [-170, 0], [170, 30], [-170, 30]].forEach(([lon, rotation]) => [[80, 12, 0], [172, 3, 6]].forEach(([doy, utc, dep]) => {
+    const cam = { lat: 20, lon, zoom: 1, rotation, projection: 0 };
+    const out = S.earthOutline(cam, cav).cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+    S.nightPath(cam, doy, utc, dep, cav).cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").forEach((c) => {
+      const rr = rotation * Math.PI / 180, ux = c[1] * Math.cos(rr) + c[2] * Math.sin(rr);
+      if (Math.abs(ux) > 256) return; // beyond the camera's lon +- 180 view (zoom 1: 256 px) nothing shows
+      const mx = out.reduce((t, p) => t + p[1], 0) / out.length, my = out.reduce((t, p) => t + p[2], 0) / out.length; // nudged 1e-6 toward the centre: points on the edge count
+      assert.ok(inside(out, c[1] + (mx - c[1]) * 1e-6, c[2] + (my - c[2]) * 1e-6), lon + "/" + rotation);
+    });
+  }));
+});

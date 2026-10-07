@@ -2578,9 +2578,9 @@ var GeoScene = (function () {
       connectCamera(map.cameraId, mask, MA);
       api.parent(mask, g);
       api.set(mask, identityTransform());
+      api.set(mask, { hidden: true });
     }
     if (!maskOnGroup(mask, g)) api.connect(mask, "id", g, "masks");
-    api.set(mask, { hidden: true });
     return mask;
   }
   // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever

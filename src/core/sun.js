@@ -202,7 +202,7 @@ var GeoSun = (function () {
   }
 
   // The Earth's outline on screen for the camera, as one closed path: the globe's disc, the Equal Earth oval
-  // (its two meridians at -180 / +180 and its two pole lines), or the Web Mercator world rectangle. The night
+  // (its two meridians at -180 / +180 and its two pole lines), or the Web Mercator rectangle over the longitudes the night is drawn on (the world plus the copies past the date line). The night
   // layers are masked to it, so their blur doesn't spill past the edge.
   function earthOutline(cam, cav) {
     var path = new cav.Path(), proj = Math.round(num(cam.projection, 0)), k, N = 180, first = true;
@@ -221,8 +221,8 @@ var GeoSun = (function () {
       for (k = 1; k <= M; k++) at(180, 90 - 180 * k / M);     // +180 meridian, north to south
       for (k = 1; k < 10; k++) at(180 - 36 * k, -90);           // south pole line
     } else {
-      var lat = GeoProjection.MAX_LAT;
-      at(-180, lat); at(180, lat); at(180, -lat); at(-180, -lat);
+      var lat = GeoProjection.MAX_LAT, c = num(cam.lon, 0), from = Math.min(-180, c - 180), to = Math.max(180, c + 180); // nightPath's span
+      at(from, lat); at(to, lat); at(to, -lat); at(from, -lat);
     }
     path.close();
     return path;
