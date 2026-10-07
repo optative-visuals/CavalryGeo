@@ -29,6 +29,9 @@ var GeoAttrs = {
   ROTATION_SIGN: 1,                           // check 11 (2026-10-02): confirmed - rotation.z direction vs map rotation (+1 same, -1 opposite)
   COMP_END_ATTR: "endFrame",                 // probed 2026-10-05: setting it lengthens the comp; frameRange follows
   COMP_PLAYBACK_END_ATTR: "playbackEnd",      // probed 2026-10-05: does NOT follow endFrame
+  COMP_START_ATTR: "startFrame",              // the start twin of endFrame (bent imagery copies the range to its source comp)
+  COMP_FPS_ATTR: "fps",                       // read by the panel since the Fly-to pads
+  COMP_BACKGROUND_ATTR: "backgroundColor",    // probed 2026-10-07: {r,g,b,a} or "#00000000"; alpha 0 is see-through in a reference
   COMP_FRAME_RANGE_ATTR: "frameRange",        // check 11 (2026-10-02): confirmed - composition frame range attribute ({x: start, y: end})
   ELLIPSE_SCALE: 1,                           // probe 2 P6: addEllipse(x, y, 5, 5) is 10 wide
   // ui.scriptLocation is undefined in Cavalry scripts, so data lives at a fixed path.
