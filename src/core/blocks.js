@@ -22,6 +22,30 @@ var GeoBlocks = (function () {
     out.sort(function (a, b) { return (a.z - b.z) || (a.y0 - b.y0) || (a.x0 - b.x0); });
     return out;
   }
+  // Wrapped (unwrapped-x) tiles: a rect carries shift k = floor(x / 2^z); its x0/x1 are the
+  // canonical tile indices (x - k * 2^z), which are what is downloaded and cached.
+  function wrapRect(r) {
+    var n = Math.pow(2, r.z), shift = Math.floor(r.x0 / n);
+    return { z: r.z, x0: r.x0 - shift * n, y0: r.y0, x1: r.x1 - shift * n, y1: r.y1, shift: shift };
+  }
+  function placedRect(r) {
+    var o = (r.shift || 0) * Math.pow(2, r.z);
+    return { z: r.z, x0: r.x0 + o, y0: r.y0, x1: r.x1 + o, y1: r.y1 };
+  }
+  function blocksForWrappedTiles(tiles) {
+    var groups = {}, order = [], out = [], i, j;
+    for (i = 0; i < tiles.length; i++) {
+      var t = tiles[i], n = Math.pow(2, t.z), k = Math.floor(t.x / n), g = t.z + "/" + k;
+      if (!groups[g]) { groups[g] = { shift: k, tiles: [] }; order.push(g); }
+      groups[g].tiles.push({ z: t.z, x: t.x - k * n, y: t.y });
+    }
+    for (i = 0; i < order.length; i++) {
+      var grp = groups[order[i]], rects = blocksForTiles(grp.tiles);
+      for (j = 0; j < rects.length; j++) { rects[j].shift = grp.shift; out.push(rects[j]); }
+    }
+    out.sort(function (a, b) { return (a.z - b.z) || (a.shift - b.shift) || (a.y0 - b.y0) || (a.x0 - b.x0); });
+    return out;
+  }
   function rectMercator(r) {
     var n = Math.pow(2, r.z);
     return { minx: r.x0 / n * WORLD - HALF, maxx: (r.x1 + 1) / n * WORLD - HALF, miny: HALF - (r.y1 + 1) / n * WORLD, maxy: HALF - r.y0 / n * WORLD };
@@ -53,13 +77,14 @@ var GeoBlocks = (function () {
         if (contains(c, r) && sameBlock(c, r) && (!best || rectTiles(c) < rectTiles(best))) best = c;
       }
       if (!best) { left.push(r); continue; }
-      var at = -1, dup = false, key = rectKey(best), next = [];
+      var at = -1, dup = false, key = rectKey(best), sh = r.shift || 0, next = [], rep = best;
+      if (sh !== (best.shift || 0)) rep = { z: best.z, x0: best.x0, y0: best.y0, x1: best.x1, y1: best.y1, shift: sh };
       for (var k = 0; k < cur.length; k++) {
         if (cur[k] === r) { at = k; continue; }
-        if (rectKey(cur[k]) === key) dup = true;
+        if (rectKey(cur[k]) === key && (cur[k].shift || 0) === sh) dup = true;
       }
       for (k = 0; k < cur.length; k++) {
-        if (k === at) { if (!dup) next.push(best); } else next.push(cur[k]);
+        if (k === at) { if (!dup) next.push(rep); } else next.push(cur[k]);
       }
       if (totalTiles(next) > maxTiles) { left.push(r); continue; }
       cur = next; reused++;
@@ -69,6 +94,6 @@ var GeoBlocks = (function () {
 
   return { BLOCK: BLOCK, MAX_IMAGES: MAX_IMAGES, WARN_IMAGES: WARN_IMAGES, MAX_IMAGE_TILES: MAX_IMAGE_TILES,
     tileRect: tileRect, blocksForTiles: blocksForTiles, rectMercator: rectMercator, rectPixels: rectPixels,
-    rectTiles: rectTiles, totalTiles: totalTiles, levelOrigin: levelOrigin, rectLocal: rectLocal, reuseCovering: reuseCovering };
+    rectTiles: rectTiles, wrapRect: wrapRect, placedRect: placedRect, blocksForWrappedTiles: blocksForWrappedTiles, rectKey: rectKey, totalTiles: totalTiles, levelOrigin: levelOrigin, rectLocal: rectLocal, reuseCovering: reuseCovering };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoBlocks;

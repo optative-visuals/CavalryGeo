@@ -122,3 +122,23 @@ test("a zoom flight needs fewer tiles than with the old fade constants", () => {
   const old = Object.keys(seen).length;
   assert.ok(fresh < old * 0.9, `new ${fresh} vs old ${old}`);
 });
+
+const R = require("../src/core/reproject.js");
+const region = (c, w, h) => R.visibleRegion(c, w, h);
+test("bentTileSet: unwrapped x beyond the date line, every sample counts, null regions skipped", () => {
+  const east = T.bentTileSet([cam({ projection: 1, lon: 170, zoom: 3 })], 1920, 1080, 0, 22, region);
+  assert.ok(east.tiles.some((t) => t.x > 7));
+  const west = T.bentTileSet([cam({ projection: 1, lon: -170, zoom: 3 })], 1920, 1080, 0, 22, region);
+  assert.ok(west.tiles.some((t) => t.x < 0));
+  const two = T.bentTileSet([cam({ zoom: 3 }), cam({ projection: 2, zoom: 3 })], 1920, 1080, 0, 22, region);
+  assert.equal(two.frames, 2);
+  const none = T.bentTileSet([cam()], 1920, 1080, 0, 22, () => null);
+  assert.deepEqual(none, { tiles: [], lo: 0, hi: -1, frames: 0 });
+});
+test("bentTileSet: a Mercator sample covers tileSet", () => {
+  const s = [cam({ lat: 40, lon: 10, zoom: 5.3 })];
+  const flat = T.tileSet(s, 1920, 1080, 0, 22), bent = T.bentTileSet(s, 1920, 1080, 0, 22, region);
+  const keys = new Set(bent.tiles.map((t) => `${t.z}/${t.x}/${t.y}`));
+  for (const t of flat.tiles) assert.ok(keys.has(`${t.z}/${t.x}/${t.y}`));
+  assert.equal(bent.lo, flat.lo); assert.equal(bent.hi, flat.hi);
+});

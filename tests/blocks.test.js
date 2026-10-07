@@ -78,3 +78,22 @@ test("rectLocal of a one-tile rect equals GeoTiles.tileLocal; bigger rects are c
   assert.deepEqual(B.rectLocal({ z: 4, x0: 4, y0: 5, x1: 7, y1: 7 }, origin), [512, -384]);
   assert.deepEqual(B.levelOrigin([{ z: 4, x0: 8, y0: 5, x1: 11, y1: 7 }, { z: 4, x0: 4, y0: 8, x1: 7, y1: 10 }]), { x0: 4, y0: 5 });
 });
+
+test("wrapRect / placedRect / blocksForWrappedTiles", () => {
+  assert.deepEqual(B.wrapRect({ z: 3, x0: -2, y0: 1, x1: -1, y1: 2 }), { z: 3, x0: 6, y0: 1, x1: 7, y1: 2, shift: -1 });
+  assert.deepEqual(B.placedRect({ z: 3, x0: 6, y0: 1, x1: 7, y1: 2, shift: -1 }), { z: 3, x0: -2, y0: 1, x1: -1, y1: 2 });
+  assert.deepEqual(B.placedRect({ z: 3, x0: 6, y0: 1, x1: 7, y1: 2 }), { z: 3, x0: 6, y0: 1, x1: 7, y1: 2 });
+  const r = B.blocksForWrappedTiles([{ z: 3, x: 7, y: 2 }, { z: 3, x: 8, y: 2 }]);
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map((q) => [q.shift, q.x0]), [[0, 7], [1, 0]]);
+  assert.deepEqual(B.placedRect(r[1]).x0, 8);
+});
+test("reuseCovering keeps the missing rect's shift", () => {
+  const saved = { z: 3, x0: 0, y0: 0, x1: 3, y1: 3 };
+  const a = { z: 3, x0: 1, y0: 1, x1: 1, y1: 1, shift: 1 }, b = { z: 3, x0: 1, y0: 1, x1: 1, y1: 1, shift: 0 };
+  const one = B.reuseCovering([a], [saved], [a], 100);
+  assert.equal(one.items[0].shift, 1); assert.equal(B.rectKey(one.items[0]), B.rectKey(saved));
+  const two = B.reuseCovering([a, b], [saved], [a, b], 100);
+  assert.equal(two.items.length, 2); assert.equal(two.reused, 2);
+  assert.deepEqual(two.items.map((q) => q.shift || 0).sort(), [0, 1]);
+});
