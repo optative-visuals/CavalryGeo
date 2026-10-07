@@ -397,6 +397,7 @@ function buildSandbox(options = {}) {
   const cavalry = makeFakeCavalry();
   if (options.setup) options.setup(api);
   const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
+  if (options.globals) Object.assign(sandbox, options.globals);
   const context = vm.createContext(sandbox);
   vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
   // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
@@ -525,7 +526,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "updateFlightBtn", "driftBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
-    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
+    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addDayNightBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
@@ -3705,7 +3706,7 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
-    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
+    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn", "addDayNightBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
   const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
@@ -3739,7 +3740,7 @@ test("each section has grey headings in order", () => {
   assert.deepEqual(headings(pages[0]), ["Start here", "Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Day & night", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
 });
 
@@ -9726,4 +9727,71 @@ test("day & night in Controls: with no Extract controls it stacks after Overlay 
   const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp());
   assert.equal(sib.indexOf(r.components.time), sib.indexOf(r.components.overlay) + 1);
   assert.deepEqual(plain(promotedNames(api, r.components.time)), TIME_ROWS.slice(0, 6));
+});
+
+// ---- Day & night in the panel ----
+// A panel built at a fixed moment: 7 Oct 2026, 14:37 UTC.
+function dayNightSandbox() {
+  const fixed = Date.UTC(2026, 9, 7, 14, 37);
+  class FixedDate extends Date { constructor(...a) { super(...(a.length ? a : [fixed])); } }
+  return buildSandbox({ globals: { Date: FixedDate } });
+}
+
+test("day & night: the Label page has a Day & night section with its widgets, defaulting to now (UTC)", () => {
+  const { context } = dayNightSandbox();
+  const page = context.sectionPages.pages[3];
+  [context.dayNightDayField, context.dayNightMonthPicker, context.dayNightTimeField, context.timeLabelCheck, context.addDayNightBtn].forEach((w) => assert.ok(holds(page, w)));
+  let heading = false;
+  walkUi(page, (n) => { if (n.getText && n.getText() === "Day & night") heading = true; });
+  assert.ok(heading, "a Day & night heading");
+  assert.equal(context.dayNightDayField.getValue(), 7);
+  assert.equal(context.dayNightMonthPicker.getValue(), 9);
+  assert.equal(context.dayNightTimeField.getValue(), 14.5);
+  assert.equal(context.timeLabelCheck.getValue(), true);
+  assert.equal(context.addDayNightBtn._background, "#1F8F4E");
+  assert.equal(context.addDayNightBtn.getText(), "Add day & night");
+});
+
+test("day & night: Add makes the overlay for the typed date and time, then a second press updates it", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), calls = [], real = context.GeoScene.addDayNight;
+  context.GeoScene.addDayNight = (m, o) => { calls.push(plain(o)); return real(m, o); };
+  context.dayNightDayField.setValue(21); context.dayNightMonthPicker.setValue(5); context.dayNightTimeField.setValue(14.5);
+  context.addDayNightBtn.onClick();
+  assert.deepEqual(calls[0], { dayOfYear: 172, utcTime: 14.5, label: true });
+  assert.equal(context.statusLabel.getText().indexOf("Day & night added to " + map.name + " for 21 Jun 14:30 UTC. Key its Day of year and UTC time in " + map.name + " Time controls."), 0);
+  assert.ok(api.getChildren(map.groupId).some((id) => api.getNiceName(id) === "Day & night"));
+  context.dayNightDayField.setValue(1); context.dayNightMonthPicker.setValue(0); context.dayNightTimeField.setValue(24); context.timeLabelCheck.setValue(false);
+  context.addDayNightBtn.onClick();
+  assert.deepEqual(calls[1], { dayOfYear: 1, utcTime: 24, label: false });
+  assert.equal(context.statusLabel.getText().indexOf("Day & night updated to 1 Jan 00:00 UTC."), 0);
+});
+
+test("Bake: only day & night parts gets a message of its own; mixed adds a skipped count", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), f = G.findDayNight(map);
+  api.select([f.layers[0], f.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
+  api.select([r.groupId]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, f.layers[0], f.layers[1]]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\)/);
+  assert.match(context.statusLabel.getText(), / Skipped 2 day & night part\(s\)\./);
+});
+
+test("Extract's source list leaves out the night layers and the time label", () => {
+  const { context } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true });
+  context.refreshSourceLayers();
+  assert.ok(context.sourceLayers.every((l) => l.meta.category !== "dayNight" && l.meta.category !== "timeLabel"));
+  assert.ok(context.GeoScene.findMapLayers(map).some((l) => l.meta.category === "dayNight"), "they are map layers");
 });

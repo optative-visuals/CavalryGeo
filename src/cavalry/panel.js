@@ -667,7 +667,7 @@ clearCacheBtn.onClick = guard(function () {
 });
 
 // ---- Extract and Bake (in the Layers section) ---------------------------------
-var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow", "highlight"];
+var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow", "highlight", "dayNight", "timeLabel"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
 var refreshLayersBtn = GeoStyle.button("Refresh");
@@ -806,8 +806,8 @@ changeEffectBtn.onClick = guard(function () {
 bakeBtn.onClick = guard(function () {
   var ids = api.getSelection();
   if (!ids.length) throw new Error("Select one or more map layers in the Scene Window first.");
-  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, skippedHighlight = 0, skippedCallout = 0, other = 0;
-  var hlParts = {}, cParts = {};
+  var baked = 0, skippedData = 0, skippedRoute = 0, skippedFurniture = 0, skippedHighlight = 0, skippedCallout = 0, skippedDayNight = 0, other = 0;
+  var hlParts = {}, cParts = {}, dnParts = {};
   // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
   // so its parts are skipped with a message of their own rather than counted as "other".
   var routeParts = {};
@@ -829,12 +829,15 @@ bakeBtn.onClick = guard(function () {
       Object.keys(hp).forEach(function (k) { hlParts[k] = true; });
       var cp = GeoScene.calloutParts(m);
       Object.keys(cp).forEach(function (k) { cParts[k] = true; });
+      var dp = GeoScene.dayNightParts(m);
+      Object.keys(dp).forEach(function (k) { dnParts[k] = true; });
     });
   } catch (e) { /* no routes to recognise */ }
   ids.forEach(function (id) {
     if (routeParts[id]) { skippedRoute++; return; }
     if (hlParts[id]) { skippedHighlight++; return; }
     if (cParts[id]) { skippedCallout++; return; }
+    if (dnParts[id]) { skippedDayNight++; return; }
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "highlight") { skippedHighlight++; return; }
@@ -847,6 +850,8 @@ bakeBtn.onClick = guard(function () {
   if (baked === 0) {
     if (skippedFurniture && !skippedRoute && !skippedData && !other) {
       throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
+    } else if (skippedDayNight && !skippedHighlight && !skippedCallout && !skippedRoute && !skippedData && !skippedFurniture && !other) {
+      throw new Error("Day & night redraws from its time, so it can't be baked.");
     } else if ((skippedHighlight || skippedCallout) && !skippedRoute && !skippedData && !skippedFurniture && !other) {
       throw new Error(skippedHighlight && skippedCallout ? "Highlights and callouts can't be baked." :
         skippedHighlight ? "Highlights can't be baked." : "Callouts are already Cavalry layers, so there's nothing to bake.");
@@ -864,6 +869,7 @@ bakeBtn.onClick = guard(function () {
   if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
   if (skippedHighlight) msg += " Skipped " + skippedHighlight + " highlight part(s).";
   if (skippedCallout) msg += " Skipped " + skippedCallout + " callout part(s).";
+  if (skippedDayNight) msg += " Skipped " + skippedDayNight + " day & night part(s).";
   if (skippedFurniture) msg += " Skipped the scale bar / north arrow (they follow the camera).";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
@@ -1055,6 +1061,30 @@ calloutCoordBtn.onClick = guard(function () {
   calloutSay(map, GeoScene.createCallout(map, { lon: lonField.getValue(), lat: latField.getValue() }, text), text);
 });
 
+// ---- Day & night (Label section, under Pins) ------------------------------------
+// The date and time start at now (UTC), the time rounded to a quarter hour. Pressing the button again
+// on a map that has the overlay sets its date and time instead of making another.
+var DAYNIGHT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var dayNightNow = new Date();
+var dayNightDayField = new ui.NumericField(dayNightNow.getUTCDate()); dayNightDayField.setType(0); dayNightDayField.setMin(1); dayNightDayField.setMax(31);
+var dayNightMonthPicker = new ui.DropDown();
+DAYNIGHT_MONTHS.forEach(function (m) { dayNightMonthPicker.addEntry(m); });
+dayNightMonthPicker.setValue(dayNightNow.getUTCMonth());
+var dayNightTimeField = new ui.NumericField(Math.round((dayNightNow.getUTCHours() + dayNightNow.getUTCMinutes() / 60) * 4) / 4);
+dayNightTimeField.setType(1); dayNightTimeField.setMin(0); dayNightTimeField.setMax(24);
+var timeLabelCheck = new ui.Checkbox(true);
+var addDayNightBtn = GeoStyle.primaryButton("Add day & night");
+// "21 Jun 14:30 UTC" (the same time text the label draws, without its dot).
+function dayNightWhen(day, time) { return GeoSun.timeText(day, time).replace(" · ", " "); }
+addDayNightBtn.onClick = guard(function () {
+  var map = currentMap();
+  var day = GeoSun.dayOfYear(dayNightDayField.getValue(), dayNightMonthPicker.getValue() + 1), time = Number(dayNightTimeField.getValue());
+  var r = GeoScene.addDayNight(map, { dayOfYear: day, utcTime: time, label: !!timeLabelCheck.getValue() });
+  var when = dayNightWhen(day, time);
+  if (r.created) say("Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map));
+  else say("Day & night updated to " + when + "." + syncControls(map));
+});
+
 // ---- Routes (Label section) -------------------------------------------------
 // A route is stops joined by legs: each stop is a circle you can drag; each leg a Bézier line.
 var routeResults = [], stops = [], routeMemo = { q: null, found: [] };
@@ -1240,7 +1270,12 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.heading("At coordinates"),
     row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
     row(pinCoordBtn, labelCoordBtn),
-    row(calloutCoordBtn)
+    row(calloutCoordBtn),
+    GeoStyle.heading("Day & night"),
+    row(new ui.Label("Day"), dayNightDayField, dayNightMonthPicker),
+    row(new ui.Label("UTC time (0-24)"), dayNightTimeField),
+    row(timeLabelCheck, new ui.Label("Time label")),
+    addDayNightBtn
   ]));
   labelPages.add(column([
     GeoStyle.heading("Stops"),
