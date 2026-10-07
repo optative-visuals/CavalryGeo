@@ -70,6 +70,33 @@ var GeoTiles = (function () {
     return { tiles: tiles, lo: frames ? lo : 0, hi: frames ? hi : -1, frames: frames };
   }
 
+  // Tiles a bent build needs, for any projection: the visible region of every sample at
+  // each visible level, with unwrapped x (lon = cam.lon + dlon, so x may be < 0 or >= 2^L).
+  // regionFn(cam, width, height) -> { dlon0, dlon1, lat0, lat1 } or null (GeoReproject.visibleRegion).
+  function bentTileSet(samples, width, height, minZoom, maxZoom, regionFn) {
+    var seen = {}, tiles = [], lo = Infinity, hi = -Infinity, frames = 0;
+    for (var i = 0; i < samples.length; i++) {
+      var cam = samples[i], reg = regionFn(cam, width, height);
+      if (!reg) continue;
+      frames++;
+      var levels = visibleLevels(clampZoom(cam.zoom), minZoom, maxZoom);
+      for (var j = 0; j < levels.length; j++) {
+        var L = levels[j], n = Math.pow(2, L);
+        if (L < lo) lo = L;
+        if (L > hi) hi = L;
+        var x0 = Math.floor((cam.lon + reg.dlon0 + 180) / 360 * n), x1 = Math.floor((cam.lon + reg.dlon1 + 180) / 360 * n);
+        var y0 = Math.max(0, Math.min(n - 1, Math.floor((Math.PI - mercY(reg.lat1)) / TWO_PI * n)));
+        var y1 = Math.max(0, Math.min(n - 1, Math.floor((Math.PI - mercY(reg.lat0)) / TWO_PI * n)));
+        for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++) {
+          var key = L + "/" + x + "/" + y;
+          if (!seen[key]) { seen[key] = true; tiles.push({ z: L, x: x, y: y }); }
+        }
+      }
+    }
+    tiles.sort(function (a, b) { return (a.z - b.z) || (a.y - b.y) || (a.x - b.x); });
+    return { tiles: tiles, lo: frames ? lo : 0, hi: frames ? hi : -1, frames: frames };
+  }
+
   function groupByLevel(tiles) {
     var by = {};
     for (var i = 0; i < tiles.length; i++) (by[tiles[i].z] = by[tiles[i].z] || []).push(tiles[i]);
@@ -90,7 +117,7 @@ var GeoTiles = (function () {
 
   return { MAX_TILES: MAX_TILES, WARN_TILES: WARN_TILES, worldScale: worldScale, mercY: mercY,
     currentLevel: currentLevel, visibleLevels: visibleLevels, levelOpacity: levelOpacity,
-    tilesForView: tilesForView, tileSet: tileSet, groupByLevel: groupByLevel, levelOrigin: levelOrigin,
+    tilesForView: tilesForView, tileSet: tileSet, bentTileSet: bentTileSet, groupByLevel: groupByLevel, levelOrigin: levelOrigin,
     tileLocal: tileLocal, levelPosition: levelPosition, levelScale: levelScale };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoTiles;

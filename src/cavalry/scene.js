@@ -107,8 +107,10 @@ var GeoScene = (function () {
 
   function compSize() { return A.readResolution(api.get(api.getActiveComp(), A.COMP_RESOLUTION_ATTR)); }
 
-  function connectCamera(cameraId, targetId, targetArrayAttr) {
-    for (var i = 0; i < GeoExpression.CAMERA_INPUTS.length; i++) {
+  // count: connect only the first `count` camera inputs (default all five).
+  function connectCamera(cameraId, targetId, targetArrayAttr, count) {
+    var n = count === undefined ? GeoExpression.CAMERA_INPUTS.length : count;
+    for (var i = 0; i < n; i++) {
       api.connect(cameraId, A.CAMERA_ARRAY_ATTR + "." + i, targetId, targetArrayAttr + "." + i, true);
     }
   }
@@ -764,9 +766,26 @@ var GeoScene = (function () {
     // Large images need background downloads: one at a time, an EOX image would freeze
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
     var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
-    var set = GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, src.maxZoom);
-    if (!set.frames) throw new Error("Imagery needs the Web Mercator projection.");
-    function itemsFor(ts) { return images ? GeoBlocks.blocksForTiles(ts.tiles) : ts.tiles.map(GeoBlocks.tileRect); }
+    // Any Equal Earth or globe frame makes the whole build bent (see "Bent imagery" below).
+    var bent = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
+    if (bent && !reprojectAvailable()) throw new Error(REPROJECT_MISSING);
+    // Each sample's region is worked out once, however many times the level drops.
+    var regions = [];
+    function regionOf(cam, width, height) {
+      var k = samples.indexOf(cam);
+      if (k < 0) return GeoReproject.visibleRegion(cam, width, height);
+      if (!(k in regions)) regions[k] = GeoReproject.visibleRegion(cam, width, height);
+      return regions[k];
+    }
+    function tilesUpTo(maxZoom) {
+      return bent ? GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf)
+        : GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, maxZoom);
+    }
+    var set = tilesUpTo(src.maxZoom);
+    function itemsFor(ts) {
+      if (bent) return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
+      return images ? GeoBlocks.blocksForTiles(ts.tiles) : ts.tiles.map(GeoBlocks.tileRect);
+    }
     // An image covers the bounding box of the tiles it needs, so the image limit counts the
     // tiles' worth of pixels really downloaded (GeoBlocks.totalTiles), not the tiles needed.
     function over(ts, items) {
@@ -776,7 +795,7 @@ var GeoScene = (function () {
     // Too much: drop the sharpest level until it fits. The top built level never fades
     // out, so deeper zooms just show it magnified (softer, but complete).
     while (over(set, items) && set.hi > set.lo) {
-      set = GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, set.hi - 1);
+      set = tilesUpTo(set.hi - 1);
       items = itemsFor(set);
     }
     if (over(set, items)) {
@@ -786,6 +805,7 @@ var GeoScene = (function () {
         : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(items) + ")" + end);
     }
     var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts) };
+    if (bent) plan.bent = true;
     if (images) plan.imageTiles = GeoBlocks.totalTiles(items);
     var left = {};
     GeoFetch.leftovers().forEach(function (p) { left[String(p).replace(/\\/g, "/")] = true; });
@@ -811,7 +831,8 @@ var GeoScene = (function () {
         plan.imageTiles = GeoBlocks.totalTiles(plan.items);
       }
     }
-    plan.cached = plan.items.length - plan.missing.length;
+    if (bent) bentMissing(plan);
+    else plan.cached = plan.items.length - plan.missing.length;
     if (set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
   }
@@ -860,11 +881,13 @@ var GeoScene = (function () {
     return byPath;
   }
 
-  function imageryDriver(map, parentId, name, expr, targetId, targetAttr) {
+  // camCount: how many camera inputs to connect (default all five); the rest keep their
+  // default values (bent level drivers: lat, lon and zoom only, rotation and projection held 0).
+  function imageryDriver(map, parentId, name, expr, targetId, targetAttr, camCount) {
     var d = api.create(A.CAMERA_LAYER_TYPE, name);
     addInputs(d, A.CAMERA_ARRAY_ATTR, GeoExpression.IMAGERY_INPUTS);
     setOne(d, A.CAMERA_EXPR_ATTR, expr);
-    connectCamera(map.cameraId, d, A.CAMERA_ARRAY_ATTR);
+    connectCamera(map.cameraId, d, A.CAMERA_ARRAY_ATTR, camCount);
     api.connect(d, A.DRIVER_OUTPUT_ATTR, targetId, targetAttr, true);
     api.parent(d, parentId);
     return d;
@@ -896,6 +919,102 @@ var GeoScene = (function () {
     return tiles.concat(levelGroups, [groupId]);
   }
 
+  // ---- Bent imagery (globe / Equal Earth) -------------------------------------------
+  // The tiles go into a separate composition, "Imagery source: <label> · <map>", laid out as a
+  // north-up Web Mercator map centred on the camera: a group "View" (masked by the rectangle
+  // "View mask") holds today's level groups, with level drivers that read only the camera's
+  // lat / lon / zoom. In the map comp, the group "Imagery: <label>" holds a Composition
+  // Reference "Imagery source" to it carrying the cavalryGeo::reproject filter (plugin), which
+  // bends the source onto the globe / Equal Earth, and the view drivers that fit View, its mask
+  // and the filter to the visible region (GeoReproject). Layers connect across comps, but new
+  // layers and footage land in the active comp, so source-comp work runs inside withComp, which
+  // always puts the map comp back.
+  var REPROJECT_TYPE = "cavalryGeo::reproject";
+  var REPROJECT_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+  var REFERENCE_NAME = "Imagery source", VIEW_NAME = "View", VIEW_MASK_NAME = "View mask";
+  var FILTER_CAMERA_ATTRS = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
+  var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"]];
+
+  function reprojectAvailable() {
+    if (typeof api.getAllLayerTypes !== "function") return false;
+    var types = [];
+    try { types = api.getAllLayerTypes(true) || []; } catch (e) { return false; }
+    for (var i = 0; i < types.length; i++) if (types[i] && types[i].type === REPROJECT_TYPE) return true;
+    return false;
+  }
+
+  // Runs fn with compId active and makes `back` active again however it ends. Already in
+  // compId (a step working through a run of source-comp units): just runs fn.
+  function withComp(compId, back, fn) {
+    if (api.getActiveComp() === compId) return fn();
+    api.setActiveComp(compId);
+    try { return fn(); } finally { api.setActiveComp(back); }
+  }
+
+  // A rect needed at two shifts (both sides of the date line) is placed twice but downloaded
+  // once: missing lists each canonical rect once, and cached counts the items already there.
+  function bentMissing(plan) {
+    var miss = {}, unique = [];
+    plan.missing.forEach(function (r) { var k = GeoBlocks.rectKey(r); if (!miss[k]) { miss[k] = true; unique.push(r); } });
+    plan.missing = unique;
+    plan.cached = plan.items.filter(function (r) { return !miss[GeoBlocks.rectKey(r)]; }).length;
+  }
+
+  // A new, empty source comp sized for the whole View box (see below), with the map comp's frame
+  // range and frame rate, and a see-through background. The map comp is active again when this returns or throws; onMade
+  // gets the id as soon as the comp exists, so a failure further on can still delete it.
+  function createSourceComp(name, mapComp, onMade) {
+    var size = A.readResolution(api.get(mapComp, A.COMP_RESOLUTION_ATTR)), range = compFrameRange(), fps = null, comp, o = {};
+    try { fps = Number(api.get(mapComp, A.COMP_FPS_ATTR)); } catch (e) { fps = null; }
+    try { comp = api.createComp(name); onMade(comp); } finally { api.setActiveComp(mapComp); }
+    // A reference's filter only sees the comp inside its resolution rectangle (centred on the
+    // origin), so the comp must cover the masked View box: at most MAX_VIEW_PX + 4 either way.
+    o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
+    o[A.COMP_BACKGROUND_ATTR] = { r: 0, g: 0, b: 0, a: 0 };
+    api.set(comp, o);
+    setOne(comp, A.COMP_END_ATTR, range.end); // the end first, so a late start never lands past the old end
+    setOne(comp, A.COMP_START_ATTR, range.start);
+    if (fps > 0) setOne(comp, A.COMP_FPS_ATTR, fps);
+    return comp;
+  }
+
+  // The reproject filters on the given layers (the group's reference), found by their connection.
+  function reprojectFilters(ids) {
+    if (typeof api.getOutConnections !== "function" || typeof api.getLayerType !== "function") return [];
+    return api.getCompLayers(false).filter(function (id) {
+      if (String(api.getLayerType(id)) !== REPROJECT_TYPE) return false;
+      var outs = [];
+      try { outs = api.getOutConnections(id, "id") || []; } catch (e) { return false; }
+      return outs.some(function (c) { return ids.indexOf(String(c).split(".")[0]) >= 0; });
+    });
+  }
+
+  // Imagery taken apart a layer per entry ({ id } in the map comp, { id, comp } in a source
+  // comp, { comp } = delete that source comp). Flat: teardownOrder. Bent: in the source comp
+  // (active while each is deleted) its tiles, level groups, View (with the level drivers) and
+  // View mask; then the filter and the group in the map comp; then the source comp itself.
+  function teardownEntries(im, mapComp) {
+    var mapPart = teardownOrder(im.groupId).map(function (id) { return { id: id }; });
+    if (!im.meta || !im.meta.bent) return mapPart;
+    var comp = im.meta.sourceComp, out = [];
+    try {
+      withComp(comp, mapComp, function () {
+        // The source comp is active, so getCompLayers lists its layers (getChildren on a comp id is unproven).
+        var kids = api.getCompLayers(false), names = kids.map(function (id) { return String(api.getNiceName(id)); });
+        kids.forEach(function (id, i) { if (names[i] === VIEW_NAME) teardownOrder(id).forEach(function (t) { out.push({ id: t, comp: comp }); }); });
+        kids.forEach(function (id, i) { if (names[i] === VIEW_MASK_NAME) out.push({ id: id, comp: comp }); });
+      });
+    } catch (e) { out = []; /* the source comp is already gone: only the map-comp part is left */ }
+    reprojectFilters(api.getChildren(im.groupId)).forEach(function (id) { out.push({ id: id }); });
+    return out.concat(mapPart, [{ comp: comp }]);
+  }
+
+  function removeEntry(e, mapComp) {
+    if (!e.id) { try { api.deleteLayer(e.comp); } catch (x) { /* already deleted */ } return; }
+    if (e.comp) withComp(e.comp, mapComp, function () { deleteIfThere(e.id); });
+    else deleteIfThere(e.id);
+  }
+
   // Adding footage layers gets slower as the scene grows, and hundreds in one go freeze
   // Cavalry, so the build is a job the panel steps from a timer. step(budgetMs) works
   // until the budget is used (always at least one unit of work) and returns
@@ -909,9 +1028,19 @@ var GeoScene = (function () {
   // layer per unit and the old imagery is left alone. During "cleanup" the new imagery is
   // already complete, so cancel() lets the cleanup finish (and returns false; it returns
   // true when the new imagery is being, or has been, discarded).
+  // A bent plan (plan.bent) runs the same phases (see "Bent imagery" above): the first unit
+  // also makes the source comp, the reference + filter, View and View mask, and the tagged
+  // View position driver; tiles land in View; "drivers" adds the level drivers (lat / lon /
+  // zoom only, no rotation driver) and the other view drivers. Each step does its run of
+  // source-comp units with the source comp active and leaves the map comp active, even
+  // when it throws; a failed bent build deletes its source comp too.
   function beginImageryBuild(map, src, opts, plan) {
     var previous = findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
+    var bent = !!plan.bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
+    var sourceComp = null, view = null, mask = null, filter = null;
+    // A bent rect is placed at its unwrapped x (east or west by whole worlds); flat rects as they are.
+    function placed(r) { return bent ? GeoBlocks.placedRect(r) : r; }
     // Only items with a downloaded file are built, low level to high so higher levels land
     // on top. A level's origin covers all its files. A file still on the in-flight list may
     // be half written (curl never reported it), so it is skipped.
@@ -925,13 +1054,15 @@ var GeoScene = (function () {
         if (path && !inFlight[path.replace(/\\/g, "/")]) files.push({ L: Lx, rect: r, path: path });
       });
       if (!files.length) continue;
-      var origin = GeoBlocks.levelOrigin(files.map(function (f) { return f.rect; }));
+      var origin = GeoBlocks.levelOrigin(files.map(function (f) { return placed(f.rect); }));
       files.forEach(function (f) { f.origin = origin; queue.push(f); });
     }
     var total = queue.length, next = 0, phase = "tiles", outer = null, level = null, builtLevels = [], pending = [], result = null;
     // Adding footage selects it, so the user's selection is put back at the end.
     var userSelection = [];
     try { userSelection = api.getSelection(); } catch (e) { /* nothing selected */ }
+
+    function withSourceComp(fn) { return withComp(sourceComp, mapComp, fn); }
 
     // Measured in Cavalry: any step that loads an asset is followed by a ~3.6 s rescan of
     // all assets, however many it loaded, so every tile's asset is loaded in the first step.
@@ -954,7 +1085,40 @@ var GeoScene = (function () {
       // is closed mid-build (stopping its timer), the half-built group is still found,
       // and removed, by the next build.
       var meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: plan.cacheKey, sourceMeta: GeoSources.meta(src, opts) };
+      if (bent) { startBent(meta); return; }
       imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), outer, "rotation.z");
+    }
+
+    // Bent: the source comp with View and its mask, the reference with the filter (camera
+    // connected), then the View position driver, which carries the GEO_META tag.
+    function startBent(meta) {
+      var label = GeoSources.label(src, opts);
+      createSourceComp("Imagery source: " + label + " · " + api.getNiceName(map.groupId), mapComp, function (c) { sourceComp = c; });
+      meta.bent = true;
+      meta.sourceComp = sourceComp;
+      withSourceComp(function () {
+        view = api.create("group", VIEW_NAME);
+        api.set(view, identityTransform());
+        mask = api.primitive("rectangle", VIEW_MASK_NAME);
+        api.set(mask, identityTransform());
+        api.connect(mask, "id", view, "masks");
+      });
+      var ref = api.createCompReference(sourceComp);
+      api.rename(ref, REFERENCE_NAME);
+      api.parent(ref, outer);
+      api.set(ref, identityTransform());
+      filter = api.create(REPROJECT_TYPE, "Cavalry Geo Reproject");
+      api.set(filter, { allowViewportClipping: false, autoPadding: false, samplingQuality: 1 });
+      api.connect(filter, "id", ref, "filters");
+      api.parent(filter, outer); // kept with its imagery (like the highlight glow), not loose at the comp root
+      FILTER_CAMERA_ATTRS.forEach(function (attr, i) { api.connect(map.cameraId, A.CAMERA_ARRAY_ATTR + "." + i, filter, attr, true); });
+      viewDriver(0, meta);
+    }
+
+    function viewDriver(k, meta) {
+      var which = VIEW_DRIVERS[k][0];
+      var target = { position: [view, "position"], scale: [view, "scale"], maskSize: [mask, "generator.dimensions"], viewScale: [filter, "viewScale"], viewOffset: [filter, "viewOffset"] }[which];
+      imageryDriver(map, outer, "Imagery driver: " + VIEW_DRIVERS[k][1], GeoExpression.imageryViewExpression(GEO_REPROJECT_SRC, which, size, meta), target[0], target[1]);
     }
 
     function addTile(f) {
@@ -969,7 +1133,7 @@ var GeoScene = (function () {
         // The level group is made with its first readable tile, so a level whose tiles
         // are all unreadable never gets a group (or a place in the fade range).
         var lg = api.create("group", "z " + f.L);
-        api.parent(lg, outer); // created low to high, so higher levels land on top
+        api.parent(lg, bent ? view : outer); // created low to high, so higher levels land on top
         // api.parent keeps the world transform and rewrites the local one, so reset
         // the level group to identity after parenting, before its drivers take over.
         api.set(lg, identityTransform());
@@ -978,7 +1142,7 @@ var GeoScene = (function () {
       }
       // Parent first (it keeps the world transform), then set the local transform.
       api.parent(id, level.group);
-      var p = GeoBlocks.rectLocal(f.rect, f.origin), px = GeoBlocks.rectPixels(f.rect);
+      var p = GeoBlocks.rectLocal(placed(f.rect), f.origin), px = GeoBlocks.rectPixels(f.rect);
       // A 2-px overlap on each side hides hairline seams (260/256 for a single tile;
       // 257/256 still showed faint seams in Cavalry), on top of the 512px-source half scale.
       api.set(id, { "position.x": p[0], "position.y": p[1], "rotation.z": 0,
@@ -994,9 +1158,13 @@ var GeoScene = (function () {
       builtLevels.forEach(function (b) {
         var lv = { L: b.L, x0: b.x0, y0: b.y0, lo: builtLo, hi: builtHi };
         ["position", "scale", "opacity"].forEach(function (attr) {
-          imageryDriver(map, outer, "Imagery driver: z " + b.L + " " + attr, GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, lv), b.group, attr);
+          var name = "Imagery driver: z " + b.L + " " + attr, expr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, lv);
+          // Bent: in the source comp under View, reading the camera's lat / lon / zoom only.
+          if (bent) withSourceComp(function () { imageryDriver(map, view, name, expr, b.group, attr, 3); });
+          else imageryDriver(map, outer, name, expr, b.group, attr);
         });
       });
+      if (bent) for (var k = 1; k < VIEW_DRIVERS.length; k++) viewDriver(k);
       setHidden(outer, false);
       sendImageryToBack(map);
       try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
@@ -1007,34 +1175,51 @@ var GeoScene = (function () {
       previous.forEach(function (i) {
         if (i.groupId === outer || !layerThere(i.groupId)) return;
         setHidden(i.groupId, true);
-        pending = pending.concat(teardownOrder(i.groupId));
+        pending = pending.concat(teardownEntries(i, mapComp));
       });
     }
 
     function unit() {
       if (phase === "tiles") {
         if (!outer) startOuter();
-        if (next < total) addTile(queue[next++]);
+        if (next < total) { var f = queue[next++]; if (bent) withSourceComp(function () { addTile(f); }); else addTile(f); }
         if (next >= total) phase = "drivers";
       } else if (phase === "drivers") {
         connectDrivers();
         phase = pending.length ? "cleanup" : "done";
       } else {
-        deleteIfThere(pending.shift());
+        removeEntry(pending.shift(), mapComp);
         if (!pending.length) phase = phase === "cleanup" ? "done" : "cancelled";
       }
     }
 
     function finished() { return phase === "done" || phase === "cancelled" || phase === "failed"; }
 
+    // The comp the next unit works in, when that is a source comp (else null).
+    function unitComp() {
+      if (phase === "tiles") return bent && outer && next < total ? sourceComp : null;
+      if ((phase === "cleanup" || phase === "discard") && pending.length && pending[0].id) return pending[0].comp || null;
+      return null;
+    }
+
     function step(budgetMs) {
       var start = Date.now(), first = true;
+      function more() { return !finished() && (first || Date.now() - start < budgetMs); }
       try {
-        while (!finished() && (first || Date.now() - start < budgetMs)) { first = false; unit(); }
+        while (more()) {
+          var comp = unitComp();
+          // A run of units in one source comp is done with it active once, not switched per unit.
+          if (comp) withComp(comp, mapComp, function () { do { first = false; unit(); } while (more() && unitComp() === comp); });
+          else { first = false; unit(); }
+        }
       } catch (e) {
         // A failed build or discard tears the new (partial) group down in one call and
         // leaves the old imagery alone. A failed cleanup keeps the finished new imagery.
-        if (phase !== "cleanup" && outer) { try { deleteIfThere(outer); } catch (e2) { /* already failing */ } }
+        if (phase !== "cleanup") {
+          if (outer) { try { deleteIfThere(outer); } catch (e2) { /* already failing */ } }
+          if (filter) { try { deleteIfThere(filter); } catch (e2) { /* already failing */ } }
+          if (sourceComp) { try { api.deleteLayer(sourceComp); } catch (e2) { /* already failing */ } }
+        }
         phase = "failed";
         throw e;
       }
@@ -1047,7 +1232,8 @@ var GeoScene = (function () {
     function cancel() {
       if (phase === "discard" || phase === "cancelled") return true;
       if (phase !== "tiles" && phase !== "drivers") return false;
-      pending = outer && layerThere(outer) ? teardownOrder(outer) : [];
+      var mine = { groupId: outer, meta: bent ? { bent: true, sourceComp: sourceComp } : null };
+      pending = outer && layerThere(outer) ? teardownEntries(mine, mapComp) : [];
       phase = pending.length ? "discard" : "cancelled";
       return true;
     }
@@ -1068,8 +1254,31 @@ var GeoScene = (function () {
   // layer's out frame is one past its last frame); layers trimmed to end earlier are left alone.
   // The play range follows only when it reached the old end. Returns null when nothing is needed.
   function extendComp(newEnd) {
-    var comp = api.getActiveComp(), oldEnd = compFrameRange().end, layers = 0;
+    var comp = api.getActiveComp(), oldEnd = compFrameRange().end;
     if (!(newEnd > oldEnd)) return null;
+    // Bent imagery lives in its own source composition(s), which must be as long.
+    var sources = [];
+    api.getCompLayers(false).forEach(function (id) {
+      try {
+        var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
+        if (meta && meta.category === "imagery" && meta.bent && meta.sourceComp && sources.indexOf(meta.sourceComp) < 0) sources.push(meta.sourceComp);
+      } catch (e) { /* one layer that can't be read never stops the rest */ }
+    });
+    var layers = extendOne(comp, oldEnd, newEnd);
+    sources.forEach(function (sc) {
+      try {
+        if (!layerThere(sc)) return;
+        withComp(sc, comp, function () { extendOne(sc, compFrameRange().end, newEnd); });
+      } catch (e) { /* a missing source comp never stops the rest */ }
+    });
+    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+  }
+
+  // Moves the layers that reached oldEnd, the comp's end and (when it reached oldEnd) its play range
+  // to newEnd in the active comp; returns how many layers moved.
+  function extendOne(comp, oldEnd, newEnd) {
+    var layers = 0;
+    if (!(newEnd > oldEnd)) return 0;
     if (typeof api.getOutFrame === "function" && typeof api.setOutFrame === "function") {
       api.getCompLayers(false).forEach(function (id) {
         try {
@@ -1083,7 +1292,7 @@ var GeoScene = (function () {
     end[A.COMP_END_ATTR] = newEnd;
     api.set(comp, end);
     if (playsToEnd) { play[A.COMP_PLAYBACK_END_ATTR] = newEnd; api.set(comp, play); } // after the comp is long enough to hold it
-    return { oldEnd: oldEnd, newEnd: newEnd, layers: layers };
+    return layers;
   }
 
   function flyCamera(map, points, startFrame) {
@@ -2517,6 +2726,7 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
+    REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable,
     findImagery: findImagery, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
