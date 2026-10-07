@@ -390,6 +390,7 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
   assert.deepEqual(E.TIME_LABEL_INPUTS.slice(7).map((i) => i[1]), [1920, 1080, 0, 40, 18]);
   const { buildSunSource } = require("../tools/buildlib.js");
   const src = buildSunSource();
+  assert.ok(!/var Geo(Codec|Runtime|Routes) =/.test(src), "the sun bundle is projection + furniture + sun only");
   const night = E.nightExpression(src, { camera: "c", category: "dayNight", depression: 6 });
   assert.deepEqual(E.readTag(night, "GEO_META"), { camera: "c", category: "dayNight", depression: 6 });
   assert.deepEqual(E.readTag(E.timeLabelExpression("/*S*/", { camera: "c", category: "timeLabel" }), "GEO_META"), { camera: "c", category: "timeLabel" });

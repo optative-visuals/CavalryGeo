@@ -2,8 +2,6 @@
 // layers' and time label's scripts (inlined as GEO_SUN_SRC) and in node tests. cav is the
 // `cavalry` module (cav.Path, optional measureText).
 if (typeof GeoProjection === "undefined" && typeof require !== "undefined") { var GeoProjection = require("./projection.js"); }
-if (typeof GeoRuntime === "undefined" && typeof require !== "undefined") { var GeoRuntime = require("./runtime.js"); }
-if (typeof GeoCodec === "undefined" && typeof require !== "undefined") { var GeoCodec = require("./codec.js"); }
 if (typeof GeoFurniture === "undefined" && typeof require !== "undefined") { var GeoFurniture = require("./furniture.js"); }
 var GeoSun = (function () {
   var D2R = Math.PI / 180, STEP = 2;
@@ -67,22 +65,123 @@ var GeoSun = (function () {
     return ring;
   }
 
-  // The night side as a path on the map. The flat projections repeat the world, so the ring is
-  // drawn once for every world-width shift that reaches the visible span cam.lon +- 180 (the
-  // globe shows each place once).
+  function shiftRing(ring, sh) {
+    var res = [];
+    for (var i = 0; i < ring.length; i++) res.push([ring[i][0] + sh, ring[i][1]]);
+    return res;
+  }
+
+  // The part of a closed ring on one side of the meridian x (side 1: lon >= x; -1: lon <= x),
+  // closed along that meridian.
+  function clipLon(ring, x, side) {
+    var res = [], n = ring.length;
+    for (var i = 0; i < n; i++) {
+      var p = ring[i], q = ring[(i + 1) % n];
+      var pin = (p[0] - x) * side >= 0, qin = (q[0] - x) * side >= 0;
+      if (pin) res.push(p);
+      if (pin !== qin) res.push([x, p[1] + (x - p[0]) / (q[0] - p[0]) * (q[1] - p[1])]);
+    }
+    return res;
+  }
+
+  // Extra points so no edge of the ring jumps more than STEP degrees of lon or lat (the
+  // +-180 edges then follow Equal Earth's curved outline).
+  function densify(ring) {
+    var res = [], n = ring.length;
+    for (var i = 0; i < n; i++) {
+      var p = ring[i], q = ring[(i + 1) % n];
+      var m = Math.max(1, Math.ceil(Math.max(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) / STEP));
+      for (var j = 0; j < m; j++) res.push([p[0] + (q[0] - p[0]) * j / m, p[1] + (q[1] - p[1]) * j / m]);
+    }
+    return res;
+  }
+
+  function drawRings(path, rings, project) {
+    var out = [0, 0];
+    for (var i = 0; i < rings.length; i++) {
+      var r = rings[i];
+      if (r.length < 3) continue;
+      for (var k = 0; k < r.length; k++) {
+        project(r[k][0], r[k][1], out);
+        if (k === 0) path.moveTo(out[0], out[1]); else path.lineTo(out[0], out[1]);
+      }
+      path.close();
+    }
+  }
+
+  // The globe: the night side seen on the disc, built in screen space. In the camera's frame
+  // (x right, y up, z toward the viewer) night is the part of the sphere beyond the plane
+  // p . n = h (n the antisolar direction, h = sin(depression)); on the disc that is the front
+  // arc of the terminator circle closed by the limb on the night side.
+  function globeNight(path, cam, doy, utc, depression) {
+    var s = subsolar(doy, utc), N = 180, k, m;
+    var R = GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(cam.zoom, 0))));
+    var rot = num(cam.rotation, 0) * D2R, cr = Math.cos(rot), sr = Math.sin(rot);
+    var sl = Math.sin(num(cam.lat, 0) * D2R), cl = Math.cos(num(cam.lat, 0) * D2R);
+    var p = -s.lat * D2R, dl = (s.lon + 180 - num(cam.lon, 0)) * D2R;
+    var nx = Math.cos(p) * Math.sin(dl), ny = cl * Math.sin(p) - sl * Math.cos(p) * Math.cos(dl);
+    var nz = sl * Math.sin(p) + cl * Math.cos(p) * Math.cos(dl);
+    var h = Math.sin(num(depression, 0) * D2R), rho = Math.sqrt(1 - h * h), sxy = Math.sqrt(nx * nx + ny * ny);
+    var first = true;
+    function put(x, y) {
+      x *= R; y *= R;
+      var X = x * cr - y * sr, Y = x * sr + y * cr;
+      if (first) { path.moveTo(X, Y); first = false; } else path.lineTo(X, Y);
+    }
+    if (sxy < 1e-9) { // the antisolar point faces the camera (night in the middle) or the back
+      if (nz > 0) { for (k = 0; k < N; k++) put(rho * Math.cos(2 * Math.PI * k / N), rho * Math.sin(2 * Math.PI * k / N)); path.close(); }
+      return path;
+    }
+    // Terminator circle: h n + rho (cos t u + sin t v), u level with the screen (uz = 0).
+    var ux = ny / sxy, uy = -nx / sxy, vx = nz * nx / sxy, vy = nz * ny / sxy;
+    function tx(t) { return h * nx + rho * (Math.cos(t) * ux + Math.sin(t) * vx); }
+    function ty(t) { return h * ny + rho * (Math.cos(t) * uy + Math.sin(t) * vy); }
+    var kk = h * nz / (rho * sxy); // the circle's depth is h nz - rho sxy sin t
+    if (kk <= -1) return path; // all of the night is round the back
+    if (kk >= 1) { // the whole terminator is in front: night is its ellipse
+      for (k = 0; k < N; k++) put(tx(2 * Math.PI * k / N), ty(2 * Math.PI * k / N));
+      path.close();
+      return path;
+    }
+    var t0 = Math.asin(kk), a0 = Math.PI - t0, a1 = 2 * Math.PI + t0;
+    m = Math.max(2, Math.ceil((a1 - a0) / (2 * Math.PI) * N));
+    for (k = 0; k <= m; k++) put(tx(a0 + (a1 - a0) * k / m), ty(a0 + (a1 - a0) * k / m));
+    // Back along the limb, through the point nearest the antisolar direction.
+    var fn = Math.atan2(ny, nx);
+    function rel(f) { f -= fn; while (f > Math.PI) f -= 2 * Math.PI; while (f < -Math.PI) f += 2 * Math.PI; return f; }
+    var d1 = rel(Math.atan2(ty(a1), tx(a1))), d0 = rel(Math.atan2(ty(a0), tx(a0)));
+    m = Math.max(1, Math.ceil(Math.abs(d0 - d1) / (2 * Math.PI) * N));
+    for (k = 1; k < m; k++) { var f = fn + d1 + (d0 - d1) * k / m; put(Math.cos(f), Math.sin(f)); }
+    path.close();
+    return path;
+  }
+
+  // The night side as a path on the map.
+  // - Web Mercator: the base map draws the real world (lon -180..180) and the camera shows
+  //   cam.lon +- 180, so the ring is drawn once for every world-width shift that reaches
+  //   either span.
+  // - Equal Earth: one bounded oval, so the ring is cut to -180..180 (a piece past the edge
+  //   comes back in on the other side) and densified so its edges follow the outline.
+  // - Globe: built in screen space (globeNight).
   function nightPath(cam, doy, utc, depression, cav) {
+    var path = new cav.Path(), proj = Math.round(num(cam.projection, 0));
+    if (proj >= 2) return globeNight(path, cam, doy, utc, depression);
     var ring = nightRing(doy, utc, depression), rings = [], lo = Infinity, hi = -Infinity, k;
     for (k = 0; k < ring.length; k++) { if (ring[k][0] < lo) lo = ring[k][0]; if (ring[k][0] > hi) hi = ring[k][0]; }
-    if (Math.round(num(cam.projection, 0)) < 2) {
-      var c = num(cam.lon, 0);
-      var from = Math.floor((c - 180 - hi) / 360), to = Math.ceil((c + 180 - lo) / 360);
-      for (k = from; k <= to; k++) {
+    if (proj === 1) {
+      rings.push(densify(clipLon(clipLon(ring, -180, 1), 180, -1)));
+      if (hi > 180 + 1e-9) rings.push(densify(shiftRing(clipLon(ring, 180, 1), -360)));
+      if (lo < -180 - 1e-9) rings.push(densify(shiftRing(clipLon(ring, -180, -1), 360)));
+    } else {
+      var c = num(cam.lon, 0), from = Math.min(-180, c - 180), to = Math.max(180, c + 180);
+      var k0 = Math.floor((from - hi) / 360), k1 = Math.ceil((to - lo) / 360);
+      for (k = k0; k <= k1; k++) {
         var sh = k * 360;
-        if (hi + sh > c - 180 + 1e-9 && lo + sh < c + 180 - 1e-9) rings.push(sh === 0 ? ring : ring.map(function (p) { return [p[0] + sh, p[1]]; }));
+        if (hi + sh > from + 1e-9 && lo + sh < to - 1e-9) rings.push(sh === 0 ? ring : shiftRing(ring, sh));
       }
-    } else rings.push(ring);
-    var enc = GeoCodec.encodeLayer({ kind: "polygon", features: [{ rings: rings }] });
-    return GeoRuntime.buildPath(enc, cam, 100, {}, cav.Path);
+    }
+    drawRings(path, rings, GeoProjection.makeProjector(cam));
+    return path;
   }
 
   // Opacity (0-100) of one of the four stacked layers: soft splits Night into four equal steps

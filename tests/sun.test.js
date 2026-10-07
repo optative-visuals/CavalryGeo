@@ -121,3 +121,82 @@ test("nightPath covers cam.lon +- 180 on flat maps wherever the camera looks", (
   // a camera-centred pole cap needs just one ring
   assert.equal(S.nightPath({ lat: 0, lon: 0, zoom: 1, rotation: 0, projection: 0 }, 172, 12, 0, cav).cmds.filter((c) => c[0] === "close").length, 1);
 });
+
+// Fill check: the drawn night path (screen space, even-odd over every contour) against the
+// true solar elevation, on a 10-degree grid of the points each projection actually shows.
+const P = require("../src/core/projection.js");
+function contoursOf(path) {
+  const out = [];
+  let cur = null;
+  path.cmds.forEach((c) => {
+    if (c[0] === "moveTo") { cur = [[c[1], c[2]]]; out.push(cur); }
+    else if (c[0] === "lineTo") cur.push([c[1], c[2]]);
+  });
+  return out;
+}
+function insideEvenOdd(contours, x, y) {
+  let inside = false;
+  contours.forEach((poly) => {
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+  });
+  return inside;
+}
+function elevation(lon, lat, sub) {
+  return 90 - dist(lon, lat, sub.lon, sub.lat);
+}
+function fillCase(cam, doy, utc, a) {
+  const contours = contoursOf(S.nightPath(cam, doy, utc, a, cav));
+  const sub = S.subsolar(doy, utc), proj = P.makeProjector(cam), out = [0, 0];
+  const lons = [];
+  if (cam.projection === 0) {
+    const lo = Math.min(-180, cam.lon - 180), hi = Math.max(180, cam.lon + 180);
+    for (let l = -175 - 360; l <= 535; l += 10) if (l > lo && l < hi) lons.push(l);
+  } else for (let l = -175; l <= 175; l += 10) lons.push(l);
+  let tested = 0, wrong = 0;
+  lons.forEach((lon) => {
+    for (let lat = -80; lat <= 80; lat += 10) {
+      const e = elevation(wrap(lon), lat, sub);
+      if (Math.abs(e + a) < 4) continue;
+      if (!proj(lon, lat, out)) continue;
+      if (cam.projection === 2 && dist(lon, lat, cam.lon, cam.lat) > 89) continue; // on the limb itself
+      if (Math.abs(out[0]) > 960 || Math.abs(out[1]) > 540) continue;
+      tested++;
+      if (insideEvenOdd(contours, out[0], out[1]) !== (e < -a)) wrong++;
+    }
+  });
+  return { tested, wrong };
+}
+const FILL_CAMS = [[20, 0], [20, 90], [-30, 170], [60, -120]];
+const FILL_TIMES = [[172, 12], [80, 12], [355, 3], [80, 20]];
+
+[0, 1, 2].forEach((projection) => {
+  test("night fill matches the solar angle, projection " + projection, () => {
+    let tested = 0, wrong = 0;
+    const bad = [];
+    FILL_CAMS.forEach(([lat, lon]) => {
+      FILL_TIMES.forEach(([doy, utc]) => {
+        [0, 18].forEach((a) => {
+          [1, 2].forEach((zoom) => {
+            const r = fillCase({ lat, lon, zoom, rotation: 0, projection }, doy, utc, a);
+            tested += r.tested; wrong += r.wrong;
+            if (r.wrong > Math.max(1, r.tested * 0.01)) bad.push(`cam ${lat},${lon} z${zoom} day ${doy} ${utc} UTC a${a}: ${r.wrong}/${r.tested}`);
+          });
+        });
+      });
+    });
+    assert.deepEqual(bad, [], `projection ${projection}: ${wrong}/${tested} wrong overall`);
+  });
+});
+
+test("Mercator over the Pacific shades land past the antimeridian", () => {
+  const cam = { lat: 0, lon: 170, zoom: 1, rotation: 0, projection: 0 };
+  const contours = contoursOf(S.nightPath(cam, 80, 12, 18, cav));
+  const proj = P.makeProjector(cam), out = [0, 0];
+  [-150, -170, -120].forEach((lon) => {
+    proj(lon, 0, out);
+    assert.ok(insideEvenOdd(contours, out[0], out[1]), "lon " + lon);
+  });
+});
