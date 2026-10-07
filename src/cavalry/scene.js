@@ -754,7 +754,25 @@ var GeoScene = (function () {
       var base = itemBase(plan, r), f = GeoNet.cachedTile(base);
       return (!f || left[f.replace(/\\/g, "/")]) && !GeoNet.isEmptyTile(base);
     });
-    plan.cached = items.length - plan.missing.length;
+    plan.reused = 0;
+    if (images && plan.missing.length) {
+      // A saved image that already covers a missing crop (same level and 8x8 block) is used instead.
+      var saved = [], zs = {};
+      plan.missing.forEach(function (r) {
+        if (zs[r.z]) return;
+        zs[r.z] = true;
+        GeoNet.savedImages(plan.cacheKey, r.z).forEach(function (s) {
+          var b = GeoNet.imageBase(plan.cacheKey, s.rect), f = GeoNet.cachedTile(b);
+          if (f && !left[f.replace(/\\/g, "/")] && !GeoNet.isEmptyTile(b)) saved.push(s.rect);
+        });
+      });
+      if (saved.length) {
+        var re = GeoBlocks.reuseCovering(plan.missing, saved, plan.items, GeoBlocks.MAX_IMAGE_TILES);
+        plan.items = re.items; plan.missing = re.missing; plan.reused = re.reused;
+        plan.imageTiles = GeoBlocks.totalTiles(plan.items);
+      }
+    }
+    plan.cached = plan.items.length - plan.missing.length;
     if (set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
   }

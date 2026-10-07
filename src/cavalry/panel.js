@@ -1694,7 +1694,7 @@ buildImageryBtn.onClick = guard(function () {
     var limit = plan.mode !== "images" ? GeoTiles.MAX_TILES + " tiles"
       : plan.uncappedItems > GeoBlocks.MAX_IMAGES ? GeoBlocks.MAX_IMAGES + " images" : GeoBlocks.MAX_IMAGE_TILES + " tiles' worth";
     var summary = n + " " + noun + " needed (" + (plan.mode === "images" ? plan.imageTiles + " tiles' worth, " : "") + plan.cached +
-      " already downloaded, about " + GeoUtil.formatBytes(GeoBlocks.totalTiles(plan.missing) * 15000) + " to download)" +
+      " already downloaded" + (plan.reused ? ", " + plan.reused + " of them saved images that already cover the view" : "") + ", about " + GeoUtil.formatBytes(GeoBlocks.totalTiles(plan.missing) * 15000) + " to download)" +
       (warn ? " — this may make Cavalry slower" : "") + ".";
     var capNote = plan.cappedZoom !== undefined ? " Sharpest detail is limited to zoom " + plan.cappedZoom + " to stay under " + limit +
       " — imagery gets softer as the flight zooms in further." : "";

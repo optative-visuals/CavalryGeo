@@ -38,8 +38,37 @@ var GeoBlocks = (function () {
   // level origin's north-west corner).
   function rectLocal(r, origin) { return [((r.x0 + r.x1 + 1) / 2 - origin.x0) * TILE, -((r.y0 + r.y1 + 1) / 2 - origin.y0) * TILE]; }
 
+  // Reuse of saved images: each missing rect is replaced by the smallest saved rect of the
+  // same level and 8x8 block that contains it, while the plan stays within maxTiles.
+  // Returns { items, missing, reused }; inputs are not changed.
+  function contains(a, r) { return a.z === r.z && a.x0 <= r.x0 && a.y0 <= r.y0 && a.x1 >= r.x1 && a.y1 >= r.y1; }
+  function sameBlock(a, r) { return Math.floor(a.x0 / BLOCK) === Math.floor(r.x0 / BLOCK) && Math.floor(a.y0 / BLOCK) === Math.floor(r.y0 / BLOCK); }
+  function rectKey(r) { return r.z + "/" + r.x0 + "_" + r.y0 + "_" + r.x1 + "_" + r.y1; }
+  function reuseCovering(missing, saved, items, maxTiles) {
+    var cur = items.slice(), left = [], reused = 0;
+    for (var i = 0; i < missing.length; i++) {
+      var r = missing[i], best = null;
+      for (var j = 0; j < saved.length; j++) {
+        var c = saved[j];
+        if (contains(c, r) && sameBlock(c, r) && (!best || rectTiles(c) < rectTiles(best))) best = c;
+      }
+      if (!best) { left.push(r); continue; }
+      var at = -1, dup = false, key = rectKey(best), next = [];
+      for (var k = 0; k < cur.length; k++) {
+        if (cur[k] === r) { at = k; continue; }
+        if (rectKey(cur[k]) === key) dup = true;
+      }
+      for (k = 0; k < cur.length; k++) {
+        if (k === at) { if (!dup) next.push(best); } else next.push(cur[k]);
+      }
+      if (totalTiles(next) > maxTiles) { left.push(r); continue; }
+      cur = next; reused++;
+    }
+    return { items: cur, missing: left, reused: reused };
+  }
+
   return { BLOCK: BLOCK, MAX_IMAGES: MAX_IMAGES, WARN_IMAGES: WARN_IMAGES, MAX_IMAGE_TILES: MAX_IMAGE_TILES,
     tileRect: tileRect, blocksForTiles: blocksForTiles, rectMercator: rectMercator, rectPixels: rectPixels,
-    rectTiles: rectTiles, totalTiles: totalTiles, levelOrigin: levelOrigin, rectLocal: rectLocal };
+    rectTiles: rectTiles, totalTiles: totalTiles, levelOrigin: levelOrigin, rectLocal: rectLocal, reuseCovering: reuseCovering };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoBlocks;
