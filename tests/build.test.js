@@ -10081,3 +10081,35 @@ test("Bake: day & night with callout or highlight parts and nothing baked names 
   context.bakeBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Highlights, callouts and day & night can't be baked.");
 });
+
+test("Routes: the Shape dropdown offers Arc and Great circle, default Arc", () => {
+  const { context } = buildSandbox();
+  assert.deepEqual(plain(context.routeShapePicker._entries), ["Arc", "Great circle"]);
+  assert.equal(context.routeShapePicker.getValue(), 0);
+});
+
+test("Routes: Create route passes the picked Shape to the handle helpers", () => {
+  [0, 1].forEach((pick) => {
+    const { context, api } = buildSandbox({ setup: installNe });
+    createWorldMap(context);
+    context.routeShapePicker.setValue(pick);
+    lookupGives(context, "A"); clickAt(context.routesPreview, 100, 60);
+    lookupGives(context, "B"); clickAt(context.routesPreview, 200, 120);
+    context.createRouteBtn.onClick();
+    const group = api.getCompLayers().filter((id) => api.hasUserDataKey(id, "geoRoute"))[0];
+    const d = routeData(api, group);
+    assert.ok(d.legs.length >= 1);
+    d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.get(h, HIN("shape")), pick)));
+  });
+});
+
+test("Routes: Shape is remembered as routeShape, other settings kept, and restored at load", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  context.routeShapePicker.setValue(1); context.routeShapePicker.onValueChanged();
+  const s = settingsOf(api);
+  assert.equal(s.routeShape, 1); assert.equal(s.mapStyle, "Mono");
+  const again = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(s); } }).context;
+  assert.equal(again.routeShapePicker.getValue(), 1);
+  const junk = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ routeShape: 7 }); } }).context;
+  assert.equal(junk.routeShapePicker.getValue(), 0);
+});

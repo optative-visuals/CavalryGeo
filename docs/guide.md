@@ -97,8 +97,8 @@ the **Controls** tab there to find the map's settings in one place:
 - **Ocean**, and each map layer: hide, opacity, fill / outline colour, outline width, detail and
   (for cities) dot size.
 - **Pins** and **Labels:** one hide, colour and size for all of them.
-- **Routes:** each route is numbered ("Route 1: Paris → Rome") and gets four rows, **Route n · Travel %**,
-  **Arc height**, **Colour** and **Width** (plus its traveller rows). Hover a row to see the route's stops.
+- **Routes:** each route is numbered ("Route 1: Paris → Rome") and gets five rows, **Route n · Travel %**,
+  **Arc height**, **Shape**, **Colour** and **Width** (plus its traveller rows). Hover a row to see the route's stops.
 - **Stops:** one **Hide**, **Colour** and **Size** for every route stop.
 - **Data:** one **Year** for the whole map, plus each data set's colours, bubble size and label size
   (**Data 1 · …**, **Data 2 · …**; hover a row to see which set it is).
@@ -256,8 +256,9 @@ can't be baked: Bake skips them.
 ## Label: routes
 
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
-  stops make a flight, more make a journey. Set **Arc height %** (how far the legs bow to start
-  with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
+  stops make a flight, more make a journey. Pick a **Shape**: **Arc** (a simple bow, the default)
+  or **Great circle** (each leg follows the shortest path over the Earth, the way a real flight
+  does). Set **Arc height %** (how far the legs bow to start with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
   the stop), and press **Create route**.
 - **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it. Zoom the preview with − / + or by pressing the scroll wheel and dragging up / down (around the point you pressed).
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
@@ -271,6 +272,13 @@ can't be baked: Bake skips them.
   numbered the next time the Controls refresh (or when you make a route), oldest first (from the
   bottom of the Scene Window up), and a name that still reads "Route: …" is renamed; a name you
   gave a route yourself is kept. A duplicated route takes the next free number.
+- **Great circle** legs look like a gentle sweep: on a flat map they bow toward the nearer pole
+  (London to Tokyo climbs over the north), and on the globe they hug the surface. **Arc height**
+  still works: it adds extra lift on top of the great circle. Change your mind later with
+  **Route n · Shape** in the map's Controls (0 is arc, 1 is great circle). Routes made by an
+  earlier version get the Shape setting when you press **Refresh controls**. Very long legs are a
+  close fit rather than exact, and on a flat map a leg that crosses the date line still goes the
+  long way round.
 - The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
   once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
   Controls: their values live on the route's handle helpers (inside its "Route helpers" group),

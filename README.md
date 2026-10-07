@@ -30,7 +30,7 @@ city.
 
 ### Routes
 Stops you can drag, joined by Bézier lines that draw on. Each route is numbered ("Route 1: …") and
-the map's Controls give it one **Travel %** to animate the whole journey, plus Arc height, Colour
+the map's Controls give it one **Travel %** to animate the whole journey, plus Arc height, Shape (a plain arc or a true great circle), Colour
 and Width; press **Pin here** to keep a dragged stop on its new spot.
 
 ### Data maps
