@@ -9,9 +9,10 @@ const IMAGERY_RUNTIME_FILES = ["src/core/tiles.js"];
 const CURVE_RUNTIME_FILES = ["src/core/projection.js", "src/core/curve.js"];
 const FURNITURE_RUNTIME_FILES = ["src/core/projection.js", "src/core/furniture.js"];
 const SUN_RUNTIME_FILES = FURNITURE_RUNTIME_FILES.concat(["src/core/sun.js"]);
+const REPROJECT_RUNTIME_FILES = ["src/core/projection.js", "src/core/reproject.js"];
 const CORE_FILES = [
   "src/core/projection.js", "src/core/routes.js", "src/core/curve.js", "src/core/markers.js", "src/core/furniture.js", "src/core/geometry.js", "src/core/codec.js", "src/core/runtime.js", "src/core/datamap.js", "src/core/sun.js",
-  "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js", "src/core/controls.js", "src/core/styles.js",
+  "src/core/osm.js", "src/core/naturalearth.js", "src/core/search.js", "src/core/util.js", "src/core/sources.js", "src/core/tiles.js", "src/core/blocks.js", "src/core/reproject.js", "src/core/flyto.js", "src/core/csv.js", "src/core/match.js", "src/core/dataset.js", "src/core/expression.js", "src/core/controls.js", "src/core/styles.js",
   "src/core/update.js", "src/core/preview.js"
 ];
 const CAVALRY_FILES = ["src/cavalry/attrs.js", "src/cavalry/net.js", "src/cavalry/fetch.js", "src/cavalry/scene.js", "src/cavalry/controls.js", "src/cavalry/updatecheck.js", "src/cavalry/style.js", "src/cavalry/preview.js", "src/cavalry/panel.js"];
@@ -36,6 +37,7 @@ function buildImageryRuntimeSource() { return IMAGERY_RUNTIME_FILES.map(read).jo
 function buildCurveSource() { return CURVE_RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildFurnitureSource() { return FURNITURE_RUNTIME_FILES.map(read).join("\n;\n"); }
 function buildSunSource() { return SUN_RUNTIME_FILES.map(read).join("\n;\n"); }
+function buildReprojectSource() { return REPROJECT_RUNTIME_FILES.map(read).join("\n;\n"); }
 
 // options.version overrides package.json's version (tests, and trying out the update check).
 function buildPanel(options = {}) {
@@ -52,8 +54,9 @@ function buildPanel(options = {}) {
     "var GEO_CURVE_SRC = " + JSON.stringify(buildCurveSource()) + ";",
     "var GEO_FURNITURE_SRC = " + JSON.stringify(buildFurnitureSource()) + ";",
     "var GEO_SUN_SRC = " + JSON.stringify(buildSunSource()) + ";",
+    "var GEO_REPROJECT_SRC = " + JSON.stringify(buildReprojectSource()) + ";",
     ...CAVALRY_FILES.map(read)
   ].join("\n;\n");
 }
 
-module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildFurnitureSource, buildSunSource, buildPanel, copyDirSync };
+module.exports = { ROOT, CORE_FILES, CAVALRY_FILES, buildRuntimeSource, buildDataRuntimeSource, buildImageryRuntimeSource, buildCurveSource, buildFurnitureSource, buildSunSource, buildReprojectSource, buildPanel, copyDirSync };
