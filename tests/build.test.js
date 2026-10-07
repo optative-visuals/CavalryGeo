@@ -836,7 +836,7 @@ test("Map tab: a note under the Fly row says what Fly here does, and hides with 
   assert.equal(context.flyNote._textColor, "#8a8a8a");
   const items = context.sectionPages.pages[0]._items;
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
-  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 3] === context.flyNote, "the note sits under the Fly, Easing and Drift rows");
+  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 1] === context.flyNote, "the note sits right after the Fly row");
   assert.equal(context.flyNote.isHidden(), true, "hidden with no map");
   createWorldMap(context);
   assert.equal(context.flyNote.isHidden(), false, "shown with a map");
@@ -9082,8 +9082,8 @@ test("recordFlight stores a record, replaces overlapping ones, keeps others and 
   const S = context.GeoScene;
   S.recordFlight(map, flightRec(10, 20));
   assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(10, 20)]);
-  S.recordFlight(map, flightRec(20, 30, { easing: "gentle" }));
-  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(20, 30, { easing: "gentle" })]);
+  S.recordFlight(map, flightRec(15, 30, { easing: "gentle" }));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(15, 30, { easing: "gentle" })]);
   S.recordFlight(map, flightRec(40, 50));
   const all = plain(api.getUserDataKey(map.cameraId, "geoFlights"));
   assert.equal(all.length, 2);
@@ -9160,8 +9160,9 @@ test("Map tab: Easing / Zoom-out and Drift rows sit right after the Fly row with
   const items = context.sectionPages.pages[0]._items;
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
   const i = items.indexOf(flyRow);
-  assert.ok(holds(items[i + 1], context.easingPicker) && holds(items[i + 1], context.arcPicker) && holds(items[i + 1], context.updateFlightBtn));
-  assert.ok(holds(items[i + 2], context.driftPicker) && holds(items[i + 2], context.driftBtn));
+  assert.equal(items[i + 1], context.flyNote);
+  assert.ok(holds(items[i + 2], context.easingPicker) && holds(items[i + 2], context.arcPicker) && holds(items[i + 2], context.updateFlightBtn));
+  assert.ok(holds(items[i + 3], context.driftPicker) && holds(items[i + 3], context.driftBtn));
   assert.equal(context.easingLabel.getText(), "Easing");
   assert.equal(context.arcLabel.getText(), "Zoom-out");
   assert.equal(context.driftLabel.getText(), "Drift move");
@@ -9287,6 +9288,7 @@ test("Drift past the composition's end asks like Fly here, and Yes extends it", 
   context.driftBtn.onClick();
   assert.equal(asked.length, 1);
   assert.equal(asked[0].title, "Extend the timeline");
+  assert.equal(asked[0].question, "This drift ends at frame 14, after your composition's last frame (9). Drift will extend the composition, and the layers that reach its end, to frame 14. Continue?");
   assert.equal(context.statusLabel.getText(), "Drift (push in) from frame 0 to 14. The composition was extended to frame 14 so the drift isn't cut off.");
   assert.equal(api.get(api.getActiveComp(), "endFrame"), 14);
 });
@@ -9317,4 +9319,58 @@ test("a Drift over an older flight removes that flight's record", () => {
   const recs = flightsOf(api, map);
   assert.equal(recs.length, 1);
   assert.equal(recs[0].kind, "drift");
+});
+
+test("recordFlight keeps a record that only shares a boundary frame, drops a real overlap", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  S.recordFlight(map, flightRec(0, 20));
+  S.recordFlight(map, flightRec(20, 40));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")).map((r) => [r.start, r.end]), [[0, 20], [20, 40]]);
+  S.recordFlight(map, flightRec(30, 50));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")).map((r) => [r.start, r.end]), [[0, 20], [30, 50]]);
+});
+
+test("Update flight on the first of two chained flights rebuilds it and leaves the second alone", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  context.results = [{ name: "Rome, Italy", lat: 41.9, lon: 12.5, bbox: { south: 41.8, north: 42, west: 12.4, east: 12.6 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  context.flyBtn.onClick(); // 20-40, from the old To
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 2);
+  const first = recs[0], secondKeys = camSeries(api, map, 21, 40);
+  context.easingPicker.setValue(2); context.arcPicker.setValue(2);
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 0–20) updated: Snappy, High zoom-out.");
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(first.from, first.to, 21, context.GeoScene.compSize().width, { easing: "snappy", arc: "high" }));
+  nearly(camSeries(api, map, 21, 40), secondKeys);
+  assert.equal(flightsOf(api, map).length, 2);
+  // the second flight now starts from the first one's destination
+  api.setFrame(30);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Rome (frames 20–40) updated: Snappy, High zoom-out.");
+  nearly(camSeries(api, map, 21, 40), context.GeoFly.path(first.to, recs[1].to, 21, context.GeoScene.compSize().width, { easing: "snappy", arc: "high" }).slice(1));
+});
+
+test("Update flight on a flight after frame 0 that is not chained starts from the camera one frame before", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 10, "array.1": 20, "array.2": 4 });
+  flyRange(context, 30, 50);
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  const before = camSeries(api, map, 29, 29)[0];
+  context.easingPicker.setValue(1);
+  api.setFrame(40);
+  context.updateFlightBtn.onClick();
+  nearly(camSeries(api, map, 30, 50), context.GeoFly.path(before, rec.to, 21, context.GeoScene.compSize().width, { easing: "gentle", arc: "normal" }));
 });

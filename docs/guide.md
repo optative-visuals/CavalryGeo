@@ -61,7 +61,7 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   **Snappy** (slow, then a quick dash, then a firm stop) or **Overshoot** (arrives a little too
   close, then settles back to the place). **Zoom-out** sets how far the camera pulls back on a
   long flight: **Low** stays close to the ground, **Normal** is the usual arc, **High** rises
-  higher for a bigger view of the trip. Both are remembered for next time.
+  higher for a bigger view of the trip. Both are remembered for next time, and so is the Drift move.
 - **Update flight:** put the playhead anywhere inside a flight you made with **Fly here**, change
   Easing or Zoom-out, and press **Update flight** — the same flight is redone with the new choices,
   keeping its frames and its destination. If the playhead is not inside a flight, or is inside a

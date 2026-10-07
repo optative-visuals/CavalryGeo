@@ -1046,7 +1046,8 @@ var GeoScene = (function () {
 
   // ---- Remembered flights ---------------------------------------------------------------
   // Each Fly here / Drift is remembered on the camera as { kind, start, end, from, to, ... } so a
-  // later "Update flight" can rebuild exactly its keys. A new record replaces any it overlaps.
+  // later "Update flight" can rebuild exactly its keys. A new record replaces any it overlaps;
+  // chained flights share one boundary frame (0-20 then 20-40), which is not an overlap.
   var FLIGHTS_KEY = "geoFlights";
 
   function readFlights(map) {
@@ -1056,7 +1057,7 @@ var GeoScene = (function () {
 
   function recordFlight(map, rec) {
     if (typeof api.setUserData !== "function") return;
-    var kept = readFlights(map).filter(function (r) { return r.end < rec.start || r.start > rec.end; });
+    var kept = readFlights(map).filter(function (r) { return r.end <= rec.start || r.start >= rec.end; });
     kept.push(rec);
     api.setUserData(map.cameraId, FLIGHTS_KEY, kept);
   }
@@ -1078,9 +1079,15 @@ var GeoScene = (function () {
     }
   }
 
-  // Where a flight really begins: the camera as it is one frame before it (so it joins whatever
+  // Where a flight really begins: the end view of a remembered flight that finishes exactly where
+  // this one starts (a chain), else the camera as it is one frame before it (so it joins whatever
   // came before), or the recorded start when it begins on the composition's first frame.
   function flightStart(map, rec) {
+    var before = readFlights(map).filter(function (r) { return r.end === rec.start && r !== rec && r.start < rec.start; });
+    if (before.length) {
+      var p = before[before.length - 1].to;
+      return { lat: p.lat, lon: p.lon, zoom: p.zoom };
+    }
     if (rec.start > compFrameRange().start) {
       var c = readCameraAt(map, rec.start - 1);
       return { lat: c.lat, lon: c.lon, zoom: c.zoom };
