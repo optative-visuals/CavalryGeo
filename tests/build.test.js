@@ -9072,3 +9072,67 @@ test("Bake: callout parts are skipped, with a message of their own", () => {
   assert.match(context.statusLabel.getText(), / Skipped 2 callout part\(s\)\./);
   assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
 });
+
+// Camera feel: remembered flights.
+const flightRec = (start, end, extra) => Object.assign({ kind: "flight", start, end, from: { lat: 0, lon: 0, zoom: 2 }, to: { lat: 48.85, lon: 2.35, zoom: 12 } }, extra || {});
+
+test("recordFlight stores a record, replaces overlapping ones, keeps others and survives JSON", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  S.recordFlight(map, flightRec(10, 20));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(10, 20)]);
+  S.recordFlight(map, flightRec(20, 30, { easing: "gentle" }));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(20, 30, { easing: "gentle" })]);
+  S.recordFlight(map, flightRec(40, 50));
+  const all = plain(api.getUserDataKey(map.cameraId, "geoFlights"));
+  assert.equal(all.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(all)), all);
+});
+
+test("flightAt finds the record under the frame, the latest made when several touch it", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  assert.equal(S.flightAt(map, 5), null);
+  S.recordFlight(map, flightRec(10, 20));
+  S.recordFlight(map, flightRec(30, 40));
+  assert.deepEqual(plain(S.flightAt(map, 15)), flightRec(10, 20));
+  assert.equal(S.flightAt(map, 25), null);
+  assert.equal(S.flightAt(map, 9), null);
+  assert.equal(S.flightAt(map, 40).start, 30);
+  // two records touching one frame (stored directly): the later one wins
+  api.setUserData(map.cameraId, "geoFlights", [flightRec(10, 20), flightRec(20, 30, { easing: "snappy" })]);
+  assert.equal(S.flightAt(map, 20).easing, "snappy");
+});
+
+test("flightStart is rec.from at the first frame, else the camera one frame before, playhead restored", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  const first = S.compFrameRange().start;
+  assert.deepEqual(plain(S.flightStart(map, flightRec(first, first + 9))), { lat: 0, lon: 0, zoom: 2 });
+  api.keyframe(map.cameraId, 39, { "array.0": 10, "array.1": 20, "array.2": 5 });
+  api.keyframe(map.cameraId, 40, { "array.0": 50, "array.1": 60, "array.2": 9 });
+  api.setFrame(7);
+  const s = plain(S.flightStart(map, flightRec(40, 60)));
+  assert.deepEqual(s, { lat: 10, lon: 20, zoom: 5 });
+  assert.equal(api.getFrame(), 7);
+});
+
+test("rebuilding a recorded flight with new easing / arc replaces exactly its keys", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  const S = context.GeoScene, F = context.GeoFly;
+  api.keyframe(map.cameraId, 10, { "array.0": 0, "array.1": 0, "array.2": 2 });
+  api.keyframe(map.cameraId, 80, { "array.0": 1, "array.1": 1, "array.2": 3 });
+  const rec = flightRec(30, 49);
+  S.recordFlight(map, rec);
+  const start = S.flightStart(map, rec);
+  S.flyCamera(map, F.path(start, rec.to, 20, S.compSize().width, { easing: "gentle", arc: "high" }), 30);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
+  S.flyCamera(map, F.path(start, rec.to, 20, S.compSize().width, { easing: "snappy", arc: "low" }), rec.start);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
+});

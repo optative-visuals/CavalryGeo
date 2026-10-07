@@ -1044,6 +1044,50 @@ var GeoScene = (function () {
     return { start: startFrame, end: end };
   }
 
+  // ---- Remembered flights ---------------------------------------------------------------
+  // Each Fly here / Drift is remembered on the camera as { kind, start, end, from, to, ... } so a
+  // later "Update flight" can rebuild exactly its keys. A new record replaces any it overlaps.
+  var FLIGHTS_KEY = "geoFlights";
+
+  function readFlights(map) {
+    var v = userData(map.cameraId, FLIGHTS_KEY);
+    return Array.isArray(v) ? v : [];
+  }
+
+  function recordFlight(map, rec) {
+    if (typeof api.setUserData !== "function") return;
+    var kept = readFlights(map).filter(function (r) { return r.end < rec.start || r.start > rec.end; });
+    kept.push(rec);
+    api.setUserData(map.cameraId, FLIGHTS_KEY, kept);
+  }
+
+  // The latest-made record whose range holds the frame, or null.
+  function flightAt(map, frame) {
+    var all = readFlights(map);
+    for (var i = all.length - 1; i >= 0; i--) if (all[i].start <= frame && frame <= all[i].end) return all[i];
+    return null;
+  }
+
+  function readCameraAt(map, frame) {
+    var back = api.getFrame();
+    try {
+      api.setFrame(frame);
+      return readCamera(map.cameraId);
+    } finally {
+      api.setFrame(back);
+    }
+  }
+
+  // Where a flight really begins: the camera as it is one frame before it (so it joins whatever
+  // came before), or the recorded start when it begins on the composition's first frame.
+  function flightStart(map, rec) {
+    if (rec.start > compFrameRange().start) {
+      var c = readCameraAt(map, rec.start - 1);
+      return { lat: c.lat, lon: c.lon, zoom: c.zoom };
+    }
+    return { lat: rec.from.lat, lon: rec.from.lon, zoom: rec.from.zoom };
+  }
+
   function hasAttribution(map) {
     return api.getChildren(map.groupId).some(function (id) { return api.getNiceName(id) === ATTRIBUTION_NAME; });
   }
@@ -2154,7 +2198,7 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
+    findImagery: findImagery, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
