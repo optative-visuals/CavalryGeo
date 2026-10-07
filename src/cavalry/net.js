@@ -250,6 +250,19 @@ var GeoNet = (function () {
   // it isn't downloaded again on every plan; it stays neither missing nor cached.
   function markEmptyTile(base) { ensureDir(base.slice(0, base.lastIndexOf("/"))); api.writeToFile(base + ".empty", "1", true); }
   function isEmptyTile(base) { return api.filePathExists(base + ".empty"); }
+  // Saved large images of one level: [{ rect, path }], read from the folder listing.
+  // Nothing when Cavalry cannot list folders or the folder does not exist yet.
+  function savedImages(cacheKey, z) {
+    var dir = imagesDir() + "/" + cacheKey + "/" + z, out = [], list;
+    if (typeof api.listDirectory !== "function" || !api.filePathExists(dir)) return out;
+    try { list = api.listDirectory(dir) || []; } catch (e) { return out; }
+    for (var i = 0; i < list.length; i++) {
+      var p = String(list[i]).replace(/\\/g, "/"), name = p.slice(p.lastIndexOf("/") + 1);
+      var m = /^(\d+)_(\d+)_(\d+)_(\d+)\.(jpg|png)$/.exec(name);
+      if (m) out.push({ rect: { z: z, x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4] }, path: p });
+    }
+    return out;
+  }
   // Downloads one tile next to `base`, choosing .jpg/.png from the Content-Type (or the
   // URL when there is none). Network failures (-1) are retried; HTTP errors are returned.
   function downloadTile(url, base) {
@@ -302,7 +315,7 @@ var GeoNet = (function () {
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
-    tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile,
+    tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
 })();

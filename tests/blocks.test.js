@@ -11,6 +11,38 @@ test("limits", () => {
   assert.equal(B.MAX_IMAGE_TILES, 2000);
 });
 
+test("reuseCovering swaps a missing crop for the smallest saved rect of its block that contains it", () => {
+  const r = { z: 4, x0: 5, y0: 5, x1: 6, y1: 6 }, other = { z: 4, x0: 9, y0: 0, x1: 9, y1: 0 };
+  const bigger = { z: 4, x0: 0, y0: 0, x1: 7, y1: 7 }, snug = { z: 4, x0: 4, y0: 4, x1: 7, y1: 7 };
+  const res = B.reuseCovering([r, other], [bigger, snug], [r, other], 2000);
+  assert.deepEqual(res.items, [snug, other]);
+  assert.deepEqual(res.missing, [other]);
+  assert.equal(res.reused, 1);
+});
+
+test("reuseCovering never uses another block, another level or a rect that does not contain it", () => {
+  const r = { z: 4, x0: 6, y0: 6, x1: 9, y1: 7 }; // spans two columns of blocks only by input, anchored in block (0,0)
+  const saved = [{ z: 4, x0: 8, y0: 0, x1: 15, y1: 7 }, { z: 5, x0: 0, y0: 0, x1: 7, y1: 7 }, { z: 4, x0: 0, y0: 0, x1: 7, y1: 7 }, { z: 4, x0: 0, y0: 0, x1: 5, y1: 7 }];
+  const res = B.reuseCovering([r], saved, [r], 2000);
+  assert.deepEqual(res.items, [r]);
+  assert.equal(res.reused, 0);
+  const r2 = { z: 4, x0: 8, y0: 8, x1: 9, y1: 9 };
+  assert.equal(B.reuseCovering([r2], [{ z: 4, x0: 0, y0: 0, x1: 15, y1: 15 }], [r2], 2000).reused, 0);
+});
+
+test("reuseCovering respects the tile cap and keeps a shared saved rect once", () => {
+  const a = { z: 4, x0: 1, y0: 1, x1: 1, y1: 1 }, b = { z: 4, x0: 3, y0: 3, x1: 3, y1: 3 }, big = { z: 4, x0: 0, y0: 0, x1: 7, y1: 7 };
+  const dup = B.reuseCovering([a, b], [big], [a, b], 2000);
+  assert.deepEqual(dup.items, [big]);
+  assert.equal(dup.reused, 2);
+  assert.deepEqual(dup.missing, []);
+  const capped = B.reuseCovering([a], [big], [a], 63);
+  assert.deepEqual(capped.items, [a]);
+  assert.deepEqual(capped.missing, [a]);
+  assert.equal(capped.reused, 0);
+  assert.equal(B.reuseCovering([a], [big], [a], 64).reused, 1);
+});
+
 test("blocksForTiles groups by 8x8 block and crops to the tiles needed", () => {
   const tiles = [];
   for (let x = 4; x <= 11; x++) for (let y = 5; y <= 10; y++) tiles.push({ z: 4, x, y });

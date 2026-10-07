@@ -249,6 +249,10 @@ function makeFakeApi() {
     processEvents: function () {},
     filePathExists: function (p) { return Object.prototype.hasOwnProperty.call(files, p); },
     readFromFile: function (p) { return files[p]; },
+    // Like Cavalry: full paths of what is directly inside the folder.
+    listDirectory: function (p) {
+      return Object.keys(files).filter(function (k) { return k.indexOf(p + "/") === 0 && k.indexOf("/", p.length + 1) < 0; });
+    },
     writeToFile: function (p, c) { files[p] = c; },
     makeFolder: function (p) { files[p] = files[p] === undefined ? "<dir>" : files[p]; },
     getAppDataFolder: function () { return "C:/fake/AppData"; },
@@ -1841,6 +1845,57 @@ test("planImagery treats files left in the in-flight list as missing", () => {
   context.GeoFetch.leftovers = () => [context.GeoScene.itemBase(first, first.items[0]) + ".jpg"];
   const second = context.GeoScene.planImagery(map, src, {});
   assert.deepEqual(plain(second.missing), [plain(first.items[0])]);
+});
+
+// Imagery reuse: a saved image of the same block that already covers a missing crop is used.
+function savedCrop(context, api, plan, r) {
+  const B = context.GeoBlocks.BLOCK, big = { z: r.z, x0: Math.floor(r.x0 / B) * B, y0: Math.floor(r.y0 / B) * B, x1: Math.floor(r.x0 / B) * B + B - 1, y1: Math.floor(r.y0 / B) * B + B - 1 };
+  const base = context.GeoNet.imageBase(plan.cacheKey, big);
+  api._files[base.slice(0, base.lastIndexOf("/"))] = "<dir>";
+  api._files[base + ".jpg"] = "<image>";
+  return big;
+}
+
+test("planImagery reuses a saved bigger crop of the block instead of downloading again", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("eox");
+  const first = context.GeoScene.planImagery(map, src, {});
+  const r = first.items[0], big = savedCrop(context, api, first, r);
+  assert.ok(context.GeoBlocks.rectTiles(big) > context.GeoBlocks.rectTiles(r));
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.reused, 1);
+  assert.deepEqual(plain(plan.items[0]), plain(big));
+  assert.equal(plan.items.length, first.items.length);
+  assert.equal(plan.missing.length, first.items.length - 1);
+  assert.equal(plan.cached, 1);
+  assert.equal(plan.imageTiles, context.GeoBlocks.totalTiles(plan.items));
+  assert.ok(!plain(plan.missing).some((m) => m.x0 === big.x0 && m.y0 === big.y0 && m.z === big.z));
+  // The build places the footage from the saved image's own area.
+  const built = context.GeoScene.buildImagery(map, src, {}, plan);
+  const level = levelGroup(api, built.groupId, big.z), kids = api.getChildren(level);
+  assert.equal(kids.length, 1);
+  const origin = context.GeoBlocks.levelOrigin([big]), px = context.GeoBlocks.rectPixels(big);
+  assert.equal(api.get(kids[0], "position.x") + "," + api.get(kids[0], "position.y"), context.GeoBlocks.rectLocal(big, origin).join(","));
+  assert.equal(api.get(kids[0], "scale.x"), (px[0] + 4) / px[0]);
+  assert.equal(api.get(kids[0], "scale.y"), (px[1] + 4) / px[1]);
+});
+
+test("planImagery does not reuse a saved image still in flight, or without a folder listing", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("eox");
+  const first = context.GeoScene.planImagery(map, src, {});
+  const big = savedCrop(context, api, first, first.items[0]);
+  context.GeoFetch.leftovers = () => [context.GeoNet.imageBase(first.cacheKey, big) + ".jpg"];
+  let plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.reused, 0);
+  assert.deepEqual(plain(plan.items), plain(first.items));
+  context.GeoFetch.leftovers = () => [];
+  delete api.listDirectory;
+  plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.reused, 0);
+  assert.deepEqual(plain(plan.missing), plain(first.items));
 });
 
 test("buildImagery places one footage per image at the rect centre with a 2-px seam overlap", () => {
