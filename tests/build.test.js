@@ -8590,3 +8590,202 @@ test("Add layers: a failed or cancelled add unticks nothing", () => {
   assert.match(cancelled.context.statusLabel.getText(), /^Cancelled/);
   assert.equal(cancelled.context.checks.roads.getValue(), true);
 });
+
+// ---- Callouts ----------------------------------------------------------------------
+const calloutMap = controlsMap;
+const coRec = (api, g) => plain(api.getUserDataKey(g, "geoCallout"));
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+// Where a new callout's label starts: the place's screen point + (160, 100), clamped inside the comp (1920 x 1080, 40 px margin).
+function labelStart(context, map, lon, lat) {
+  const p = plain(context.GeoRuntime.projectPoint(lon, lat, context.GeoScene.readCamera(map.cameraId)));
+  return [Math.max(-960 + 40, Math.min(960 - 240, p[0] + 160)), Math.max(-540 + 40, Math.min(540 - 40, p[1] + 100))];
+}
+
+test("callouts: createCallout makes a numbered group with every member named and parented", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.equal(api.getNiceName(g), "Callout 1: Paris");
+  assert.equal(api.getParent(g), map.groupId);
+  assert.equal(api.getUserDataKey(g, "geoCalloutNumber"), 1);
+  const rec = coRec(api, g);
+  assert.equal(rec.camera, map.cameraId); assert.equal(rec.lon, 2.35); assert.equal(rec.lat, 48.85); assert.equal(rec.text, "Paris");
+  const names = { label: "Callout 1 label", box: "Callout 1 box", dot: "Callout 1 dot", line1: "Callout 1 line 1", line2: "Callout 1 line 2",
+    size: "Callout 1 size", place: "Callout 1 place", fade: "Callout 1 fade", edge: "Callout 1 edge", bend: "Callout 1 bend" };
+  Object.keys(names).forEach((k) => assert.equal(api.getNiceName(rec[k]), names[k], k));
+  assert.equal(api.getNiceName(rec.draws[0]), "Callout 1 draw 1"); assert.equal(api.getNiceName(rec.draws[1]), "Callout 1 draw 2");
+  assert.equal(api.getLayerType(rec.label), "textShape");
+  assert.equal(api.getLayerType(rec.box), "customShape");
+  assert.equal(api.getLayerType(rec.size), "boundingBox");
+  assert.equal(api.getLayerType(rec.line1), "basicLine"); assert.equal(api.getLayerType(rec.line2), "basicLine");
+  [rec.label, rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getParent(id), g));
+  assert.equal(api.getParent(rec.box), rec.label, "the box moves with the label");
+  assert.deepEqual(plain(api.get(rec.box, "position")), [0, 0]);
+  const helpers = api.getParent(rec.size);
+  assert.equal(api.getNiceName(helpers), "Callout 1 helpers");
+  assert.equal(api.getParent(helpers), g);
+  [rec.size, rec.place, rec.fade, rec.edge, rec.bend].concat(rec.draws).forEach((id) => assert.equal(api.getParent(id), helpers));
+  assert.equal(api.get(g, "position.x"), 0);
+});
+
+test("callouts: the label is a text layer with a Document background, its position free and starting by the place", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  assert.equal(api.get(rec.label, "text"), "Paris");
+  assert.equal(api.get(rec.label, "backgroundMode"), 4);
+  assert.deepEqual(plain(api.get(rec.label, "backgroundPadding")), [12, 8]);
+  assert.equal(api.get(rec.label, "cornerRadius"), 6);
+  assert.equal(api.getInConnection(rec.box, "inputShape"), rec.label + ".backgroundShape");
+  assert.equal(api.getInConnection(rec.label, "position"), "", "the label's position is the user's");
+  const at = plain(api.get(rec.label, "position")), want = labelStart(context, map, 2.35, 48.85);
+  assert.ok(near(at[0], want[0]) && near(at[1], want[1]), "label at " + at + ", wanted " + want);
+});
+
+test("callouts: a label starting past the comp's edge is clamped inside it", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const rec = coRec(api, G.createCallout(map, { lon: 170, lat: 70 }, "Far"));
+  const at = plain(api.get(rec.label, "position"));
+  assert.deepEqual(at, labelStart(context, map, 170, 70));
+  assert.ok(at[0] === 720 || at[1] === 500, "clamped: " + at);
+});
+
+test("callouts: the size utility reads the label; the place and fade drivers follow the camera", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  assert.equal(api.getInConnection(rec.size, "inputShapes"), rec.label + ".id");
+  for (let i = 0; i < 5; i++) {
+    assert.equal(api.getInConnection(rec.place, "array." + i), map.cameraId + ".array." + i);
+    assert.equal(api.getInConnection(rec.fade, "array." + i), map.cameraId + ".array." + i);
+  }
+  assert.equal(api.get(rec.place, "array.5"), 2.35); assert.equal(api.get(rec.place, "array.6"), 48.85);
+  assert.equal(api.getInConnection(rec.fade, "array.5"), rec.place + ".array.5", "the fade reads lon / lat from the place driver");
+  assert.equal(api.getInConnection(rec.fade, "array.6"), rec.place + ".array.6");
+  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN));
+  assert.equal(api.get(rec.fade, "expression"), E.labelVisibilityExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutFade" }));
+  assert.equal(api.getInConnection(rec.dot, "position"), rec.place + ".id");
+  [rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "opacity"), rec.fade + ".id"));
+  assert.equal(api.getInConnection(rec.label, "opacity"), "", "the label never fades by itself");
+});
+
+test("callouts: edge, bend and draw helpers are fed from the dot and the size utility and drive the lines", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  const sources = [[rec.dot, "position.x"], [rec.dot, "position.y"], [rec.size, "position.x"], [rec.size, "position.y"], [rec.size, "size.x"], [rec.size, "size.y"]];
+  [rec.edge, rec.bend, rec.draws[0], rec.draws[1]].forEach((h) => sources.forEach((s, i) => assert.equal(api.getInConnection(h, "array." + i), s[0] + "." + s[1], h + " input " + i)));
+  const meta = (category) => ({ camera: map.cameraId, category: category });
+  assert.equal(api.get(rec.edge, "expression"), E.calloutEdgeExpression(meta("calloutEdge")));
+  assert.equal(api.get(rec.bend, "expression"), E.calloutBendExpression(meta("calloutBend")));
+  assert.equal(api.get(rec.draws[0], "expression"), E.calloutDrawExpression(meta("calloutDraw")));
+  assert.equal(api.get(rec.draws[1], "expression"), E.calloutDrawExpression(meta("calloutDraw")));
+  const idx = (n) => "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, n);
+  assert.equal(api.get(rec.draws[0], idx("index")), 0); assert.equal(api.get(rec.draws[1], idx("index")), 1);
+  [rec.draws[0], rec.draws[1]].forEach((d) => { assert.equal(api.get(d, idx("draw")), 100); assert.equal(api.get(d, idx("style")), 1); assert.equal(api.get(d, idx("elbow")), 40); });
+  assert.equal(api.get(rec.bend, "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style")), 1);
+  assert.equal(api.getInConnection(rec.line1, "generator.startPosition"), rec.edge + ".id");
+  assert.equal(api.getInConnection(rec.line1, "generator.endPosition"), rec.bend + ".id");
+  assert.equal(api.getInConnection(rec.line2, "generator.startPosition"), rec.bend + ".id");
+  assert.equal(api.getInConnection(rec.line2, "generator.endPosition"), rec.place + ".id");
+  assert.equal(api.getInConnection(rec.line1, "stroke.trimEnd"), rec.draws[0] + ".id");
+  assert.equal(api.getInConnection(rec.line2, "stroke.trimEnd"), rec.draws[1] + ".id");
+  [rec.line1, rec.line2].forEach((l) => {
+    assert.equal(api.get(l, "generator"), "bezierLine");
+    assert.equal(api.get(l, "stroke.trim"), true);
+    assert.deepEqual(plain(api.get(l, "generator.startOffset")), [0, 0]); assert.deepEqual(plain(api.get(l, "generator.endOffset")), [0, 0]);
+    assert.equal(api.get(l, "stroke.capStyle"), 1);
+  });
+});
+
+test("callouts: colours come from the map's style", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, c = context.GeoStyles.builtIn("Dark").colors;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  [rec.line1, rec.line2].forEach((l) => {
+    assert.ok(api.hasStroke(l) && !api.hasFill(l));
+    assert.equal(api.get(l, "stroke.strokeColor"), c.accent); assert.equal(api.get(l, "stroke.width"), 3);
+  });
+  assert.ok(api.hasFill(rec.dot) && !api.hasStroke(rec.dot));
+  assert.equal(api.get(rec.dot, "material.materialColor"), c.accent);
+  assert.deepEqual(plain(api.get(rec.dot, "generator.radius")), [6, 6]);
+  assert.equal(api.get(rec.label, "material.materialColor"), c.text);
+  assert.equal(api.get(rec.box, "material.materialColor"), c.ocean);
+});
+
+test("callouts: numbers go up; findCallouts lists them top first with their members; prepareCallouts renumbers a duplicate", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  const b = G.createCallout(map, { lon: -0.12, lat: 51.5 }, "London");
+  assert.equal(api.getNiceName(b), "Callout 2: London");
+  assert.equal(G.calloutNumber(b), 2);
+  let found = G.findCallouts(map);
+  assert.deepEqual(found.map((c) => c.groupId), [b, a], "top first");
+  assert.deepEqual(found.map((c) => c.number), [2, 1]);
+  assert.deepEqual(found.map((c) => c.text), ["London", "Paris"]);
+  const rec = coRec(api, b), f = found[0];
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(f[k], rec[k], k));
+  assert.deepEqual(plain(f.draws), rec.draws);
+  api.setUserData(b, "geoCalloutNumber", 1);   // a duplicated group copies the number
+  G.prepareCallouts(map);
+  assert.deepEqual([G.calloutNumber(a), G.calloutNumber(b)], [1, 2]);
+  assert.equal(api.getNiceName(b), "Callout 2: London");
+  api.deleteLayer(rec.fade);
+  found = G.findCallouts(map);
+  assert.equal(found.filter((c) => c.groupId === b)[0].fade, null, "a missing member is null");
+});
+
+test("callouts: findCallouts reads only the map group's children", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  let scans = 0; const real = api.getCompLayers;
+  api.getCompLayers = function () { scans++; return real.apply(api, arguments); };
+  assert.equal(G.findCallouts(map).length, 1);
+  api.getCompLayers = real;
+  assert.equal(scans, 0);
+});
+
+test("callouts: calloutParts lists the group and every member; isMapPart covers the group and its members", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const parts = plain(G.calloutParts(map));
+  [g, rec.label, rec.box, rec.dot, rec.line1, rec.line2, rec.size, rec.place, rec.fade, rec.edge, rec.bend, rec.draws[0], rec.draws[1]].forEach((id) => assert.equal(parts[id], true, String(id)));
+  assert.ok(G.isMapPart(map, g)); assert.ok(G.isMapPart(map, rec.label)); assert.ok(G.isMapPart(map, rec.place));
+});
+
+test("callouts: applying a map style recolours the lines, dot, text and box", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, light = context.GeoStyles.builtIn("Light");
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  G.applyMapStyle(map, light);
+  assert.equal(api.get(rec.line1, "stroke.strokeColor"), light.colors.accent);
+  assert.equal(api.get(rec.line2, "stroke.strokeColor"), light.colors.accent);
+  assert.equal(api.get(rec.dot, "material.materialColor"), light.colors.accent);
+  assert.equal(api.get(rec.label, "material.materialColor"), light.colors.text);
+  assert.equal(api.get(rec.box, "material.materialColor"), light.colors.ocean);
+});
+
+test("callouts: the previews show a callout's place as a pin", () => {
+  const { context } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  assert.deepEqual(plain(G.previewModel(map).pins), [{ lon: 2.35, lat: 48.85 }]);
+});
+
+test("callouts: a failure part way through leaves nothing behind and keeps the selection", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const before = api.getCompLayers(false).slice().sort(), keep = api.getCompLayers(false).slice(0, 1);
+  api.select(keep);
+  const real = api.connect;
+  api.connect = function (a, b) { if (b === "backgroundShape") throw new Error("no background"); return real.apply(api, arguments); };
+  assert.throws(() => G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), /no background/);
+  api.connect = real;
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+  assert.deepEqual(plain(api.getSelection()), keep);
+  assert.equal(G.findCallouts(map).length, 0);
+});

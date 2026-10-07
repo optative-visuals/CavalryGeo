@@ -79,6 +79,9 @@ var GeoStyles = (function () {
     each(parts.credits, FILL, "text");
     each(parts.furniture, FILL, "text");
     each(parts.regions, STROKE, "ocean");
+    each(parts.calloutLines, STROKE, "accent");
+    each(parts.calloutDots, FILL, "accent");
+    each(parts.calloutBoxes, FILL, "ocean");
     return out;
   }
 

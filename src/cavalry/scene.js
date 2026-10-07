@@ -1658,6 +1658,150 @@ var GeoScene = (function () {
     }
   }
 
+  // ---- Callouts ------------------------------------------------------------------------------
+  // A callout is a group in the map group: a text label with Cavalry's own text background (a Custom
+  // Shape parented under it) that the user drags in the viewport, a dot at the place following the
+  // camera, and two Basic Lines (label edge -> bend -> place) whose ends small helper scripts work out
+  // every frame from the dot and a Bounding Box reading the label. Deleting the group removes it all.
+  var CALLOUT_KEY = "geoCallout", CALLOUT_NUMBER_KEY = "geoCalloutNumber";
+  var CALLOUT_NAMES = ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"];
+  var CALLOUT_OFFSET = [160, 100], CALLOUT_MARGIN = 40, CALLOUT_DOT = 6, CALLOUT_LINE_WIDTH = 3;
+  var CALLOUT_PADDING = [12, 8], CALLOUT_CORNER = 6, CALLOUT_DOCUMENT_BACKGROUND = 4;
+
+  function calloutNumber(groupId) { return numberOf(groupId, CALLOUT_NUMBER_KEY); }
+  // This map's callout groups, straight from the map group's children (top first, Scene Window order).
+  function calloutGroups(map) {
+    return api.getChildren(map.groupId).filter(function (id) {
+      var rec = userData(id, CALLOUT_KEY);
+      return !!rec && typeof rec === "object" && rec.camera === map.cameraId;
+    });
+  }
+  // Gives every callout a lasting number (a duplicated group copies its number and takes the next free one).
+  function prepareCallouts(map) { numberGroups(calloutGroups(map), CALLOUT_NUMBER_KEY, "Callout"); }
+
+  function findCallouts(map) {
+    return calloutGroups(map).map(function (g) {
+      var rec = userData(g, CALLOUT_KEY) || {}, out = { groupId: g, number: calloutNumber(g), text: String(rec.text == null ? "" : rec.text) };
+      CALLOUT_NAMES.forEach(function (k) { out[k] = there(rec[k]); });
+      out.draws = (rec.draws || []).map(there);
+      return out;
+    });
+  }
+  // Every callout group and member (helpers group included): what Bake leaves alone and what counts as a callout in a selection.
+  function calloutParts(map) {
+    var out = {};
+    findCallouts(map).forEach(function (c) {
+      out[c.groupId] = true;
+      CALLOUT_NAMES.concat(["draws"]).forEach(function (k) { [].concat(c[k]).forEach(function (id) { if (id) out[id] = true; }); });
+      var helper = [c.size, c.place, c.fade, c.edge, c.bend].concat(c.draws).filter(Boolean)[0];
+      var holder = helper ? api.getParent(helper) : "";
+      if (holder && holder !== c.groupId) out[holder] = true;
+    });
+    return out;
+  }
+
+  // text: the label's words; place: { lon, lat }. Returns the new group's id; a callout that can't be
+  // wired is deleted again before the error goes on, and the user's selection is put back.
+  function createCallout(map, place, text) {
+    if (typeof api.setGenerator !== "function" || typeof api.primitive !== "function" || typeof api.setUserData !== "function") throw new Error("This Cavalry can't make callouts.");
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, look = styleOf(map), lon = Number(place.lon), lat = Number(place.lat);
+    var words = String(text == null ? "" : text);
+    var made = [], previous = null;
+    function track(id) { made.push(id); return id; }
+    var number = numberGroups(calloutGroups(map), CALLOUT_NUMBER_KEY, "Callout") + 1, label0 = "Callout " + number;
+    try { previous = api.getSelection(); } catch (e0) { previous = null; }
+    try {
+      var g = track(api.create("group", capTitle(label0 + ": " + words)));
+      api.parent(g, map.groupId);
+      api.set(g, identityTransform());
+      var helpers = track(api.create("group", label0 + " helpers"));
+      api.parent(helpers, g);
+      api.set(helpers, identityTransform());
+      var meta = function (category) { return { camera: map.cameraId, category: category }; };
+      var utility = function (name, inputs, values, expr) {
+        var id = track(api.create(A.CAMERA_LAYER_TYPE, label0 + " " + name));
+        addInputs(id, CA, inputs, values);
+        setOne(id, A.CAMERA_EXPR_ATTR, expr);
+        api.parent(id, helpers);
+        return id;
+      };
+      var feed = function (id, sources) { sources.forEach(function (s, i) { api.connect(s[0], s[1], id, CA + "." + i, true); }); };
+
+      // The label (its position stays the user's) and its background box, which rides along as its child.
+      var label = track(api.create(A.TEXT_LAYER_TYPE, label0 + " label"));
+      setOne(label, A.TEXT_ATTR, words);
+      applyStyle(label, { fill: look.colors.text });
+      api.set(label, { backgroundMode: CALLOUT_DOCUMENT_BACKGROUND, backgroundPadding: CALLOUT_PADDING, cornerRadius: CALLOUT_CORNER });
+      var box = track(api.create("customShape", label0 + " box"));
+      api.connect(label, "backgroundShape", box, "inputShape", true);
+      applyStyle(box, { fill: look.colors.ocean });
+      api.parent(box, label);
+      api.set(box, { position: [0, 0], "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+      var size = track(api.create("boundingBox", label0 + " size"));
+      api.connect(label, A.DRIVER_OUTPUT_ATTR, size, "inputShapes");
+      api.parent(size, helpers);
+
+      // The dot at the place, and the drivers that keep it (and the lines) on it.
+      var dot = track(api.primitive("ellipse", label0 + " dot"));
+      setOne(dot, "generator.radius", [CALLOUT_DOT, CALLOUT_DOT]);
+      applyStyle(dot, { fill: look.colors.accent });
+      var placeId = utility("place", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("calloutPlace"), A.DRIVER_RETURN));
+      connectCamera(map.cameraId, placeId, CA);
+      api.connect(placeId, A.DRIVER_OUTPUT_ATTR, dot, "position", true);
+      var fade = utility("fade", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("calloutFade")));
+      connectCamera(map.cameraId, fade, CA);
+      api.connect(placeId, CA + ".5", fade, CA + ".5", true);
+      api.connect(placeId, CA + ".6", fade, CA + ".6", true);
+      api.connect(fade, A.DRIVER_OUTPUT_ATTR, dot, "opacity", true);
+
+      // Edge / bend / draw helpers: the dot (place) and the label's centre and size in, line points and trim out.
+      var geom = [[dot, "position.x"], [dot, "position.y"], [size, "position.x"], [size, "position.y"], [size, "size.x"], [size, "size.y"]];
+      var edge = utility("edge", E.CALLOUT_GEOM_INPUTS, {}, E.calloutEdgeExpression(meta("calloutEdge")));
+      var bend = utility("bend", E.CALLOUT_GEOM_INPUTS, {}, E.calloutBendExpression(meta("calloutBend")));
+      var draws = [0, 1].map(function (i) { return utility("draw " + (i + 1), E.CALLOUT_DRAW_INPUTS, { index: i }, E.calloutDrawExpression(meta("calloutDraw"))); });
+      [edge, bend].concat(draws).forEach(function (h) { feed(h, geom); });
+
+      var lines = [[edge, bend], [bend, placeId]].map(function (ends, i) {
+        var line = track(api.create("basicLine", label0 + " line " + (i + 1)));
+        api.setGenerator(line, "generator", "bezierLine");
+        applyStyle(line, { stroke: look.colors.accent, width: CALLOUT_LINE_WIDTH });
+        if (A.STROKE_CAP_ATTR) { try { setOne(line, A.STROKE_CAP_ATTR, A.ROUND_CAP_VALUE); } catch (e1) { /* default caps */ } }
+        setOne(line, "stroke.trim", true);
+        api.set(line, { "generator.startOffset": [0, 0], "generator.endOffset": [0, 0] });
+        api.connect(ends[0], A.DRIVER_OUTPUT_ATTR, line, "generator.startPosition", true);
+        api.connect(ends[1], A.DRIVER_OUTPUT_ATTR, line, "generator.endPosition", true);
+        api.connect(draws[i], A.DRIVER_OUTPUT_ATTR, line, "stroke.trimEnd", true);
+        api.connect(fade, A.DRIVER_OUTPUT_ATTR, line, "opacity", true);
+        return line;
+      });
+
+      // Bottom to top: lines, dot, label (a new layer lands on top). Parenting keeps the world
+      // transform, so each layer is reset afterwards; the dot's position is driven, so it is left alone.
+      lines.forEach(function (line) { api.parent(line, g); api.set(line, identityTransform()); });
+      api.parent(dot, g);
+      api.set(dot, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
+      api.parent(label, g);
+      var s = compSize(), p = GeoRuntime.projectPoint(lon, lat, readCamera(map.cameraId));
+      api.set(label, {
+        "rotation.z": 0, "scale.x": 1, "scale.y": 1,
+        position: [Math.max(-s.width / 2 + CALLOUT_MARGIN, Math.min(s.width / 2 - 240, p[0] + CALLOUT_OFFSET[0])),
+          Math.max(-s.height / 2 + CALLOUT_MARGIN, Math.min(s.height / 2 - CALLOUT_MARGIN, p[1] + CALLOUT_OFFSET[1]))]
+      });
+
+      api.setUserData(g, CALLOUT_KEY, {
+        camera: map.cameraId, lon: lon, lat: lat, text: words, label: label, box: box, dot: dot, line1: lines[0], line2: lines[1],
+        size: size, place: placeId, fade: fade, edge: edge, bend: bend, draws: draws
+      });
+      api.setUserData(g, CALLOUT_NUMBER_KEY, number);
+      return g;
+    } catch (e) {
+      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
+      throw e;
+    } finally {
+      if (previous && typeof api.select === "function") { try { api.select(previous); } catch (e3) { /* cosmetic */ } }
+    }
+  }
+
   // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
@@ -1750,7 +1894,7 @@ var GeoScene = (function () {
 
   // The ids of every part of a map a style colours (see GeoStyles.targets).
   function styleParts(map) {
-    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], furniture: [], regions: [] };
+    var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], furniture: [], regions: [], calloutLines: [], calloutDots: [], calloutBoxes: [] };
     var layers = findMapLayers(map);
     layers.forEach(function (l) {
       var c = l.meta.category;
@@ -1769,6 +1913,12 @@ var GeoScene = (function () {
     });
     findTravellers(map).forEach(function (t) { if (!t.userSource && t.source && layerThere(t.source)) parts.markers.push(t.source); });
     findLabels(map).forEach(function (id) { parts.labels.push(id); });
+    findCallouts(map).forEach(function (c) {
+      [c.line1, c.line2].forEach(function (id) { if (id) parts.calloutLines.push(id); });
+      if (c.dot) parts.calloutDots.push(c.dot);
+      if (c.label) parts.labels.push(c.label);
+      if (c.box) parts.calloutBoxes.push(c.box);
+    });
     api.getChildren(map.groupId).forEach(function (id) { if (CREDIT_NAMES.indexOf(api.getNiceName(id)) >= 0) parts.credits.push(id); });
     var fu = findFurniture(map, layers); [fu.scaleBar, fu.northArrow].forEach(function (id) { if (id) parts.furniture.push(id); });
     return parts;
@@ -1888,6 +2038,12 @@ var GeoScene = (function () {
       try { text = String(api.get(l.text, A.TEXT_ATTR) || ""); } catch (e) { text = ""; }
       if (p) out.labels.push({ lon: p.lon, lat: p.lat, text: text });
     });
+    // A callout's place: read live from its place driver (like a label's), else from its record.
+    calloutGroups(map).forEach(function (g) {
+      var rec = userData(g, CALLOUT_KEY) || {}, drv = there(rec.place);
+      var p = (drv ? lonLat(inputValue(drv, CA + "5"), inputValue(drv, CA + "6")) : null) || lonLat(Number(rec.lon), Number(rec.lat));
+      if (p) out.pins.push(p);
+    });
     findRoutes(map).forEach(function (r) {
       var d = userData(r.groupId, ROUTE_KEY) || {};
       var places = (d.stops || []).map(function (s) {
@@ -1918,6 +2074,7 @@ var GeoScene = (function () {
     findImagery: findImagery, flyCamera: flyCamera, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
+    createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
