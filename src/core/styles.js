@@ -7,7 +7,7 @@ var GeoStyles = (function () {
   var WIDTH_ROLES = ["borders", "states", "coast", "rivers", "roads", "railways", "routes"];
   var FILL = "material.materialColor", STROKE = "stroke.strokeColor", WIDTH = "stroke.width";
   var HEX = /^#[0-9a-fA-F]{6}$/;
-  var CALLOUT_BOX_LIGHTEN = 0.15;
+  var CALLOUT_BOX_LIGHTEN = 0.15, NIGHT_DARKEN = 0.6;
 
   // Colours in ROLES order, widths in WIDTH_ROLES order.
   function make(name, colors, widths) {
@@ -42,7 +42,7 @@ var GeoStyles = (function () {
     extractLine: { stroke: "extract", width: 3 },
     pin: { fill: "accent" }, stop: { fill: "accent" }, marker: { fill: "accent" },
     route: { stroke: "accent", width: "routes" },
-    label: { fill: "text" }, credit: { fill: "text" }, valueLabels: { fill: "text" }, legend: { fill: "text" }, furniture: { fill: "text" },
+    timeLabel: { fill: "text" }, label: { fill: "text" }, credit: { fill: "text" }, valueLabels: { fill: "text" }, legend: { fill: "text" }, furniture: { fill: "text" },
     ocean: { fill: "ocean" },
     regions: { stroke: "ocean", width: 0.5 },
     bubbles: { fill: "#bc4749", stroke: "#ffffff", width: 1 }
@@ -83,6 +83,8 @@ var GeoStyles = (function () {
     each(parts.calloutLines, STROKE, "accent");
     each(parts.calloutDots, FILL, "accent");
     each(parts.calloutBoxes, FILL, "calloutBox");
+    each(parts.nightLayers, FILL, "night");
+    each(parts.timeLabels, FILL, "text");
     return out;
   }
 
@@ -96,8 +98,19 @@ var GeoStyles = (function () {
     return out;
   }
 
+  // The night side of a day & night overlay: the style's ocean colour mixed 60 % toward black.
+  function nightColour(style) {
+    var h = String(style.colors.ocean).slice(1, 7), out = "#";
+    for (var i = 0; i < 3; i++) {
+      var c = parseInt(h.slice(i * 2, i * 2 + 2), 16), s = Math.round(c * (1 - NIGHT_DARKEN)).toString(16);
+      out += s.length < 2 ? "0" + s : s;
+    }
+    return out;
+  }
+
   function valueFor(style, t) {
     if (t.role === "calloutBox") return calloutBox(style);
+    if (t.role === "night") return nightColour(style);
     return t.kind === "width" ? style.widths[t.role] : style.colors[t.role];
   }
 
@@ -164,7 +177,7 @@ var GeoStyles = (function () {
 
   return {
     ROLES: ROLES, WIDTH_ROLES: WIDTH_ROLES, BUILT_IN: BUILT_IN, DARK: BUILT_IN[0],
-    layerStyle: layerStyle, targets: targets, valueFor: valueFor, calloutBox: calloutBox, CALLOUT_BOX_LIGHTEN: CALLOUT_BOX_LIGHTEN, toHex: toHex, clean: clean, fromReadings: fromReadings,
+    layerStyle: layerStyle, targets: targets, valueFor: valueFor, calloutBox: calloutBox, nightColour: nightColour, CALLOUT_BOX_LIGHTEN: CALLOUT_BOX_LIGHTEN, toHex: toHex, clean: clean, fromReadings: fromReadings,
     normalise: normalise, builtIn: builtIn, isBuiltIn: isBuiltIn, find: find, names: names, previewColors: previewColors
   };
 })();

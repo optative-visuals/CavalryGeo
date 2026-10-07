@@ -397,6 +397,7 @@ function buildSandbox(options = {}) {
   const cavalry = makeFakeCavalry();
   if (options.setup) options.setup(api);
   const sandbox = { api: api, ui: ui, cavalry: cavalry, console: console };
+  if (options.globals) Object.assign(sandbox, options.globals);
   const context = vm.createContext(sandbox);
   vm.runInContext(buildPanel({ version: options.version }), context, { filename: "CavalryGeo.js" });
   // The Map tab's own preview owns a redraw timer from the moment the panel opens; tests watch
@@ -525,7 +526,7 @@ test("every button's onClick can be invoked against an empty scene without an er
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "updateFlightBtn", "driftBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
-    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
+    "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addDayNightBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
     "buildImageryBtn", "cancelImageryBtn", "imageryAttrBtn", "clearTilesBtn"
@@ -3705,7 +3706,7 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
-    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
+    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn", "addDayNightBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
   const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
@@ -3739,7 +3740,7 @@ test("each section has grey headings in order", () => {
   assert.deepEqual(headings(pages[0]), ["Start here", "Search", "Preview (drag to move)", "Style"]);
   assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Map furniture"]);
   assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
+  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Day & night", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
   assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
 });
 
@@ -5158,7 +5159,7 @@ test("controls split: a plain map has only the main component", () => {
   const { context, api } = buildSandbox();
   const map = controlsMap(context);
   const r = context.GeoControlPanel.sync(map);
-  assert.deepEqual(plain(r.components), { main: r.componentId, overlay: null, data: null, extract: null });
+  assert.deepEqual(plain(r.components), { main: r.componentId, overlay: null, data: null, extract: null, time: null });
   assert.equal(controlsOf(api, map, "overlay"), undefined);
 });
 
@@ -9446,4 +9447,547 @@ test("Update flight on a comp starting at frame 10 starts from the recorded view
   context.updateFlightBtn.onClick();
   assert.ok(seen.indexOf(9) < 0, "read frame 9");
   nearly(camSeries(api, map, 10, 30), context.GeoFly.path(rec.from, rec.to, 21, context.GeoScene.compSize().width, { easing: "smooth", arc: "normal" }));
+});
+
+// ---- Day & night: the overlay, its opacity helpers and the time label ----
+const dnMap = controlsMap;
+const dnRec = (api, g) => plain(api.getUserDataKey(g, "geoDayNight"));
+const dnVal = (context, api, id, inputs, name) => api.get(id, "generator.array." + context.GeoExpression.inputIndex(inputs, name));
+const dnHelperVal = (context, api, id, name) => api.get(id, "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_OPACITY_INPUTS, name));
+
+test("day & night: add makes the group, four night layers, helpers, a record and no label by default", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression, dark = context.GeoStyles.builtIn("Dark");
+  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 14.5 });
+  assert.equal(r.created, true);
+  assert.equal(api.getNiceName(r.groupId), "Day & night");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  const rec = dnRec(api, r.groupId);
+  assert.equal(rec.camera, map.cameraId); assert.equal(rec.label, null);
+  assert.equal(rec.layers.length, 4); assert.equal(rec.helpers.length, 4);
+  [0, 6, 12, 18].forEach((a, i) => {
+    const id = rec.layers[i], h = rec.helpers[i];
+    assert.equal(api.getNiceName(id), "Night " + a + "°");
+    assert.equal(api.getLayerType(id), "javaScriptShape");
+    assert.equal(api.getParent(id), r.groupId);
+    assert.deepEqual(plain(E.readTag(api.get(id, "generator.expression"), "GEO_META")), { camera: map.cameraId, category: "dayNight", depression: a });
+    E.NIGHT_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(id, "generator.array." + k), inp[0]));
+    for (let k = 0; k < 5; k++) assert.equal(api.getInConnection(id, "generator.array." + k), map.cameraId + ".array." + k);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "dayOfYear"), 172);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "utcTime"), 14.5);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "depression"), a);
+    assert.ok(api.hasFill(id) && !api.hasStroke(id));
+    assert.equal(api.get(id, "material.materialColor"), context.GeoStyles.nightColour(dark));
+    assert.equal(api.getNiceName(h), "Night opacity " + a + "°");
+    assert.equal(api.getLayerType(h), "javaScript");
+    assert.equal(api.getNiceName(api.getParent(h)), "Day & night helpers");
+    assert.equal(api.getParent(api.getParent(h)), r.groupId);
+    assert.deepEqual(plain(E.readTag(api.get(h, "expression"), "GEO_META")), { camera: map.cameraId, category: "dayNightOpacity", step: i });
+    E.NIGHT_OPACITY_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(h, "array." + k), inp[0]));
+    assert.equal(dnHelperVal(context, api, h, "night"), 55);
+    assert.equal(dnHelperVal(context, api, h, "twilight"), 1);
+    assert.equal(dnHelperVal(context, api, h, "step"), i);
+    assert.equal(api.getInConnection(id, "opacity"), h + ".id");
+  });
+  assert.equal(api.getChildren(map.groupId).filter((id) => api.getNiceName(id) === "Time label").length, 0);
+});
+
+test("day & night: the label option adds a Time label with its inputs, the style's text colour and the same time", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression, dark = context.GeoStyles.builtIn("Dark");
+  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 14.5, label: true });
+  const rec = dnRec(api, r.groupId), id = rec.label;
+  assert.equal(api.getNiceName(id), "Time label");
+  assert.equal(api.getLayerType(id), "javaScriptShape");
+  assert.equal(api.getParent(id), map.groupId);
+  assert.deepEqual(plain(E.readTag(api.get(id, "generator.expression"), "GEO_META")), { camera: map.cameraId, category: "timeLabel" });
+  E.TIME_LABEL_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(id, "generator.array." + k), inp[0]));
+  for (let k = 0; k < 5; k++) assert.equal(api.getInConnection(id, "generator.array." + k), map.cameraId + ".array." + k);
+  const v = (n) => dnVal(context, api, id, E.TIME_LABEL_INPUTS, n);
+  assert.equal(v("dayOfYear"), 172); assert.equal(v("utcTime"), 14.5);
+  assert.equal(v("compW"), 1920); assert.equal(v("compH"), 1080); assert.equal(v("corner"), 0); assert.equal(v("margin"), 40); assert.equal(v("size"), 18);
+  assert.ok(api.hasFill(id) && !api.hasStroke(id));
+  assert.equal(api.get(id, "material.materialColor"), dark.colors.text);
+});
+
+test("day & night: the group sits above the base layers, Ocean and imagery, below an earlier pin and callout", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  const roads = G.createMapLayer(map, "Roads", { v: 1, kind: "line", f: [] }, { camera: map.cameraId, category: "roads" }, {}, {});
+  G.restackBaseLayers(map, context.DRAW_ORDER);
+  const pin = G.addPin(map, "Pin", 0, 0);
+  const callout = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const kids = api.getChildren(map.groupId), pos = (id) => kids.indexOf(id);
+  assert.ok(pos(pin) < pos(g) && pos(callout) < pos(g), "below the pin and the callout");
+  assert.ok(pos(g) < pos(roads) && pos(roads) < pos(countries) && pos(countries) < pos(oceanOf(api, map)), "above every base layer and the Ocean");
+  // a later restack of the base layers keeps it above them
+  G.restackBaseLayers(map, context.DRAW_ORDER);
+  const again = api.getChildren(map.groupId);
+  assert.ok(again.indexOf(pin) < again.indexOf(g) && again.indexOf(g) < again.indexOf(roads));
+});
+
+test("day & night: with no base layer the group still sits above the Ocean and below a pin", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const pin = G.addPin(map, "Pin", 0, 0);
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const kids = api.getChildren(map.groupId);
+  assert.ok(kids.indexOf(pin) < kids.indexOf(g) && kids.indexOf(g) < kids.indexOf(oceanOf(api, map)));
+});
+
+test("day & night: a second add updates the time on every layer, makes nothing new and reports created false", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const first = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const before = api.getCompLayers(false).slice().sort();
+  const second = G.addDayNight(map, { dayOfYear: 355, utcTime: 3.25 });
+  assert.equal(second.created, false); assert.equal(second.groupId, first.groupId);
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+  dnRec(api, first.groupId).layers.forEach((id) => {
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "dayOfYear"), 355);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "utcTime"), 3.25);
+  });
+});
+
+test("day & night: a second add with the label option adds a missing label, then updates it", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const first = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  assert.equal(dnRec(api, first.groupId).label, null);
+  const second = G.addDayNight(map, { dayOfYear: 100, utcTime: 6, label: true });
+  assert.equal(second.created, false);
+  const label = dnRec(api, first.groupId).label;
+  assert.ok(label && api.getNiceName(label) === "Time label");
+  assert.equal(dnVal(context, api, label, E.TIME_LABEL_INPUTS, "dayOfYear"), 100);
+  const third = G.addDayNight(map, { dayOfYear: 200, utcTime: 18, label: true });
+  assert.equal(dnRec(api, first.groupId).label, label, "no second label");
+  assert.equal(dnVal(context, api, label, E.TIME_LABEL_INPUTS, "dayOfYear"), 200);
+  assert.equal(dnVal(context, api, label, E.TIME_LABEL_INPUTS, "utcTime"), 18);
+  assert.equal(third.created, false);
+  // without the option an existing label still follows the time
+  G.addDayNight(map, { dayOfYear: 10, utcTime: 1 });
+  assert.equal(dnVal(context, api, label, E.TIME_LABEL_INPUTS, "dayOfYear"), 10);
+});
+
+test("day & night: findDayNight lists the group, its layers, helpers and label; dayNightParts names every part", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  assert.equal(G.findDayNight(map), null);
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  const f = G.findDayNight(map);
+  assert.equal(f.groupId, r.groupId);
+  assert.deepEqual(plain(f.layers), rec.layers); assert.deepEqual(plain(f.helpers), rec.helpers); assert.equal(f.label, rec.label);
+  const parts = plain(G.dayNightParts(map));
+  [r.groupId, rec.label, api.getParent(rec.helpers[0])].concat(rec.layers, rec.helpers).forEach((id) => assert.equal(parts[id], true, id));
+  assert.equal(Object.keys(parts).length, 1 + 1 + 1 + 4 + 4);
+  assert.deepEqual(plain(G.dayNightParts({ groupId: "none", cameraId: "none" })), {});
+});
+
+test("day & night: findDayNight needs the record, this map's camera and members that belong to the group", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  // a layer moved out of the group, and a label that is gone, are no longer the overlay's
+  api.parent(rec.layers[1], map.groupId);
+  api.deleteLayer(rec.label);
+  const f = G.findDayNight(map);
+  assert.equal(f.layers[1], null); assert.equal(f.layers[0], rec.layers[0]);
+  assert.equal(f.label, null);
+  assert.equal(G.dayNightParts(map)[rec.layers[1]], undefined);
+  // another map's record is not ours
+  api.setUserData(r.groupId, "geoDayNight", Object.assign({}, rec, { camera: "elsewhere" }));
+  assert.equal(G.findDayNight(map), null);
+});
+
+test("day & night: applying a map style recolours the four fills and the label", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, S = context.GeoStyles, light = S.builtIn("Light");
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  G.applyMapStyle(map, light);
+  rec.layers.forEach((id) => assert.equal(api.get(id, "material.materialColor"), S.nightColour(light)));
+  assert.equal(api.get(rec.label, "material.materialColor"), light.colors.text);
+});
+
+test("day & night: nightColour mixes the ocean 60 % toward black", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.GeoStyles.nightColour(context.GeoStyles.builtIn("Dark")), "#0c1114");
+});
+
+test("day & night: a failure part way through leaves nothing behind and keeps the selection", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const before = api.getCompLayers(false).slice().sort(), keep = api.getCompLayers(false).slice(0, 1);
+  api.select(keep);
+  const real = api.connect;
+  api.connect = function (a, b, c, d) { if (/Night opacity 12/.test(api.getNiceName(a))) throw new Error("no opacity"); return real.apply(api, arguments); };
+  assert.throws(() => G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), /no opacity/);
+  api.connect = real;
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+  assert.deepEqual(plain(api.getSelection()), keep);
+  assert.equal(G.findDayNight(map), null);
+});
+
+test("day & night: a late failure (the label, or the record) removes everything it made", () => {
+  ["label", "record"].forEach((late) => {
+    const { context, api } = buildSandbox();
+    const map = dnMap(context), G = context.GeoScene;
+    const before = api.getCompLayers(false).slice().sort(), realSet = api.setUserData, realCreate = api.create;
+    api.setUserData = function (id, key) { if (late === "record" && key === "geoDayNight") throw new Error("late record"); return realSet.apply(api, arguments); };
+    api.create = function (type, name) { if (late === "label" && name === "Time label") throw new Error("late label"); return realCreate.apply(api, arguments); };
+    assert.throws(() => G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), /late/);
+    api.setUserData = realSet; api.create = realCreate;
+    assert.deepEqual(api.getCompLayers(false).slice().sort(), before, late);
+    assert.equal(G.findDayNight(map), null);
+  });
+});
+
+test("day & night: a failure adding the label to an existing overlay leaves the overlay as it was", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const before = api.getCompLayers(false).slice().sort(), realCreate = api.create;
+  api.create = function (type, name) { if (name === "Time label") throw new Error("late label"); return realCreate.apply(api, arguments); };
+  assert.throws(() => G.addDayNight(map, { dayOfYear: 90, utcTime: 12, label: true }), /late label/);
+  api.create = realCreate;
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before);
+  assert.equal(dnRec(api, g).label, null);
+});
+
+test("day & night: the user's selection is put back after a successful add and update", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, keep = [map.cameraId];
+  api.select(keep);
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true });
+  assert.deepEqual(plain(api.getSelection()), keep);
+  G.addDayNight(map, { dayOfYear: 81, utcTime: 12, label: true });
+  assert.deepEqual(plain(api.getSelection()), keep);
+});
+
+test("day & night: the overlay's group and layers are map parts", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  assert.ok(G.isMapPart(map, r.groupId));
+  assert.ok(G.isMapPart(map, rec.layers[0]));
+});
+
+// ---- Day & night in Controls ----
+const TIME_ROWS = ["Day & night · Day of year (1–365)", "Day & night · UTC time (0–24)", "Day & night · Night colour", "Day & night · Night opacity", "Day & night · Twilight (0 hard · 1 soft)",
+  "Day & night · Hide", "Time label · Hide", "Time label · Colour", "Time label · Size", "Time label · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)"];
+
+test("day & night in Controls: a Time controls component after Extract controls, with exactly the time rows, driving the four layers and the label", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), E = context.GeoExpression;
+  const r0 = context.GeoControlPanel.sync(map);
+  assert.equal(r0.components.time, null);
+  const dn = context.GeoScene.addDayNight(map, { dayOfYear: 172, utcTime: 14.5, label: true }), rec = dnRec(api, dn.groupId);
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(r.components.time, "made");
+  assert.equal(api.getNiceName(r.components.time), "Map Time controls");
+  assert.equal(api.getUserDataKey(r.components.time, "geoControlsGroup"), "time");
+  const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp());
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(r.components.extract) + 1);
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(map.groupId) - 1);
+  assert.deepEqual(plain(promotedNames(api, r.components.time)), TIME_ROWS);
+  const slots = slotsOf(api, r.valuesId), V = r.valuesId;
+  const dayIn = V + "." + slots["dn:day"], timeIn = V + "." + slots["dn:time"];
+  rec.layers.forEach((id) => {
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear")), dayIn);
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "utcTime")), timeIn);
+  });
+  assert.equal(api.getInConnection(rec.label, "generator.array." + E.inputIndex(E.TIME_LABEL_INPUTS, "dayOfYear")), dayIn);
+  assert.equal(api.getInConnection(rec.label, "generator.array." + E.inputIndex(E.TIME_LABEL_INPUTS, "utcTime")), timeIn);
+  rec.helpers.forEach((id) => assert.equal(api.getInConnection(id, "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night")), V + "." + slots["dn:night"]));
+  assert.equal(api.get(V, slots["dn:day"]), 172);
+  // the script inputs keep their own names
+  rec.layers.forEach((id) => E.NIGHT_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(id, "generator.array." + k), inp[0])));
+  // a second sync changes nothing
+  const promos = plain(api._promoted(r.components.time)), slots1 = plain(slots);
+  const again = context.GeoControlPanel.sync(map);
+  assert.equal(again.components.time, r.components.time);
+  assert.deepEqual(plain(api._promoted(again.components.time)), promos);
+  assert.deepEqual(slotsOf(api, again.valuesId), slots1);
+  // deleting the overlay removes the Time controls component
+  api.deleteLayer(dn.groupId);
+  const gone = context.GeoControlPanel.sync(map);
+  assert.equal(gone.components.time, null);
+  assert.ok(!api.getChildren(api.getParent(map.groupId) || api.getActiveComp()).includes(r.components.time));
+});
+
+test("day & night in Controls: with no Extract controls it stacks after Overlay controls, and without a label has only the day & night rows", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context);
+  context.GeoScene.addPin && context.GeoScene.addPin(map, "Here", 1, 1);
+  context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.components.extract, null);
+  assert.ok(r.components.overlay && r.components.time);
+  const sib = api.getChildren(api.getParent(map.groupId) || api.getActiveComp());
+  assert.equal(sib.indexOf(r.components.time), sib.indexOf(r.components.overlay) + 1);
+  assert.deepEqual(plain(promotedNames(api, r.components.time)), TIME_ROWS.slice(0, 6));
+});
+
+// ---- Day & night in the panel ----
+// A panel built at a fixed moment: 7 Oct 2026, 14:37 UTC.
+function dayNightSandbox() {
+  const fixed = Date.UTC(2026, 9, 7, 14, 37);
+  class FixedDate extends Date { constructor(...a) { super(...(a.length ? a : [fixed])); } }
+  return buildSandbox({ globals: { Date: FixedDate } });
+}
+
+test("day & night: the Label page has a Day & night section with its widgets, defaulting to now (UTC)", () => {
+  const { context } = dayNightSandbox();
+  const page = context.sectionPages.pages[3];
+  [context.dayNightDayField, context.dayNightMonthPicker, context.dayNightTimeField, context.timeLabelCheck, context.addDayNightBtn].forEach((w) => assert.ok(holds(page, w)));
+  let heading = false;
+  walkUi(page, (n) => { if (n.getText && n.getText() === "Day & night") heading = true; });
+  assert.ok(heading, "a Day & night heading");
+  assert.equal(context.dayNightDayField.getValue(), 7);
+  assert.equal(context.dayNightMonthPicker.getValue(), 9);
+  assert.equal(context.dayNightTimeField.getValue(), 14.5);
+  assert.equal(context.timeLabelCheck.getValue(), true);
+  assert.equal(context.addDayNightBtn._background, "#1F8F4E");
+  assert.equal(context.addDayNightBtn.getText(), "Add day & night");
+});
+
+test("day & night: Add makes the overlay for the typed date and time, then a second press updates it", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), calls = [], real = context.GeoScene.addDayNight;
+  context.GeoScene.addDayNight = (m, o) => { calls.push(plain(o)); return real(m, o); };
+  context.dayNightDayField.setValue(21); context.dayNightMonthPicker.setValue(5); context.dayNightTimeField.setValue(14.5);
+  context.addDayNightBtn.onClick();
+  assert.deepEqual(calls[0], { dayOfYear: 172, utcTime: 14.5, label: true });
+  assert.equal(context.statusLabel.getText().indexOf("Day & night added to " + map.name + " for 21 Jun 14:30 UTC. Key its Day of year and UTC time in " + map.name + " Time controls."), 0);
+  assert.ok(api.getChildren(map.groupId).some((id) => api.getNiceName(id) === "Day & night"));
+  context.dayNightDayField.setValue(1); context.dayNightMonthPicker.setValue(0); context.dayNightTimeField.setValue(24); context.timeLabelCheck.setValue(false);
+  context.addDayNightBtn.onClick();
+  assert.deepEqual(calls[1], { dayOfYear: 1, utcTime: 24, label: false });
+  assert.equal(context.statusLabel.getText().indexOf("Day & night updated to 1 Jan 00:00 UTC."), 0);
+});
+
+test("Bake: only day & night parts gets a message of its own; mixed adds a skipped count", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), f = G.findDayNight(map);
+  api.select([f.layers[0], f.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
+  api.select([r.groupId]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.select([countries, f.layers[0], f.layers[1]]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\)/);
+  assert.match(context.statusLabel.getText(), / Skipped 2 day & night part\(s\)\./);
+});
+
+test("Extract's source list leaves out the night layers and the time label", () => {
+  const { context } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true });
+  context.refreshSourceLayers();
+  assert.ok(context.sourceLayers.every((l) => l.meta.category !== "dayNight" && l.meta.category !== "timeLabel"));
+  assert.ok(context.GeoScene.findMapLayers(map).some((l) => l.meta.category === "dayNight"), "they are map layers");
+});
+
+// ---- Day & night: final fixes ----
+const resizeComp = (api, w, h) => {
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: w, y: h }; return realGet.apply(this, arguments); };
+};
+
+test("day & night: the time label's comp size follows a resized composition (fitFurniture and a Controls sync)", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const label = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId).label;
+  const v = (n) => dnVal(context, api, label, E.TIME_LABEL_INPUTS, n);
+  resizeComp(api, 1080, 1350);
+  G.fitFurniture(map);
+  assert.equal(v("compW"), 1080); assert.equal(v("compH"), 1350);
+  resizeComp(api, 3840, 2160);
+  context.GeoControlPanel.sync(map);
+  assert.equal(v("compW"), 3840); assert.equal(v("compH"), 2160);
+});
+
+// A duplicated Day & night group: the copy carries the original's record, but has its own layers.
+function duplicateDayNight(api, G, map) {
+  const a = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, recA = dnRec(api, a);
+  api.setUserData(a, "geoDayNight", Object.assign({}, recA, { camera: "hidden" }));
+  const b = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, recB = dnRec(api, b);
+  api.setUserData(a, "geoDayNight", recA);
+  api.setUserData(b, "geoDayNight", recA);
+  api.select([b]); api.bringToFront(); // like Ctrl+D: the copy lands on top
+  return { a, b, recA, recB };
+}
+
+test("day & night (duplicate): the original wins over its copy; with the original gone the copy adopts its own layers", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const { a, b, recA, recB } = duplicateDayNight(api, G, map);
+  const kids = api.getChildren(map.groupId);
+  assert.ok(kids.indexOf(b) < kids.indexOf(a), "the copy sits on top");
+  const f = G.findDayNight(map);
+  assert.equal(f.groupId, a);
+  assert.deepEqual(plain(f.layers), recA.layers); assert.deepEqual(plain(f.helpers), recA.helpers);
+  api.deleteLayer(a);
+  const g = G.findDayNight(map);
+  assert.equal(g.groupId, b);
+  assert.deepEqual(plain(g.layers), recB.layers); assert.deepEqual(plain(g.helpers), recB.helpers);
+  assert.deepEqual(dnRec(api, b).layers, recB.layers, "the copy's record now names its own layers");
+  assert.deepEqual(dnRec(api, b).helpers, recB.helpers);
+});
+
+test("day & night (duplicate): an empty copy with the original's record is never picked over the original", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const a = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const copy = api.create("group", "Day & night");
+  api.parent(copy, map.groupId);
+  api.setUserData(copy, "geoDayNight", dnRec(api, a));
+  assert.ok(api.getChildren(map.groupId).indexOf(copy) < api.getChildren(map.groupId).indexOf(a), "the copy is on top");
+  assert.equal(G.findDayNight(map).groupId, a);
+});
+
+test("day & night: Add with every night layer deleted makes them again (and a lost helper), wired and recorded", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  rec.layers.forEach((id) => api.deleteLayer(id));
+  api.deleteLayer(rec.helpers[2]);
+  const r = G.addDayNight(map, { dayOfYear: 100, utcTime: 6 });
+  assert.equal(r.created, false); assert.equal(r.groupId, g);
+  assert.equal(r.restored, 5);
+  const f = G.findDayNight(map), now = dnRec(api, g);
+  assert.ok(f.layers.every(Boolean) && f.helpers.every(Boolean));
+  assert.deepEqual(now.layers, plain(f.layers)); assert.deepEqual(now.helpers, plain(f.helpers));
+  [0, 6, 12, 18].forEach((a, i) => {
+    const id = f.layers[i];
+    assert.equal(api.getNiceName(id), "Night " + a + "°");
+    assert.equal(api.getParent(id), g);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "dayOfYear"), 100);
+    assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "depression"), a);
+    assert.equal(api.getInConnection(id, "opacity"), f.helpers[i] + ".id");
+  });
+  assert.equal(f.helpers[0], rec.helpers[0], "a helper that was still there is kept");
+  assert.equal(api.getParent(f.helpers[2]), api.getParent(rec.helpers[0]), "in the same helpers group");
+});
+
+test("day & night: the panel says when it remade missing night layers", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  const rec = dnRec(api, context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  rec.layers.forEach((id) => api.deleteLayer(id));
+  context.addDayNightBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Day & night updated to 7 Oct 14:30 UTC\. Its missing night layers were made again\./);
+});
+
+test("day & night: a Time label left behind by a deleted overlay is used again, or removed without the label option", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const labels = () => api.getChildren(map.groupId).filter((id) => api.getNiceName(id) === "Time label");
+  const first = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), label = dnRec(api, first.groupId).label;
+  api.deleteLayer(first.groupId);
+  assert.deepEqual(plain(labels()), [label], "the label is left behind");
+  const second = G.addDayNight(map, { dayOfYear: 200, utcTime: 9, label: true });
+  assert.equal(second.created, true);
+  assert.deepEqual(plain(labels()), [label], "used again, not doubled");
+  assert.equal(dnRec(api, second.groupId).label, label);
+  assert.equal(dnVal(context, api, label, E.TIME_LABEL_INPUTS, "dayOfYear"), 200);
+  // an overlay whose record lost its label picks the stray one up too
+  const rec = dnRec(api, second.groupId);
+  api.setUserData(second.groupId, "geoDayNight", Object.assign({}, rec, { label: null }));
+  G.addDayNight(map, { dayOfYear: 201, utcTime: 9, label: true });
+  assert.deepEqual(plain(labels()), [label]);
+  assert.equal(dnRec(api, second.groupId).label, label);
+  // without the option, a fresh overlay removes the stray label
+  api.deleteLayer(second.groupId);
+  G.addDayNight(map, { dayOfYear: 10, utcTime: 1 });
+  assert.deepEqual(plain(labels()), []);
+});
+
+test("day & night: Add again leaves omitted values alone and skips an animated (keyed) input, saying so", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  G.addDayNight(map, {});
+  rec.layers.forEach((id) => { assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "dayOfYear"), 80); assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "utcTime"), 12); });
+  assert.equal(dnVal(context, api, rec.label, E.TIME_LABEL_INPUTS, "utcTime"), 12);
+  const at = "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "utcTime");
+  api.keyframe(rec.layers[0], 0, { [at]: 3 });
+  api.keyframe(rec.layers[0], 10, { [at]: 9 });
+  const r = G.addDayNight(map, { dayOfYear: 90, utcTime: 15 });
+  assert.deepEqual(plain(r.kept), ["UTC time"]);
+  assert.deepEqual(plain(api.getKeyframeTimes(rec.layers[0], at)), [0, 10], "the keys stay");
+  assert.equal(dnVal(context, api, rec.layers[0], E.NIGHT_INPUTS, "dayOfYear"), 90);
+  assert.equal(dnVal(context, api, rec.layers[1], E.NIGHT_INPUTS, "utcTime"), 15);
+  context.dayNightDayField.setValue(1); context.dayNightMonthPicker.setValue(0); context.dayNightTimeField.setValue(6);
+  context.addDayNightBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Day & night updated to 1 Jan 06:00 UTC\. It kept your animated UTC time\./);
+});
+
+test("day & night: Add again with the time on Controls values sets those values and keeps the layers connected; a keyed value is kept", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  const s = context.GeoControlPanel.sync(map), V = s.valuesId, slots = slotsOf(api, V);
+  const dayIn = V + "." + slots["dn:day"], timeIn = V + "." + slots["dn:time"];
+  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 18 });
+  assert.deepEqual(plain(r.kept), []);
+  assert.equal(api.get(V, slots["dn:day"]), 172); assert.equal(api.get(V, slots["dn:time"]), 18);
+  rec.layers.forEach((id) => {
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear")), dayIn);
+    assert.equal(api.getInConnection(id, "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "utcTime")), timeIn);
+  });
+  assert.equal(api.getInConnection(rec.label, "generator.array." + E.inputIndex(E.TIME_LABEL_INPUTS, "dayOfYear")), dayIn);
+  api.keyframe(V, 0, { [slots["dn:day"]]: 1 });
+  api.keyframe(V, 20, { [slots["dn:day"]]: 365 });
+  const r2 = G.addDayNight(map, { dayOfYear: 200, utcTime: 6 });
+  assert.deepEqual(plain(r2.kept), ["Day of year"]);
+  assert.deepEqual(plain(api.getKeyframeTimes(V, slots["dn:day"])), [0, 20]);
+  assert.equal(api.get(V, slots["dn:time"]), 6);
+  // a time wired to something else is left alone as well
+  const other = api.create("javaScript", "Clock");
+  api.connect(other, "id", rec.layers[2], "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "utcTime"), true);
+  assert.deepEqual(plain(G.addDayNight(map, { dayOfYear: 200, utcTime: 7 }).kept), ["Day of year", "UTC time"]);
+});
+
+test("Bake: a night layer or time label that is no longer in the overlay is still skipped as day & night", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  api.parent(rec.layers[1], map.groupId); // moved out of the group
+  api.setUserData(G.findDayNight(map).groupId, "geoDayNight", Object.assign({}, rec, { label: null }));
+  assert.equal(G.dayNightParts(map)[rec.layers[1]], undefined);
+  assert.equal(G.dayNightParts(map)[rec.label], undefined);
+  api.select([rec.layers[1], rec.label]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
+});
+
+test("Bake: day & night with callout or highlight parts and nothing baked names day & night too", () => {
+  const { context, api } = buildSandbox();
+  const map = findFrance(context), G = context.GeoScene;
+  context.highlightBtn.onClick();
+  const h = G.findHighlights(map)[0];
+  const co = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  const night = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId).layers[0];
+  api.select([co.label, night]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Callouts and day & night can't be baked.");
+  api.select([h.shape, night]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights and day & night can't be baked.");
+  api.select([h.shape, co.label, night]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Highlights, callouts and day & night can't be baked.");
 });

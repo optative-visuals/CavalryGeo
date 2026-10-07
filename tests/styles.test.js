@@ -142,3 +142,18 @@ test("calloutBox: the ocean colour mixed 15% toward white", () => {
   assert.equal(S.valueFor(S.builtIn("Dark"), { role: "calloutBox", kind: "color" }), "#3f4a52");
   assert.equal(S.valueFor(S.builtIn("Dark"), { role: "land", kind: "color" }), S.builtIn("Dark").colors.land);
 });
+
+test("night colour: the ocean mixed 60 % toward black, a role that targets the night layers", () => {
+  assert.equal(S.nightColour(S.DARK), "#0c1114");
+  assert.equal(S.nightColour({ colors: { ocean: "#ffffff" } }), "#666666");
+  const t = S.targets({ nightLayers: ["n1", "n2"], timeLabels: ["t1"] });
+  assert.deepEqual(t, [
+    { layer: "n1", attr: "material.materialColor", role: "night", kind: "color" },
+    { layer: "n2", attr: "material.materialColor", role: "night", kind: "color" },
+    { layer: "t1", attr: "material.materialColor", role: "text", kind: "color" }
+  ]);
+  const light = S.builtIn("Light");
+  assert.equal(S.valueFor(light, t[0]), S.nightColour(light));
+  assert.equal(S.valueFor(light, t[2]), light.colors.text);
+  assert.deepEqual(S.layerStyle(light, "timeLabel"), { fill: light.colors.text });
+});

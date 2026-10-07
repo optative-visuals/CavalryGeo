@@ -154,6 +154,24 @@ adding street layers.
       group with its own "Callout 2 · ..." rows in Overlay controls; dragging the copy's label moves only the copy,
       and the copy's line and dot still follow its place when the camera moves.
 
+## Label → Day & night
+
+- [ ] 19m. Label → Pins → Day & night: the day, month and UTC time boxes show today's date and the current time
+      (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
+      layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
+      in <map> Time controls.", and the night side is shaded.
+- [ ] 19n. Change the date and time, press **Add day & night** again → "Day & night updated to ...", no second
+      group, and the shadow and Time label move.
+- [ ] 19o. In Time controls, key **Day of year** and **UTC time** → the shadow sweeps across the map and the label
+      follows. Try flat, Equal Earth and globe views, and a date near a solstice (the pole stays covered).
+      Flat: with the camera over the Pacific (lon 170), land just past the date line (Alaska, Hawaii) is shaded
+      when it is night there. Equal Earth: the shadow stays inside the oval and hugs its curved left and right
+      edges, with nothing drawn outside it. Globe: the shadow's edge follows the rim of the globe; turn the camera
+      to the sunlit side and no night shows; point it at the spot where it is midnight and nearly the whole
+      disc is shaded, darkest in the middle. Set UTC time to 24 → the label reads 00:00 of the same date.
+- [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
+      baked."; Extract's layer list does not show them.
+
 ## Label → Routes
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route

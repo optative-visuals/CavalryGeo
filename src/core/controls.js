@@ -22,6 +22,9 @@ var GeoControls = (function () {
     buildings: "Buildings", water: "Water", parks: "Parks", roads: "Roads", railways: "Railways" };
   var SB = function (n) { return IN + E.inputIndex(E.SCALE_BAR_INPUTS, n); }, NA = function (n) { return IN + E.inputIndex(E.NORTH_ARROW_INPUTS, n); };
   var CO_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "draw"), CO_STYLE = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style");
+  var N_DAY = IN + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear"), N_TIME = IN + E.inputIndex(E.NIGHT_INPUTS, "utcTime");
+  var NH_NIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night"), NH_TWILIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight");
+  var TL = function (n) { return IN + E.inputIndex(E.TIME_LABEL_INPUTS, n); };
   function choice(max) { return { hardMin: 0, hardMax: max, step: 1 }; }
   var CORNERS = " (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)";
   // The attributes a values input may drive on each kind of member: the glue reads their
@@ -33,11 +36,12 @@ var GeoControls = (function () {
     dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
-    calloutDraw: [CO_DRAW, CO_STYLE], calloutBend: [CO_STYLE], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y]
+    calloutDraw: [CO_DRAW, CO_STYLE], calloutBend: [CO_STYLE], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
+    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
-  var GROUPS = ["main", "overlay", "data", "extract"];
+  var GROUPS = ["main", "overlay", "data", "extract", "time"];
 
   // What a layer's geoLinks user data says once a values input has been connected to it.
   function recordFor(valuesId, key) { return valuesId + "|" + key; }
@@ -245,6 +249,31 @@ var GeoControls = (function () {
       value("furn:north:margin", "double", nn + "Margin", [na], NA("margin"));
       value("furn:north:size", "double", nn + "Size", [na], NA("size"));
     }
+    // Day & night: its time, colour and look as values on the night layers and opacity helpers (script
+    // inputs, never renamed there); hiding the group and the time label's own look go straight on their attributes.
+    group = "time";
+    var dn = model.dayNight;
+    if (dn) {
+      var nl = (dn.layers || []).filter(Boolean), nh = (dn.helpers || []).filter(Boolean), tl = dn.label, dsn = "Day & night" + SEP;
+      var timeTargets = function (attr, labelAttr) {
+        var t = nl.map(function (m) { return { m: m, attr: attr }; });
+        if (tl) t.push({ m: tl, attr: labelAttr });
+        return t;
+      };
+      valueTargets("dn:day", "double", dsn + "Day of year (1–365)", timeTargets(N_DAY, TL("dayOfYear")), { hardMin: 1, hardMax: 365 });
+      valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(N_TIME, TL("utcTime")), { hardMin: 0, hardMax: 24 });
+      value("dn:colour", "color", dsn + "Night colour", nl, FILL);
+      value("dn:night", "double", dsn + "Night opacity", nh, NH_NIGHT, { hardMin: 0, hardMax: 100 });
+      value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", nh, NH_TWILIGHT, choice(1));
+      direct(dn.id, "hidden", dsn + "Hide");
+      if (tl) {
+        var tn = "Time label" + SEP;
+        direct(tl.id, "hidden", tn + "Hide");
+        direct(tl.id, FILL, tn + "Colour");
+        value("dn:labelSize", "double", tn + "Size", [tl], TL("size"));
+        value("dn:labelCorner", "double", tn + "Corner" + CORNERS, [tl], TL("corner"), choice(3));
+      }
+    }
     return out;
   }
 
@@ -259,6 +288,8 @@ var GeoControls = (function () {
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
+    var dn = model.dayNight;
+    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], [dn.label]).forEach(add); }
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};
