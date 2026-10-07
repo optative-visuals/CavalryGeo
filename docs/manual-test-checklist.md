@@ -296,7 +296,18 @@ adding street layers.
 - [ ] 44. NASA Blue Marble on a world view → whole-Earth imagery.
 - [ ] 45. MapTiler with your key (if you have one) → the plan counts tiles (limit 300, warning
       above 150) → satellite, then `streets-v2`; a wrong key → "MapTiler rejected your key".
-- [ ] 46. Switch the camera to the globe → imagery disappears; back to Web Mercator → it returns.
+- [ ] 46. Bent imagery, globe: with the Cavalry Geo Reproject plugin installed (drag `CavalryGeo_plugin`
+      into Cavalry and confirm), a world flight on the globe → Build imagery → a group "Imagery: <source>"
+      holding "Imagery source", and an "Imagery source: <source> · <map name>" composition in Assets →
+      imagery wraps the globe, lining up with the borders; poles filled by stretching, no gaps.
+- [ ] 46b. Same on Equal Earth → imagery fills the outline, lining up with the borders.
+- [ ] 46c. Date line: a flight from longitude 170 to −170 (globe and Equal Earth) → Build imagery →
+      imagery is continuous across the date line, no seam or gap.
+- [ ] 46d. Without the plugin installed, Build imagery on the globe → stops with "Imagery on the globe and
+      Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder…"; nothing
+      is downloaded or built. A Web Mercator build still works with no plugin.
+- [ ] 46e. Rebuild flat ↔ bent: build on Web Mercator, switch the map to the globe and build again → the
+      flat group is replaced by the bent one; and back → the bent group and its composition are replaced.
 - [ ] 47. Cancel during a download → "Download cancelled. Files still downloading in the
       background are kept; nothing was built."; Build again finishes quickly. Pressing Build
       imagery while it downloads → "Imagery is already downloading — press Cancel to stop." Build again and
