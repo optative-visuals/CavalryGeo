@@ -7590,6 +7590,13 @@ test("a panel action scans the comp's layers no more often than before the furni
 // ---- Simpler route controls: numbers, titles, Travel % helpers ----
 const STOPS3 = [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 5, lat: 5 }, { name: "C", lon: 10, lat: 0 }];
 function drawsOf(api, G, groupId) { return plain(G.routeDraws(groupId)); }
+const CLIPDRAW = "array." + GeoExpressionT.inputIndex(GeoExpressionT.CLIP_INPUTS, "draw");
+// What drives a leg's trim end: the draw helper's "id" output, directly (old-style legs) or through the leg's clip end helper.
+function trimChain(api, line) {
+  const from = String(api.getInConnection(line, "stroke.trimEnd") || ""), id = from.split(".")[0];
+  if (id && /"category":"legClip"/.test(String(api.get(id, "expression")))) return api.getInConnection(id, CLIPDRAW);
+  return from;
+}
 
 test("new routes are numbered, titled Route n, and each leg gets a draw helper on its trim end", () => {
   const { context, api } = buildSandbox();
@@ -7602,7 +7609,7 @@ test("new routes are numbered, titled Route n, and each leg gets a draw helper o
   assert.equal(draws.length, 2);
   draws.forEach((d, k) => {
     assert.equal(api.getNiceName(d), "Leg " + (k + 1) + " draw");
-    assert.equal(api.getInConnection(r1.legs[k], "stroke.trimEnd"), d + ".id");
+    assert.equal(trimChain(api, r1.legs[k]), d + ".id");
     assert.equal(api.get(d, "array.1"), k);
     assert.equal(api.get(d, "array.2"), 2);
     assert.equal(api.get(d, "array.0"), 100);
@@ -7654,7 +7661,7 @@ test("prepareRoutes numbers existing unnumbered routes in Scene Window order, re
   assert.equal(api.getNiceName(b.groupId), "My trip", "a user name is kept");
   const drawsA = drawsOf(api, G, a.groupId);
   assert.equal(drawsA.length, 1, "the animated first leg gets no helper");
-  assert.equal(api.getInConnection(a.legs[1], "stroke.trimEnd"), drawsA[0] + ".id");
+  assert.equal(trimChain(api, a.legs[1]), drawsA[0] + ".id");
   assert.equal(api.get(drawsA[0], "array.1"), 1, "index keeps the leg's place in the route");
   assert.equal(drawsOf(api, G, b.groupId).length, 1);
   G.prepareRoutes(map);
@@ -7670,7 +7677,7 @@ test("the traveller still rides: its tip reads the leg's trim end, now driven by
   G.addTraveller(map, r.groupId, "dot");
   const t = plain(api.getUserDataKey(r.groupId, "geoTraveller"));
   assert.equal(api.getInConnection(t.legs[0].tip, "array.0"), r.legs[0] + ".stroke.trimEnd");
-  assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), G.routeDraws(r.groupId)[0] + ".id");
+  assert.equal(trimChain(api, r.legs[0]), G.routeDraws(r.groupId)[0] + ".id");
 });
 
 test("controls: a route shows Travel %, Arc height, Colour and Width in the Overlay controls, with the stops as notes; Travel drives every leg", () => {
@@ -7773,7 +7780,7 @@ test("controls upgrade: an older map's leg draw on %, Lean, Flip side and shape-
   assert.equal(api.getInConnection(legs[0].line, "stroke.trimEnd"), "");
   const draws = drawsOf(api, G, r.groupId);
   assert.equal(draws.length, 1);
-  assert.equal(api.getInConnection(legs[1].line, "stroke.trimEnd"), draws[0] + ".id");
+  assert.equal(trimChain(api, legs[1].line), draws[0] + ".id");
   // Lean and shape by hand let go, their values kept on the handle helpers, their keys forgotten.
   handles.forEach((h) => { assert.equal(api.getInConnection(h, LEAN), ""); assert.equal(api.get(h, LEAN), 15); });
   [legs[1].startHandle, legs[1].endHandle].forEach((h) => { assert.equal(api.getInConnection(h, HAND), ""); assert.equal(api.get(h, HAND), true); });
@@ -7797,7 +7804,7 @@ test("prepareRoutes: a leg whose trim end is connected (not keyed) to something 
   assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), mine + ".id", "still driven by the user's layer");
   const draws = drawsOf(api, G, r.groupId);
   assert.equal(draws.length, 1);
-  assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), draws[0] + ".id");
+  assert.equal(trimChain(api, r.legs[1]), draws[0] + ".id");
 });
 
 test("prepareRoutes: a leg whose trim end was set by hand to 50 counts as taken and gets no helper", () => {
@@ -7809,7 +7816,7 @@ test("prepareRoutes: a leg whose trim end was set by hand to 50 counts as taken 
   G.prepareRoutes(map);
   const draws = drawsOf(api, G, r.groupId);
   assert.equal(draws.length, 1);
-  assert.equal(api.getInConnection(r.legs[0], "stroke.trimEnd"), draws[0] + ".id");
+  assert.equal(trimChain(api, r.legs[0]), draws[0] + ".id");
   assert.equal(api.getInConnection(r.legs[1], "stroke.trimEnd"), "");
   assert.equal(api.get(r.legs[1], "stroke.trimEnd"), 50, "the user's value stays");
 });
@@ -7912,7 +7919,8 @@ test("prepareRoutes: a helper that can't be wired is deleted, the helpers made b
   unnumber(api, G, a);
   unnumber(api, G, b);
   const real = api.connect;
-  api.connect = function (x, y, z, w) { if (w === "stroke.trimEnd" && z === b.legs[1]) throw new Error("no"); return real.apply(this, arguments); };
+  const failing = plain(api.getUserDataKey(b.groupId, "geoRoute")).legs.filter((l) => l.line === b.legs[1])[0].clipEnd;
+  api.connect = function (x, y, z, w) { if (w === CLIPDRAW && z === failing) throw new Error("no"); return real.apply(this, arguments); };
   assert.doesNotThrow(() => G.prepareRoutes(map));
   api.connect = real;
   assert.equal(drawHelpers(api).length, 3, "b's leg 1 and both of a's: the failed helper is gone");
@@ -10195,4 +10203,155 @@ test("Routes: Shape is remembered as routeShape, other settings kept, and restor
   assert.equal(again.routeShapePicker.getValue(), 1);
   const junk = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ routeShape: 7 }); } }).context;
   assert.equal(junk.routeShapePicker.getValue(), 0);
+});
+
+// ---- Route legs clipped at the globe's edge ----
+const CIN = (name) => "array." + GeoExpressionT.inputIndex(GeoExpressionT.CLIP_INPUTS, name);
+function oldClipRoute(context, api, map, opts) {
+  // A route as built before clipping: no clip helpers, the old two-input fade, the draw straight on the trim end.
+  const r = context.GeoScene.createRoute(map, ABC, opts || { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  d.legs.forEach((l) => {
+    api.deleteLayer(l.clipStart); api.deleteLayer(l.clipEnd);
+    delete l.clipStart; delete l.clipEnd;
+    api._truncate(l.fade, "array", 2);
+    api.set(l.fade, { expression: "OLD" });
+    api.connect(l.draw, "id", l.line, "stroke.trimEnd", true);
+  });
+  api.setUserData(r.groupId, "geoRoute", d);
+  return r;
+}
+
+test("clipped legs: a new leg gets clip start / clip end / fade helpers wired to the line, the camera and the stops' places", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId), IN = (id, attr) => api.getInConnection(id, attr);
+  assert.equal(d.legs.length, 2);
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [l.fade, l.clipStart, l.clipEnd].forEach((h) => {
+      assert.equal(api.getParent(h), d.helpers);
+      assert.equal(api.hasAttribute(h, "array.20"), true);
+      assert.equal(api.hasAttribute(h, "array.21"), false);
+      assert.match(api.get(h, "expression"), /GeoCurve\.visibleSpan/);
+      assert.deepEqual([IN(h, CIN("aX")), IN(h, CIN("aY")), IN(h, CIN("bX")), IN(h, CIN("bY"))],
+        [l.line + ".generator.startPosition.x", l.line + ".generator.startPosition.y", l.line + ".generator.endPosition.x", l.line + ".generator.endPosition.y"]);
+      assert.deepEqual([IN(h, CIN("startX")), IN(h, CIN("startY")), IN(h, CIN("endX")), IN(h, CIN("endY"))],
+        [l.line + ".generator.startOffset.x", l.line + ".generator.startOffset.y", l.line + ".generator.endOffset.x", l.line + ".generator.endOffset.y"]);
+      ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((n, i) => assert.equal(IN(h, CIN(n)), map.cameraId + ".array." + i, n));
+      assert.equal(IN(h, CIN("aLon")), a.position + ".array.5"); assert.equal(IN(h, CIN("aLat")), a.position + ".array.6");
+      assert.equal(IN(h, CIN("bLon")), b.position + ".array.5"); assert.equal(IN(h, CIN("bLat")), b.position + ".array.6");
+      assert.equal(IN(h, CIN("shape")), l.startHandle + "." + HIN("shape"));
+    });
+    assert.equal(IN(l.line, "opacity"), l.fade + ".id");
+    assert.equal(IN(l.line, "stroke.trimStart"), l.clipStart + ".id");
+    assert.equal(IN(l.line, "stroke.trimEnd"), l.clipEnd + ".id");
+    assert.equal(IN(l.clipEnd, CIN("draw")), l.draw + ".id", "the draw feeds the clip end");
+    assert.deepEqual([IN(l.fade, CIN("fromOpacity")), IN(l.fade, CIN("toOpacity"))], [a.holder + ".opacity", b.holder + ".opacity"]);
+    assert.equal(api.get(l.line, "stroke.trim"), true);
+    assert.deepEqual(["legFade", "legClip", "legClip"], [l.fade, l.clipStart, l.clipEnd].map((h) => GeoExpressionT.readTag(api.get(h, "expression"), "GEO_META").category));
+  });
+  assert.equal(api.getNiceName(d.legs[0].clipStart), "Leg 1: A → B clip start");
+  assert.equal(api.getNiceName(d.legs[0].clipEnd), "Leg 1: A → B clip end");
+});
+
+test("clipped legs: a refresh gives an older route the clip helpers and the new fade, once", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene;
+  const r = oldClipRoute(context, api, map);
+  const before = routeData(api, r.groupId), IN = (id, attr) => api.getInConnection(id, attr);
+  before.legs.forEach((l) => assert.equal(IN(l.line, "stroke.trimEnd"), l.draw + ".id"));
+  G.prepareRoutes(map);
+  const d = routeData(api, r.groupId);
+  d.legs.forEach((l) => {
+    assert.ok(l.clipStart && l.clipEnd);
+    assert.equal(api.getParent(l.clipStart), d.helpers); assert.equal(api.getParent(l.clipEnd), d.helpers);
+    assert.equal(IN(l.line, "stroke.trimStart"), l.clipStart + ".id");
+    assert.equal(IN(l.line, "stroke.trimEnd"), l.clipEnd + ".id");
+    assert.equal(IN(l.clipEnd, CIN("draw")), l.draw + ".id");
+    assert.equal(api.hasAttribute(l.fade, "array.20"), true);
+    assert.match(api.get(l.fade, "expression"), /visibleSpan/);
+    assert.equal(IN(l.fade, CIN("camProjection")), map.cameraId + ".array.4");
+    assert.equal(IN(l.fade, CIN("shape")), l.startHandle + "." + HIN("shape"));
+    assert.deepEqual([IN(l.fade, "array.0"), IN(l.fade, "array.1")], [d.stops[l.from].holder + ".opacity", d.stops[l.to].holder + ".opacity"], "the stops' opacities stay wired");
+  });
+  const count = api.getCompLayers(false).length, snapshot = JSON.stringify(plain(api._connections));
+  G.prepareRoutes(map);
+  assert.equal(api.getCompLayers(false).length, count, "no layers added");
+  assert.equal(JSON.stringify(plain(api._connections)), snapshot, "no connections changed");
+  assert.deepEqual(routeData(api, r.groupId), d);
+});
+
+test("clipped legs: a leg whose trim end the user owns keeps it; it still gets clip start and the new fade", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  const d0 = routeData(api, r.groupId), IN = (id, attr) => api.getInConnection(id, attr);
+  api.keyframe(d0.legs[0].line, 0, { "stroke.trimEnd": 0 });
+  api.keyframe(d0.legs[0].line, 9, { "stroke.trimEnd": 100 });
+  G.prepareRoutes(map);
+  const d = routeData(api, r.groupId), l = d.legs[0];
+  assert.equal(api.layerExists(d0.legs[0].clipEnd), false, "the clip end lets go");
+  assert.ok(!l.clipEnd);
+  assert.equal(IN(l.line, "stroke.trimEnd"), "");
+  assert.deepEqual(plain(api.getKeyframeTimes(l.line, "stroke.trimEnd")), [0, 9]);
+  assert.equal(IN(l.line, "stroke.trimStart"), l.clipStart + ".id");
+  assert.equal(IN(l.line, "opacity"), l.fade + ".id");
+  assert.ok(d.legs[1].clipEnd, "the other leg is unaffected");
+  const count = api.getCompLayers(false).length;
+  G.prepareRoutes(map);
+  assert.equal(api.getCompLayers(false).length, count);
+  // An older leg whose trim end was set by hand: no draw helper, so no clip end either.
+  const old = oldClipRoute(context, api, map);
+  const od = routeData(api, old.groupId);
+  api.deleteLayer(od.legs[0].draw); delete od.legs[0].draw; api.setUserData(old.groupId, "geoRoute", od);
+  api.set(od.legs[0].line, { "stroke.trimEnd": 50 });
+  G.prepareRoutes(map);
+  const after = routeData(api, old.groupId);
+  assert.ok(after.legs[0].clipStart); assert.ok(!after.legs[0].clipEnd);
+  assert.equal(api.get(after.legs[0].line, "stroke.trimEnd"), 50);
+  assert.ok(after.legs[1].clipEnd);
+});
+
+test("clipped legs: travellers read the leg's trim start and un-clipped draw, and a refresh upgrades an older traveller", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene, IN = (id, attr) => api.getInConnection(id, attr);
+  const r = G.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  G.addTraveller(map, r.groupId, "dot");
+  const t = plain(api.getUserDataKey(r.groupId, "geoTraveller")), d = routeData(api, r.groupId);
+  const SH = (later, n) => "array." + (later + n);
+  t.legs.forEach((leg, i) => {
+    const later = t.legs.length - 1 - i;
+    assert.equal(IN(leg.show, SH(later, 2)), leg.line + ".stroke.trimStart");
+    assert.equal(IN(leg.show, SH(later, 3)), d.legs[i].draw + ".id");
+    assert.equal(api.hasAttribute(leg.show, SH(later, 4)), false);
+    assert.equal(IN(leg.tip, "array.0"), leg.line + ".stroke.trimEnd", "the tip still rides the (clipped) trim end");
+  });
+  // An older traveller: show helpers with only their first inputs.
+  t.legs.forEach((leg, i) => {
+    api._truncate(leg.show, "array", t.legs.length - 1 - i + 2);
+    api.set(leg.show, { expression: "OLD" });
+  });
+  G.prepareRoutes(map);
+  t.legs.forEach((leg, i) => {
+    const later = t.legs.length - 1 - i;
+    assert.equal(IN(leg.show, SH(later, 2)), leg.line + ".stroke.trimStart");
+    assert.equal(IN(leg.show, SH(later, 3)), d.legs[i].draw + ".id");
+    assert.match(api.get(leg.show, "expression"), /<= _i\d+ \+ 1e-6/);
+    assert.equal(api.hasAttribute(leg.show, SH(later, 4)), false);
+  });
+  const count = api.getCompLayers(false).length, snapshot = JSON.stringify(plain(api._connections));
+  G.prepareRoutes(map);
+  assert.equal(api.getCompLayers(false).length, count);
+  assert.equal(JSON.stringify(plain(api._connections)), snapshot);
+});
+
+test("clipped legs: deleting a route takes the clip helpers with it", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId), helpers = d.legs.reduce((a, l) => a.concat([l.clipStart, l.clipEnd, l.fade]), []);
+  api.deleteLayer(r.groupId);
+  helpers.forEach((h) => assert.equal(api.layerExists(h), false));
 });

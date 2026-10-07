@@ -220,7 +220,7 @@ test("traveller helpers: tip clamps to 0..99.9; show is the current leg only", (
   assert.equal(run(tip, [100]), 99.9);
   assert.equal(run(tip, [-5]), 0);
   assert.deepEqual(E.TRAVELLER_TIP_INPUTS.map((i) => i[0]), ["drawOn"]);
-  assert.deepEqual(E.travellerShowInputs(2).map((i) => i[0]), ["drawOn", "legOpacity", "later1", "later2"]);
+  assert.deepEqual(E.travellerShowInputs(2).map((i) => i[0]), ["drawOn", "legOpacity", "later1", "later2", "trimStart", "drawFull"]);
   const show2 = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 2);
   assert.equal(run(show2, [0, 100, 0, 0]), 0, "not started → hidden");
   assert.equal(run(show2, [40, 100, 0, 0]), 100, "drawing, later legs not started → shown");
@@ -437,4 +437,72 @@ test("the opacity expression treats non-numbers as the defaults", () => {
   const got = Function("night", "twilight", "step", "return eval(" + JSON.stringify(expr) + ");")(NaN, undefined, "x");
   assert.ok(isFinite(got));
   assert.ok(Math.abs(got - require("../src/core/sun.js").stepOpacity(55, 1, 0)) < 1e-9);
+});
+
+test("route clip helpers: trim start / trim end / fade follow GeoCurve.visibleSpan on the globe", () => {
+  const vm = require("node:vm");
+  const bundle = require("../tools/buildlib.js").buildCurveSource();
+  const Curve = require("../src/core/curve.js"), P = require("../src/core/projection.js");
+  const byName = (extra) => {
+    const ctx = {};
+    E.CLIP_INPUTS.forEach((inp) => { ctx[inp[0]] = inp[1]; });
+    return Object.assign(ctx, extra);
+  };
+  const run = (expr, extra) => vm.runInNewContext(expr, byName(extra));
+  const meta = (c) => ({ camera: "c", category: c });
+  const expr = { start: E.routeClipStartExpression(bundle, meta("legClip")), end: E.routeClipEndExpression(bundle, meta("legClip")), fade: E.routeClipFadeExpression(bundle, meta("legFade")) };
+  assert.deepEqual(E.readTag(expr.start, "GEO_META"), { camera: "c", category: "legClip" });
+  assert.equal(E.CLIP_INPUTS[0][0], "fromOpacity"); assert.equal(E.CLIP_INPUTS[1][0], "toOpacity");
+  assert.equal(E.FADE_INPUTS.length, 2);
+  // London -> Tokyo from the west: a stop hidden at the far end.
+  const cam = { lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 }, L = [-0.13, 51.51], T = [139.69, 35.68];
+  const pr = P.makeProjector(cam, false), p0 = [0, 0], p1 = [0, 0];
+  pr(L[0], L[1], p0); pr(T[0], T[1], p1);
+  const gc = { cam, aLon: L[0], aLat: L[1], bLon: T[0], bLat: T[1], offA: [0, 0], offB: [0, 0] };
+  const h = Curve.greatCircleHandles(p0, p1, gc, { arc: 0 });
+  const span = Curve.visibleSpan(p0, p1, h.start, h.end, gc);
+  const inputs = { aX: p0[0], aY: p0[1], bX: p1[0], bY: p1[1], startX: h.start[0], startY: h.start[1], endX: h.end[0], endY: h.end[1], shape: 1,
+    camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: 0, camProjection: 2, aLon: L[0], aLat: L[1], bLon: T[0], bLat: T[1] };
+  assert.ok(span.s1 > 0.1 && span.s1 < 0.9);
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, a + " vs " + b);
+  near(run(expr.start, inputs), 0);
+  near(run(expr.end, Object.assign({ draw: 100 }, inputs)), span.s1 * 100);
+  near(run(expr.end, Object.assign({ draw: 20 }, inputs)), 20);
+  assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0 }, inputs)), 100, "a hidden stop no longer fades the leg");
+  // Seen from the east the leg starts at the limb; trim start never passes the draw.
+  const cam2 = { lat: 0, lon: 110, zoom: 2, rotation: 0, projection: 2 }, pr2 = P.makeProjector(cam2, false), q0 = [0, 0], q1 = [0, 0];
+  pr2(L[0], L[1], q0); pr2(T[0], T[1], q1);
+  const gc2 = { cam: cam2, aLon: L[0], aLat: L[1], bLon: T[0], bLat: T[1], offA: [0, 0], offB: [0, 0] };
+  const h2 = Curve.greatCircleHandles(q0, q1, gc2, { arc: 0 }), span2 = Curve.visibleSpan(q0, q1, h2.start, h2.end, gc2);
+  const in2 = Object.assign({}, inputs, { aX: q0[0], aY: q0[1], bX: q1[0], bY: q1[1], startX: h2.start[0], startY: h2.start[1], endX: h2.end[0], endY: h2.end[1], camLon: 110 });
+  assert.ok(span2.s0 > 0.1);
+  near(run(expr.start, Object.assign({ draw: 100 }, in2)), span2.s0 * 100);
+  near(run(expr.start, Object.assign({ draw: 5 }, in2)), 5);
+  near(run(expr.end, Object.assign({ draw: 100 }, in2)), 100);
+  // Nothing visible: fade 0, draw untouched.
+  const far = Object.assign({}, inputs, { camLat: -65, camLon: -100 });
+  assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, far)), 0);
+  near(run(expr.end, Object.assign({ draw: 70 }, far)), 70);
+  // Flat map / Equal Earth / Arc shape: identical to today.
+  [Object.assign({}, inputs, { camProjection: 0 }), Object.assign({}, inputs, { camProjection: 1 }), Object.assign({}, inputs, { shape: 0 })].forEach((f) => {
+    near(run(expr.start, Object.assign({ draw: 100 }, f)), 0);
+    near(run(expr.end, Object.assign({ draw: 100 }, f)), 100);
+    assert.equal(run(expr.fade, Object.assign({ fromOpacity: 100, toOpacity: 0 }, f)), 0, "stops' opacities still fade the leg");
+    assert.equal(run(expr.fade, Object.assign({ fromOpacity: 100, toOpacity: 100 }, f)), 100);
+  });
+});
+
+test("traveller show helper: also hides before the leg's clip start and after its clipped end", () => {
+  const vm = require("node:vm");
+  const run = (expr, extra) => vm.runInNewContext(expr, extra);
+  const show = E.travellerShowExpression({ camera: "c", category: "travellerShow" }, 1);
+  assert.deepEqual(E.travellerShowInputs(1).map((i) => i[0]), ["drawOn", "legOpacity", "later1", "trimStart", "drawFull"]);
+  const base = { drawOn: 40, legOpacity: 100, later1: 0, trimStart: 0, drawFull: 0 };
+  assert.equal(run(show, base), 100, "an unclipped leg behaves as before");
+  assert.equal(run(show, Object.assign({}, base, { drawOn: 0 })), 0);
+  assert.equal(run(show, Object.assign({}, base, { trimStart: 40 })), 0, "tip at the clip start: still round the back");
+  assert.equal(run(show, Object.assign({}, base, { trimStart: 30 })), 100);
+  assert.equal(run(show, Object.assign({}, base, { drawFull: 70 })), 0, "the draw has gone past the clipped end");
+  assert.equal(run(show, Object.assign({}, base, { drawFull: 40 })), 100);
+  assert.equal(run(show, Object.assign({}, base, { later1: 5 })), 0);
 });

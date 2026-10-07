@@ -135,3 +135,77 @@ test("greatCircleHandles: identical and antipodal stops fall back to Arc", () =>
   const anti = C.greatCircleHandles(p0, p1, { cam, aLon: 10, aLat: 20, bLon: -170, bLat: -20, offA: [0, 0], offB: [0, 0] }, opts);
   assert.deepEqual(anti, C.handles(p0, p1, opts));
 });
+
+// ---- visibleSpan ----
+// The leg as the scene draws it: stops on screen (hidden ones pushed onto the limb), great-circle handles.
+function leg(cam, A = L, B = T) {
+  const proj = P.makeProjector(cam, false), p0 = [0, 0], p1 = [0, 0];
+  proj(A[0], A[1], p0); proj(B[0], B[1], p1);
+  const gc = { cam, aLon: A[0], aLat: A[1], bLon: B[0], bLat: B[1], offA: [0, 0], offB: [0, 0] };
+  const h = C.greatCircleHandles(p0, p1, gc, { arc: 0 });
+  return { p0, p1, h, gc, span: C.visibleSpan(p0, p1, h.start, h.end, gc) };
+}
+// The point a fraction s along the leg's screen length.
+function alongLeg(p0, p1, h, s) {
+  const pts = [], cum = [0];
+  for (let i = 0; i <= 2000; i++) { pts.push(at(p0, p1, h, i / 2000)); if (i) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); }
+  const want = s * cum[2000];
+  for (let i = 1; i <= 2000; i++) if (cum[i] >= want) return pts[i];
+  return pts[2000];
+}
+// Where the great circle A -> B leaves the front hemisphere, projected (bisection, independent of visibleSpan).
+function limbCrossing(cam, A, B, from, to) {
+  const raw = P.makeProjector(cam, true), q = [0, 0];
+  const vis = (t) => { const g = C.greatCirclePoint(A[0], A[1], B[0], B[1], t); return raw(g[0], g[1], q); };
+  let a = from, b = to;
+  for (let i = 0; i < 40; i++) { const m = (a + b) / 2; if (vis(m) === vis(a)) a = m; else b = m; }
+  const g = C.greatCirclePoint(A[0], A[1], B[0], B[1], (a + b) / 2);
+  raw(g[0], g[1], q);
+  return q;
+}
+
+test("visibleSpan: flat projections show the whole leg", () => {
+  [0, 1].forEach((projection) => {
+    const cam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection };
+    assert.deepEqual(plainSpan(leg(cam).span), { s0: 0, s1: 1 });
+  });
+});
+function plainSpan(s) { return s && { s0: s.s0, s1: s.s1 }; }
+
+test("visibleSpan: London to Tokyo seen from the west is cut off where it goes round the back", () => {
+  const cam = { lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 };
+  const { p0, p1, h, span } = leg(cam);
+  assert.equal(span.s0, 0);
+  assert.ok(span.s1 > 0.05 && span.s1 < 0.95, "s1 " + span.s1);
+  const want = limbCrossing(cam, L, T, 0, 1), got = alongLeg(p0, p1, h, span.s1);
+  assert.ok(Math.hypot(got[0] - want[0], got[1] - want[1]) < 6, "off by " + Math.hypot(got[0] - want[0], got[1] - want[1]));
+});
+
+test("visibleSpan: seen from the east the leg starts at the limb and ends at Tokyo", () => {
+  const cam = { lat: 0, lon: 110, zoom: 2, rotation: 0, projection: 2 };
+  const { p0, p1, h, span } = leg(cam);
+  assert.equal(span.s1, 1);
+  assert.ok(span.s0 > 0.05 && span.s0 < 0.95, "s0 " + span.s0);
+  const want = limbCrossing(cam, L, T, 0, 1), got = alongLeg(p0, p1, h, span.s0);
+  assert.ok(Math.hypot(got[0] - want[0], got[1] - want[1]) < 6, "off by " + Math.hypot(got[0] - want[0], got[1] - want[1]));
+});
+
+test("visibleSpan: a leg wholly on the far side is null; wholly in front is the whole leg", () => {
+  const far = { lat: -65, lon: -100, zoom: 2, rotation: 0, projection: 2 };
+  assert.equal(leg(far).span, null);
+  const near = { lat: 45, lon: 60, zoom: 2, rotation: 0, projection: 2 };
+  assert.deepEqual(plainSpan(leg(near, [30, 40], [90, 50]).span), { s0: 0, s1: 1 });
+});
+
+test("visibleSpan: a long leg with both stops in front is whole", () => {
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 };
+  const { span } = leg(cam, [-80, 0], [80, 60]);
+  assert.deepEqual(plainSpan(span), { s0: 0, s1: 1 });
+});
+
+test("visibleSpan: identical and antipodal stops", () => {
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 };
+  assert.deepEqual(plainSpan(C.visibleSpan([0, 0], [10, 0], [0, 0], [0, 0], { cam, aLon: 0, aLat: 0, bLon: 0, bLat: 0 })), { s0: 0, s1: 1 });
+  assert.equal(C.visibleSpan([0, 0], [10, 0], [0, 0], [0, 0], { cam, aLon: 170, aLat: 0, bLon: 170, bLat: 0 }), null);
+  assert.deepEqual(plainSpan(C.visibleSpan([0, 0], [10, 0], [0, 0], [0, 0], { cam, aLon: 0, aLat: 0, bLon: 180, bLat: 0 })), { s0: 0, s1: 1 });
+});

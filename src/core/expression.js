@@ -178,6 +178,27 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
   }
 
+  // Globe legs are cut off where they go round the back: three helpers per leg (trim start, trim
+  // end, fade) share one input list, so they are wired alike. The fade inputs come first (an older
+  // route's fade helper keeps its two and gains the rest); the leg's ends and offsets are read
+  // from the line itself.
+  var CLIP_INPUTS = FADE_INPUTS.concat([["aX", 0], ["aY", 0], ["bX", 0], ["bY", 0], ["startX", 0], ["startY", 0], ["endX", 0], ["endY", 0],
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0], ["draw", 100]]);
+  // Only a great-circle leg on the globe is clipped; the span (null = all hidden) is _sp.
+  var CLIP_SRC = "var _gl = _i10 >= 0.5 && Math.round(_i15) === 2;\n" +
+    "var _sp = _gl ? GeoCurve.visibleSpan([_i2, _i3], [_i4, _i5], [_i6, _i7], [_i8, _i9], " +
+    "{cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19}) : {s0: 0, s1: 1};\n";
+  function clipExpression(curveSrc, meta, body) {
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(CLIP_INPUTS) + CLIP_SRC + body + "\n";
+  }
+  // Trim start: the span's start, never past the draw (so trim start <= trim end).
+  function routeClipStartExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "Math.min(_sp ? _sp.s0 * 100 : 0, _i20);"); }
+  // Trim end: the draw, held at the span's end.
+  function routeClipEndExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_sp ? Math.min(_i20, _sp.s1 * 100) : _i20);"); }
+  // Opacity: fully shown unless none of the leg is visible; legs that are not clipped still
+  // fade with their stops.
+  function routeClipFadeExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_gl ? (_sp ? 100 : 0) : Math.min(_i0, _i1));"); }
+
   // Route travellers: a leg's copy sits at the tip of its draw-on (Cavalry wraps 100 % back
   // to the start, so stop just short) and only shows on the leg currently drawing.
   var TRAVELLER_TIP_INPUTS = [["drawOn", 100]];
@@ -219,10 +240,13 @@ var GeoExpression = (function () {
   function travellerShowInputs(laterCount) {
     var inputs = [["drawOn", 100], ["legOpacity", 100]];
     for (var k = 1; k <= laterCount; k++) inputs.push(["later" + k, 0]);
+    // The leg's trim start and un-clipped draw: the copy hides while its tip is before the clip
+    // start, or after the draw has gone past a clipped end (both 0 / absent on an unclipped leg).
+    inputs.push(["trimStart", 0], ["drawFull", 0]);
     return inputs;
   }
   function travellerShowExpression(meta, laterCount) {
-    var cond = "_i0 > 0";
+    var cond = "_i0 > _i" + (laterCount + 2) + " && _i" + (laterCount + 3) + " <= _i0 + 1e-6";
     for (var k = 0; k < laterCount; k++) cond += " && _i" + (k + 2) + " <= 0";
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(travellerShowInputs(laterCount)) + "((" + cond + ") ? _i1 : 0);\n";
   }
@@ -279,7 +303,7 @@ var GeoExpression = (function () {
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
-    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
+    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
     CALLOUT_GEOM_INPUTS: CALLOUT_GEOM_INPUTS, CALLOUT_DRAW_INPUTS: CALLOUT_DRAW_INPUTS, calloutEdgeExpression: calloutEdgeExpression, calloutBendExpression: calloutBendExpression, calloutDrawExpression: calloutDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,

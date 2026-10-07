@@ -72,6 +72,61 @@ var GeoCurve = (function () {
     return out;
   }
 
-  return { handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles };
+  // Which part of a globe leg is on the visible hemisphere, as fractions { s0, s1 } of the leg's
+  // own screen length (0 = first stop, 1 = last), or null when none of it is. The leg is the cubic
+  // through p0 (+ startOff), p1 (+ endOff). gc: { cam, aLon, aLat, bLon, bLat }. Flat maps show the
+  // whole leg. The visible part of the great circle between the stops is one contiguous arc: its
+  // limb crossings are found on the great circle and mapped onto the Bézier by nearest point.
+  function visibleSpan(p0, p1, startOff, endOff, gc) {
+    var cam = gc && gc.cam;
+    if (!cam || Math.round(cam.projection || 0) !== 2) return { s0: 0, s1: 1 };
+    var project = GeoProjection.makeProjector(cam, true), tmp = [0, 0];
+    function front(g) { return project(g[0], g[1], tmp); }
+    var w = angleBetween(unit(gc.aLon, gc.aLat), unit(gc.bLon, gc.bLat));
+    if (w < 1e-9 || w > Math.PI - 1e-6) {
+      return (front([gc.aLon, gc.aLat]) || front([gc.bLon, gc.bLat])) ? { s0: 0, s1: 1 } : null;
+    }
+    function at(t) { return greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, t); }
+    var N = 64, first = -1, last = -1, i;
+    for (i = 0; i <= N; i++) if (front(at(i / N))) { if (first < 0) first = i; last = i; }
+    if (first < 0) return null;
+    if (first === 0 && last === N) return { s0: 0, s1: 1 };
+    // Limb crossing between a visible and a hidden great-circle parameter, as a screen point.
+    function crossing(tIn, tOut) {
+      for (var k = 0; k < 12; k++) {
+        var m = (tIn + tOut) / 2;
+        if (front(at(m))) tIn = m; else tOut = m;
+      }
+      var g = at(tIn), q = [0, 0];
+      project(g[0], g[1], q);
+      return q;
+    }
+    var c1 = [p0[0] + startOff[0], p0[1] + startOff[1]], c2 = [p1[0] + endOff[0], p1[1] + endOff[1]];
+    var M = 128, pts = [], cum = [0];
+    for (i = 0; i <= M; i++) {
+      var t = i / M, u = 1 - t;
+      pts.push([u * u * u * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * p1[0],
+        u * u * u * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * p1[1]]);
+      if (i > 0) cum.push(cum[i - 1] + Math.sqrt(Math.pow(pts[i][0] - pts[i - 1][0], 2) + Math.pow(pts[i][1] - pts[i - 1][1], 2)));
+    }
+    var total = cum[M];
+    if (!(total > 1e-9)) return { s0: 0, s1: 1 };
+    function fractionOf(q) {
+      var best = Infinity, frac = 0;
+      for (var j = 0; j < M; j++) {
+        var ax = pts[j][0], ay = pts[j][1], dx = pts[j + 1][0] - ax, dy = pts[j + 1][1] - ay, l2 = dx * dx + dy * dy;
+        var v = l2 > 1e-12 ? Math.max(0, Math.min(1, ((q[0] - ax) * dx + (q[1] - ay) * dy) / l2)) : 0;
+        var ex = ax + v * dx - q[0], ey = ay + v * dy - q[1], d = ex * ex + ey * ey;
+        if (d < best) { best = d; frac = (cum[j] + v * Math.sqrt(l2)) / total; }
+      }
+      return frac;
+    }
+    var s0 = first === 0 ? 0 : fractionOf(crossing(first / N, (first - 1) / N));
+    var s1 = last === N ? 1 : fractionOf(crossing(last / N, (last + 1) / N));
+    if (s1 < s0) { var sw = s0; s0 = s1; s1 = sw; }
+    return { s0: s0, s1: s1 };
+  }
+
+  return { handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles, visibleSpan: visibleSpan };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoCurve;
