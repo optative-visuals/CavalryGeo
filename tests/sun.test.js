@@ -78,7 +78,7 @@ test("nightPath draws on a flat map, with a copy wrapped past the edge", () => {
   const g = S.nightPath({ lat: 0, lon: 180, zoom: 1, rotation: 0, projection: 2 }, 80, 12, 6, cav);
   assert.equal(g.cmds.filter((c) => c[0] === "close").length, 1);
   const q = S.nightPath(cam, 172, 12, 0, cav);
-  assert.equal(q.cmds.filter((c) => c[0] === "close").length, 1);
+  assert.equal(q.cmds.filter((c) => c[0] === "close").length, 3, "the ring and a copy on each side, for the overscan");
 });
 
 test("stepOpacity", () => {
@@ -118,8 +118,8 @@ test("nightPath covers cam.lon +- 180 on flat maps wherever the camera looks", (
   p2(180, 0, out); const a = out[0]; p2(260, 0, out); const b = out[0];
   const xs2 = lonsOf(S.nightPath(cam2, 80, 20, 0, cav));
   assert.ok(xs2.some((x) => x > a && x < b), "points in 180..260");
-  // a camera-centred pole cap needs just one ring
-  assert.equal(S.nightPath({ lat: 0, lon: 0, zoom: 1, rotation: 0, projection: 0 }, 172, 12, 0, cav).cmds.filter((c) => c[0] === "close").length, 1);
+  // a camera-centred pole cap: the ring and a copy on each side (the overscan past the edges)
+  assert.equal(S.nightPath({ lat: 0, lon: 0, zoom: 1, rotation: 0, projection: 0 }, 172, 12, 0, cav).cmds.filter((c) => c[0] === "close").length, 3);
 });
 
 // Fill check: the drawn night path (screen space, even-odd over every contour) against the
@@ -275,9 +275,72 @@ test("earthOutline: the Mercator rectangle spans the night's longitudes, so nigh
     const out = S.earthOutline(cam, cav).cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
     S.nightPath(cam, doy, utc, dep, cav).cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").forEach((c) => {
       const rr = rotation * Math.PI / 180, ux = c[1] * Math.cos(rr) + c[2] * Math.sin(rr);
+      const uy = -c[1] * Math.sin(rr) + c[2] * Math.cos(rr), oys = out.map((p) => -p[1] * Math.sin(rr) + p[2] * Math.cos(rr));
+      if (uy > Math.max.apply(null, oys) + 1e-6 || uy < Math.min.apply(null, oys) - 1e-6) return; // the overscan past the top / bottom edge, cut off by the mask
       if (Math.abs(ux) > 256) return; // beyond the camera's lon +- 180 view (zoom 1: 256 px) nothing shows
       const mx = out.reduce((t, p) => t + p[1], 0) / out.length, my = out.reduce((t, p) => t + p[2], 0) / out.length; // nudged 1e-6 toward the centre: points on the edge count
       assert.ok(inside(out, c[1] + (mx - c[1]) * 1e-6, c[2] + (my - c[2]) * 1e-6), lon + "/" + rotation);
     });
   }));
+});
+
+// ---- the night is drawn past the Earth's edge (overscan), so the blur's fade falls outside it ----
+const pts = (p) => p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+function contours(p) { const out = []; let cur = []; p.cmds.forEach((c) => { if (c[0] === "close") { out.push(cur); cur = []; } else cur.push(c); }); return out; }
+function inPoly(poly, x, y) { let n = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { if ((poly[i][2] > y) !== (poly[j][2] > y) && x < (poly[j][1] - poly[i][1]) * (y - poly[i][2]) / (poly[j][2] - poly[i][2]) + poly[i][1]) n = !n; } return n; }
+const covered = (p, x, y) => contours(p).some((c) => inPoly(c, x, y));
+const overscanOf = (zoom) => 2 * S.blurAmount(zoom, 1) + 2;
+
+test("overscan (globe): the limb is drawn at R + M, the terminator is where it was, the old night is still covered", () => {
+  const P = require("../src/core/projection.js");
+  [[2, 80, 12, 0], [4, 172, 3, 6], [3, 80, 23, 18], [2, 355, 20, 0]].forEach(([zoom, doy, utc, dep]) => [[20, 40], [-30, 200], [60, -100], [0, 0]].forEach(([lat, lon]) => {
+    const cam = { lat, lon, zoom, rotation: 0, projection: 2 }, R = P.worldScale(zoom), M = overscanOf(zoom);
+    const night = S.nightPath(cam, doy, utc, dep, cav), ps = pts(night), radii = ps.map((c) => Math.hypot(c[1], c[2]));
+    if (!ps.length) return;
+    // every point is inside the disc (terminator, interior) or on the pushed limb circle
+    radii.forEach((r) => assert.ok(r <= R + 1e-6 || Math.abs(r - (R - 0 + M)) < 1e-6, "radius " + r));
+    const pushed = ps.filter((c, i) => radii[i] > R + 1e-6);
+    if (!pushed.length || Math.min.apply(null, radii) > 0.9 * R) return; // (a sliver of night: nothing to check)
+    // the old path ran its limb arc at R between the same two terminator ends: those ends are on the disc's rim, and the rim
+    // points between them (the old limb) are covered by the new polygon
+    const dirs = pushed.map((c) => Math.atan2(c[2], c[1]));
+    [dirs[Math.floor(dirs.length / 2)]].forEach((a) => assert.ok(covered(night, R * Math.cos(a) * 0.999, R * Math.sin(a) * 0.999), "old limb point " + [zoom, doy, utc, dep, lat, lon]));
+    // the pushed limb's first and last point sit in the same direction as a terminator end on the rim
+    const rim = ps.filter((c, i) => Math.abs(radii[i] - R) < 1e-6);
+    [dirs[0], dirs[dirs.length - 1]].forEach((a) => assert.ok(rim.some((c) => Math.abs(Math.atan2(c[2], c[1]) - a) < 1e-6), "radial join"));
+  }));
+});
+
+test("overscan (flat maps): night along the outline reaches M - 1 px past it, away from the edge nothing moves", () => {
+  const P = require("../src/core/projection.js"), D = Math.PI / 180;
+  [1, 0].forEach((projection) => [[0, 2], [0, 3]].forEach(([c, zoom]) => [[80, 12, 0], [172, 3, 6], [355, 20, 0], [80, 0, 18]].forEach(([doy, utc, dep]) => {
+    const cam = { lat: 0, lon: 0, zoom, rotation: 0, projection }, M = overscanOf(zoom);
+    const outline = pts(S.earthOutline(cam, cav)), night = S.nightPath(cam, doy, utc, dep, cav);
+    const sun = S.subsolar(doy, utc), r = (90 - dep) * D;
+    const inNight = (lon, lat) => {
+      const cd = Math.sin(-sun.lat * D) * Math.sin(lat * D) + Math.cos(-sun.lat * D) * Math.cos(lat * D) * Math.cos((lon - sun.lon - 180) * D);
+      return Math.acos(Math.max(-1, Math.min(1, cd))) < r - 2 * D;
+    };
+    const proj = P.makeProjector(cam), o = [0, 0];
+    for (let lat = -80; lat <= 80; lat += 10) [-180, 180].forEach((lon) => {
+      if (!inNight(lon, lat)) return;
+      proj(lon, lat, o);
+      const sgn = lon < 0 ? -1 : 1; // the oval's edge slopes: probe straight out sideways, M - 1 px (the strip is wider)
+      assert.ok(covered(night, o[0] + sgn * (M - 1), o[1]), "side " + lon + "/" + lat + " proj " + projection);
+    });
+    [-1, 1].forEach((sg) => {
+      for (let lon = -170; lon <= 170; lon += 10) {
+        const lat = sg * (projection === 1 ? 90 : P.MAX_LAT);
+        if (!inNight(lon, sg * 89.9)) continue;
+        proj(lon, lat, o);
+        assert.ok(covered(night, o[0], o[1] + sg * (M - 1)), "pole " + lon + "/" + sg + " proj " + projection);
+      }
+    });
+    // the interior is untouched: every ring point well inside is a vertex of the path
+    const ring = S.nightRing(doy, utc, dep), all = pts(night);
+    ring.filter((p) => Math.abs(p[0]) < 170 && Math.abs(p[1]) < 80).forEach((p) => {
+      proj(p[0], p[1], o);
+      assert.ok(all.some((q) => Math.hypot(q[1] - o[0], q[2] - o[1]) < 1e-6), "ring point " + p);
+    });
+  })));
 });

@@ -96,13 +96,34 @@ var GeoSun = (function () {
     return res;
   }
 
-  function drawRings(path, rings, project) {
+  // How far (screen px) the night is drawn past the Earth's edge, so the night layers' blur fades out
+  // there, where the Night mask cuts it away, and not inside the Earth.
+  function overscan(cam) { return 2 * blurAmount(cam.zoom, 1) + 2; }
+
+  // Equal Earth: how many degrees of lon to draw past +-180 so the extra width is at least 2 M px, measured
+  // at the ring's highest latitude (where a degree of lon is narrowest), at most 30.
+  function overscanLon(ring, cam, M) {
+    var top = 0, i;
+    for (i = 0; i < ring.length; i++) top = Math.max(top, Math.abs(ring[i][1]));
+    var pr = GeoProjection.makeProjector({ lat: 0, lon: 0, zoom: cam.zoom, rotation: 0, projection: 1 }), a = [0, 0], b = [0, 0];
+    pr(0, top, a); pr(1, top, b);
+    var w = Math.abs(b[0] - a[0]);
+    return w < 1e-9 ? 30 : Math.min(30, 2 * M / w);
+  }
+
+  // push: { m, lim, ux, uy } moves a point whose |lat| >= lim (on the map's top or bottom edge) m px
+  // outward along the screen's up direction (ux, uy).
+  function drawRings(path, rings, project, push) {
     var out = [0, 0];
     for (var i = 0; i < rings.length; i++) {
       var r = rings[i];
       if (r.length < 3) continue;
       for (var k = 0; k < r.length; k++) {
         project(r[k][0], r[k][1], out);
+        if (push && Math.abs(r[k][1]) >= push.lim) {
+          var sg = r[k][1] > 0 ? 1 : -1;
+          out[0] += sg * push.m * push.ux; out[1] += sg * push.m * push.uy;
+        }
         if (k === 0) path.moveTo(out[0], out[1]); else path.lineTo(out[0], out[1]);
       }
       path.close();
@@ -123,6 +144,7 @@ var GeoSun = (function () {
     var nz = sl * Math.sin(p) + cl * Math.cos(p) * Math.cos(dl);
     var h = Math.sin(num(depression, 0) * D2R), rho = Math.sqrt(1 - h * h), sxy = Math.sqrt(nx * nx + ny * ny);
     var first = true;
+    var over = 1 + overscan(cam) / R; // the limb is drawn this much further out
     function put(x, y) {
       x *= R; y *= R;
       var X = x * cr - y * sr, Y = x * sr + y * cr;
@@ -151,7 +173,7 @@ var GeoSun = (function () {
     function rel(f) { f -= fn; while (f > Math.PI) f -= 2 * Math.PI; while (f < -Math.PI) f += 2 * Math.PI; return f; }
     var d1 = rel(Math.atan2(ty(a1), tx(a1))), d0 = rel(Math.atan2(ty(a0), tx(a0)));
     m = Math.max(1, Math.ceil(Math.abs(d0 - d1) / (2 * Math.PI) * N));
-    for (k = 1; k < m; k++) { var f = fn + d1 + (d0 - d1) * k / m; put(Math.cos(f), Math.sin(f)); }
+    for (k = 0; k <= m; k++) { var f = fn + d1 + (d0 - d1) * k / m; put(over * Math.cos(f), over * Math.sin(f)); } // both ends go straight out from the terminator
     path.close();
     return path;
   }
@@ -168,19 +190,26 @@ var GeoSun = (function () {
     if (proj >= 2) return globeNight(path, cam, doy, utc, depression);
     var ring = nightRing(doy, utc, depression), rings = [], lo = Infinity, hi = -Infinity, k;
     for (k = 0; k < ring.length; k++) { if (ring[k][0] < lo) lo = ring[k][0]; if (ring[k][0] > hi) hi = ring[k][0]; }
+    var M = overscan(cam), rot = num(cam.rotation, 0) * D2R;
+    var push = { m: M, lim: proj === 1 ? 90 - 1e-9 : GeoProjection.MAX_LAT - 1e-9, ux: -Math.sin(rot), uy: Math.cos(rot) };
     if (proj === 1) {
-      rings.push(densify(clipLon(clipLon(ring, -180, 1), 180, -1)));
-      if (hi > 180 + 1e-9) rings.push(densify(shiftRing(clipLon(ring, 180, 1), -360)));
-      if (lo < -180 - 1e-9) rings.push(densify(shiftRing(clipLon(ring, -180, -1), 360)));
+      // Cut at +-(180 + d), not at the oval: the copy of the ring a world to the left or right fills the
+      // strip past each edge, and the mask cuts it off.
+      var X = 180 + overscanLon(ring, cam, M);
+      [0, -360, 360].forEach(function (sh) {
+        var piece = clipLon(clipLon(sh === 0 ? ring : shiftRing(ring, sh), -X, 1), X, -1);
+        if (piece.length >= 3) rings.push(densify(piece));
+      });
     } else {
-      var c = num(cam.lon, 0), from = Math.min(-180, c - 180), to = Math.max(180, c + 180);
+      var c = num(cam.lon, 0), pad = M / GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(cam.zoom, 0)))) / D2R;
+      var from = Math.min(-180, c - 180) - pad, to = Math.max(180, c + 180) + pad; // a little further, so the blur fades off the edge
       var k0 = Math.floor((from - hi) / 360), k1 = Math.ceil((to - lo) / 360);
       for (k = k0; k <= k1; k++) {
         var sh = k * 360;
         if (hi + sh > from + 1e-9 && lo + sh < to - 1e-9) rings.push(sh === 0 ? ring : shiftRing(ring, sh));
       }
     }
-    drawRings(path, rings, GeoProjection.makeProjector(cam));
+    drawRings(path, rings, GeoProjection.makeProjector(cam), push);
     return path;
   }
 
