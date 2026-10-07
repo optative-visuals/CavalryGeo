@@ -10972,3 +10972,35 @@ test("day & night mask: an older overlay gets its mask on refresh, one the recor
   api.deleteLayer(g);
   assert.equal(api.layerExists(now.mask), false);
 });
+
+test("day & night: Refresh controls and Add again bring the night layers' and the mask's drawing up to date, once, touching nothing else", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const EXPR = "generator.expression";
+  context.GeoControlPanel.sync(map); // makes the Controls layers first
+  const want = (id) => api.get(id, EXPR);
+  const wanted = rec.layers.concat([rec.mask]).map(want);
+  const old = (id) => "/*OLD*/" + api.get(id, EXPR).replace(/overscan|earthOutline|nightPath/g, "x");
+  rec.layers.concat([rec.mask]).forEach((id) => api.set(id, { [EXPR]: old(id) }));
+  api.set(rec.layers[1], { "generator.array.5": 99 });
+  const mine = {}; [g, rec.mask].concat(rec.layers, rec.helpers, rec.blurs).forEach((id) => { mine[id] = true; });
+  const snap = () => JSON.stringify(plain(api._connections.filter((c) => mine[c[0]] || mine[c[2]])));
+  const before = snap(), inputs = rec.layers.map((id) => [5, 6, 7].map((k) => api.get(id, "generator.array." + k)));
+  context.GeoControlPanel.sync(map);
+  rec.layers.concat([rec.mask]).forEach((id, i) => assert.equal(want(id), wanted[i], "current expression " + i));
+  rec.layers.concat([rec.mask]).forEach((id) => assert.deepEqual(plain(E.readTag(want(id), "GEO_META")).camera, map.cameraId));
+  assert.deepEqual(rec.layers.map((id) => [5, 6, 7].map((k) => api.get(id, "generator.array." + k))), inputs);
+  assert.equal(snap(), before, "connections unchanged");
+  assert.deepEqual(dnRec(api, g), rec);
+  // second refresh and Add again write no expression
+  const real = api.set.bind(api), writes = [];
+  api.set = (id, o) => { if (o && Object.keys(o).indexOf(EXPR) >= 0) writes.push(id); return real(id, o); };
+  context.GeoControlPanel.sync(map); G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  assert.deepEqual(writes, []);
+  // Add again also updates an old one
+  api.set = real;
+  api.set(rec.layers[0], { [EXPR]: old(rec.layers[0]) });
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  assert.equal(want(rec.layers[0]), wanted[0]);
+});

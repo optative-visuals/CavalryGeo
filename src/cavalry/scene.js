@@ -2583,6 +2583,19 @@ var GeoScene = (function () {
     if (!maskOnGroup(mask, g)) api.connect(mask, "id", g, "masks");
     return mask;
   }
+  // Rewrites the drawing script of each night layer and of the Night mask to the current one when it differs
+  // (layers made by an earlier version carry the old drawing); inputs, values and connections stay. Compares
+  // first, so a layer that is up to date is not written.
+  function refreshNightScripts(map, layers, mask) {
+    var E = GeoExpression;
+    function fresh(id, expr) {
+      if (!id || !layerThere(id)) return;
+      var now = ""; try { now = String(readExpr(id, A.MAP_EXPR_ATTR) || ""); } catch (e) { now = ""; }
+      if (now !== expr) setOne(id, A.MAP_EXPR_ATTR, expr);
+    }
+    layers.forEach(function (id, i) { fresh(id, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: NIGHT_DEPRESSIONS[i] })); });
+    fresh(mask, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
+  }
   // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
   // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
   // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
@@ -2637,6 +2650,7 @@ var GeoScene = (function () {
     try {
       var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
       var mask = ensureNightMask(map, f.groupId, f.mask, track);
+      refreshNightScripts(map, f.layers, mask);
       if (made.length) {
         var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
         Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
@@ -2689,6 +2703,7 @@ var GeoScene = (function () {
         var restored = made.filter(function (id) { return id !== holder; }).length;
         var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
         var maskId = ensureNightMask(map, found.groupId, found.mask, track);
+        refreshNightScripts(map, layers, maskId);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
         found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
