@@ -933,7 +933,7 @@ var GeoScene = (function () {
   var REPROJECT_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
   var REFERENCE_NAME = "Imagery source", VIEW_NAME = "View", VIEW_MASK_NAME = "View mask";
   var FILTER_CAMERA_ATTRS = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
-  var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"], ["padding", "filter padding"]];
+  var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"]];
 
   function reprojectAvailable() {
     if (typeof api.getAllLayerTypes !== "function") return false;
@@ -960,14 +960,16 @@ var GeoScene = (function () {
     plan.cached = plan.items.filter(function (r) { return !miss[GeoBlocks.rectKey(r)]; }).length;
   }
 
-  // A new, empty source comp with the map comp's resolution, frame range and frame rate, and a
-  // see-through background. The map comp is active again when this returns or throws; onMade
+  // A new, empty source comp sized for the whole View box (see below), with the map comp's frame
+  // range and frame rate, and a see-through background. The map comp is active again when this returns or throws; onMade
   // gets the id as soon as the comp exists, so a failure further on can still delete it.
   function createSourceComp(name, mapComp, onMade) {
-    var res = api.get(mapComp, A.COMP_RESOLUTION_ATTR), range = compFrameRange(), fps = null, comp, o = {};
+    var size = A.readResolution(api.get(mapComp, A.COMP_RESOLUTION_ATTR)), range = compFrameRange(), fps = null, comp, o = {};
     try { fps = Number(api.get(mapComp, A.COMP_FPS_ATTR)); } catch (e) { fps = null; }
     try { comp = api.createComp(name); onMade(comp); } finally { api.setActiveComp(mapComp); }
-    o[A.COMP_RESOLUTION_ATTR] = res;
+    // A reference's filter only sees the comp inside its resolution rectangle (centred on the
+    // origin), so the comp must cover the masked View box: at most MAX_VIEW_PX + 4 either way.
+    o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
     o[A.COMP_BACKGROUND_ATTR] = { r: 0, g: 0, b: 0, a: 0 };
     api.set(comp, o);
     setOne(comp, A.COMP_END_ATTR, range.end); // the end first, so a late start never lands past the old end
@@ -1115,7 +1117,7 @@ var GeoScene = (function () {
 
     function viewDriver(k, meta) {
       var which = VIEW_DRIVERS[k][0];
-      var target = { position: [view, "position"], scale: [view, "scale"], maskSize: [mask, "generator.dimensions"], viewScale: [filter, "viewScale"], viewOffset: [filter, "viewOffset"], padding: [filter, "padding"] }[which];
+      var target = { position: [view, "position"], scale: [view, "scale"], maskSize: [mask, "generator.dimensions"], viewScale: [filter, "viewScale"], viewOffset: [filter, "viewOffset"] }[which];
       imageryDriver(map, outer, "Imagery driver: " + VIEW_DRIVERS[k][1], GeoExpression.imageryViewExpression(GEO_REPROJECT_SRC, which, size, meta), target[0], target[1]);
     }
 

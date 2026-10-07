@@ -2476,7 +2476,7 @@ test("an error in a build step tears down the new group and keeps the old imager
 
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
 const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
-const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset", "padding"];
+const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
 // A globe camera at lon 170 sees across the date line (tiles east of it are shifted by one world).
 function bentFixture(cam) {
   const { context, api } = buildSandbox();
@@ -2582,7 +2582,7 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
     sourceMeta: plain(context.GeoSources.meta(src, {})), bent: true, sourceComp: comp });
   // The source composition.
   assert.equal(api.getNiceName(comp), "Imagery source: EOX Sentinel-2 · World");
-  assert.deepEqual(plain(api.get(comp, "resolution")), { x: 1920, y: 1080 });
+  assert.deepEqual(plain(api.get(comp, "resolution")), { x: 4104, y: 4104 }, "big enough for the whole view box");
   assert.deepEqual(plain(api.get(comp, "frameRange")), { x: 2, y: 50 });
   assert.equal(api.get(comp, "fps"), 24);
   const bg = api.get(comp, "backgroundColor");
@@ -2605,7 +2605,7 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
   ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((a, i) => assert.equal(inConn(api, p.filter, a), map.cameraId + ".array." + i, a));
   // View drivers in the map comp, parented to the group.
   const size = { width: 1920, height: 1080 };
-  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"], padding: [p.filter, "padding"] };
+  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"] };
   VIEW_WHICH.forEach((which) => {
     const from = inConn(api, targets[which][0], targets[which][1]);
     assert.ok(from, which + " is driven");

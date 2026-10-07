@@ -195,27 +195,6 @@ test("imagery view drivers: position, scale, mask size, filter scale and offset 
   assert.throws(() => E.imageryViewExpression(src, "rotation", size), /Unknown imagery view driver: rotation/);
 });
 
-test("imagery view driver: padding keeps the filter output covering the frame", () => {
-  const { buildReprojectSource } = require("../tools/buildlib.js");
-  const RP = require("../src/core/reproject.js");
-  const src = buildReprojectSource(), size = { width: 1920, height: 1080 };
-  const cams = [{ lat: 82, lon: 0, zoom: 11, rotation: 0, projection: 1 }, { lat: 82, lon: 0, zoom: 11, rotation: 30, projection: 1 }, { lat: 40, lon: 10, zoom: 6, rotation: 20, projection: 2 }];
-  const results = cams.map((cam) => {
-    const v = RP.view(cam, 1920, 1080), r = cam.rotation * Math.PI / 180;
-    const fw = Math.abs(1920 * Math.cos(r)) + Math.abs(1080 * Math.sin(r)), fh = Math.abs(1920 * Math.sin(r)) + Math.abs(1080 * Math.cos(r));
-    const want = [Math.min(4096, Math.max(0, Math.ceil((fw - v.w * v.scale) / 2)) + 2), Math.min(4096, Math.max(0, Math.ceil((fh - v.h * v.scale) / 2)) + 2)];
-    const ctx = { n0: cam.lat, n1: cam.lon, n2: cam.zoom, n3: cam.rotation, n4: cam.projection };
-    const got = Array.from(vm.runInNewContext(E.imageryViewExpression(src, "padding", size), ctx));
-    assert.deepEqual(got, want);
-    return { got, v, fw, fh };
-  });
-  const a = results[0];
-  assert.ok(a.v.scale < 1 || a.got[0] > 2 || a.got[1] > 2, "needs padding");
-  assert.ok(a.got[0] > 2 || a.got[1] > 2);
-  assert.ok(a.v.w * a.v.scale + 2 * a.got[0] >= a.fw && a.v.h * a.v.scale + 2 * a.got[1] >= a.fh);
-  results.forEach((x) => assert.ok(x.got[0] >= 2 && x.got[1] >= 2));
-});
-
 test("route helper expressions: end point, handles (plugin and hand mode) and fade", () => {
   const vm = require("node:vm");
   const fs = require("node:fs");
