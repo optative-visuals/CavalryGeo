@@ -241,7 +241,28 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FURNITURE_FADE_INPUTS) + "Math.max(0, Math.min(1, (_i0 - (_i1 - 0.5)) / 0.5)) * 100;\n";
   }
 
+  // Day & night: a night layer draws the dark side for a day of the year and a UTC time; the
+  // opacity helpers split Night opacity into four soft steps; the label prints the time.
+  var NIGHT_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["depression", 0]]);
+  var NIGHT_OPACITY_INPUTS = [["night", 55], ["twilight", 1], ["step", 0]];
+  var TIME_LABEL_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["compW", 1920], ["compH", 1080], ["corner", 0], ["margin", 40], ["size", 18]]);
+  function nightExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(NIGHT_INPUTS) +
+      "GeoSun.nightPath({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}, _i5, _i6, _i7, cavalry);\n";
+  }
+  // Same formula as GeoSun.stepOpacity (a unit test keeps them equal); no runtime source needed.
+  function nightOpacityExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_OPACITY_INPUTS) +
+      "(_i1 >= 0.5 ? (1 - Math.pow(1 - Math.max(0, Math.min(100, _i0)) / 100, 1 / 4)) * 100 : (Math.round(_i2) === 0 ? Math.max(0, Math.min(100, _i0)) : 0));\n";
+  }
+  function timeLabelExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
+      "GeoSun.timeLabel({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, dayOfYear: _i5, utcTime: _i6, compW: _i7, compH: _i8, corner: _i9, margin: _i10, size: _i11}, cavalry);\n";
+  }
+
   return {
+    NIGHT_INPUTS: NIGHT_INPUTS, NIGHT_OPACITY_INPUTS: NIGHT_OPACITY_INPUTS, TIME_LABEL_INPUTS: TIME_LABEL_INPUTS,
+    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
