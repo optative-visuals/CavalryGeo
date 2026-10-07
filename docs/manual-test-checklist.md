@@ -246,8 +246,9 @@ adding street layers.
       limited to zoom Z to stay under 150 images — imagery gets softer as the flight zooms in
       further."
 - [ ] 41b. Fly here with **To:** past the composition's end → a dialog "Extend the timeline" asks; **Yes**
-      extends the composition, the layers reaching its end and the play range, and the flight plays
-      to the end (nothing cut off); **No** changes nothing (no keys, composition unchanged). A
+      extends the composition, the layers reaching its end and the play range to 3 seconds after
+      the flight ends (the dialog and the status name that frame), and the flight plays to the end
+      with room to spare (no snap back to the start); **No** changes nothing (no keys, composition unchanged). A
       **To:** not after **From:**, or a **From:** before the composition's first frame, is refused
       with a message.
 - [ ] 41c. Fly to a place, then search another place and press Fly here again → the second flight
@@ -261,7 +262,7 @@ adding street layers.
 - [ ] 41f. Pick **Pan left**, set From: and To: → **Drift** → "Drift (pan left) from frame … to …";
       the view slides gently left. Try Push in, Pull out, Pan right / up / down. From: and To: move on
       so a second Drift chains. Put the playhead inside a drift and press **Update flight** → "That's
-      a drift …". A **To:** past the composition's end asks to extend, like Fly here.
+      a drift …". A **To:** past the composition's end asks to extend, like Fly here (3 seconds of padding after the drift).
 - [ ] 42. Build imagery again → the question counts only the new images → Yes → only those download → the old imagery stays until the new
       one is built, then swaps at once and "Removing the old imagery…" shows → play: sharper levels
       fade in, no flashes or see-through frames; past zoom Z the top level just gets softer.

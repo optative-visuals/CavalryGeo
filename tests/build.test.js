@@ -758,7 +758,7 @@ test("Fly to asks before a flight that ends after the composition's last frame (
   flyRange(context, 0, 14);
   context.flyBtn.onClick();
   assert.equal(asked.length, 1);
-  assert.match(context.statusLabel.getText(), /The composition was extended to frame 14 so the flight isn't cut off\./);
+  assert.match(context.statusLabel.getText(), /The composition was extended to frame 89 \(3 seconds after the flight ends\)\./);
 });
 
 test("Fly to says nothing extra when the flight stays inside the composition (F9)", () => {
@@ -1043,19 +1043,42 @@ test("Fly here past the composition's end asks, and Yes extends the composition,
   context.flyBtn.onClick();
   assert.equal(asked.length, 1);
   assert.equal(asked[0].title, "Extend the timeline");
-  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 14. Continue?");
-  assert.equal(api.get(comp, "endFrame"), 14);
-  assert.equal(api.get(comp, "frameRange").y, 14);
-  assert.equal(api.get(comp, "playbackEnd"), 14);
-  assert.equal(api.getOutFrame(atEnd), 15);
-  assert.equal(api.getOutFrame(atEndMinusOne), 15);
+  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 89 (3 seconds after the flight ends). Continue?");
+  assert.equal(api.get(comp, "endFrame"), 89);
+  assert.equal(api.get(comp, "frameRange").y, 89);
+  assert.equal(api.get(comp, "playbackEnd"), 89);
+  assert.equal(api.getOutFrame(atEnd), 90);
+  assert.equal(api.getOutFrame(atEndMinusOne), 90);
   assert.equal(api.getOutFrame(trimmed), 4, "a layer trimmed to end earlier is left alone");
-  assert.equal(api.getOutFrame(map.cameraId), 15);
+  assert.equal(api.getOutFrame(map.cameraId), 90);
   camTimes(api, map).forEach((t) => assert.deepEqual(t, range(0, 14)));
-  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 14 so the flight isn't cut off."), 0);
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 89 (3 seconds after the flight ends)."), 0);
   assert.ok(context.statusLabel.getText().indexOf("Press Build imagery") > 0);
   assert.equal(context.flyStartField.getValue(), 14);
   assert.equal(context.flyEndField.getValue(), 28);
+});
+
+test("Extending pads 3 seconds at the comp's frame rate: 30 fps pads 90 frames, an unreadable rate pads 75 (25 fps)", () => {
+  const a = buildSandbox();
+  flyWorld(a.context);
+  const layer = a.api.create("group", "Reaches the end");
+  a.api.set(a.api.getActiveComp(), { fps: 30 });
+  const asked = withModal(a.ui, true);
+  flyRange(a.context, 0, 14);
+  a.context.flyBtn.onClick();
+  assert.match(asked[0].question, /to frame 104 \(3 seconds after the flight ends\)\. Continue\?$/);
+  assert.equal(a.api.get(a.api.getActiveComp(), "endFrame"), 104);
+  assert.equal(a.api.getOutFrame(layer), 105);
+  assert.match(a.context.statusLabel.getText(), /The composition was extended to frame 104 \(3 seconds after the flight ends\)\./);
+  const b = buildSandbox();
+  flyWorld(b.context);
+  const layerB = b.api.create("group", "Reaches the end");
+  b.api.set(b.api.getActiveComp(), { fps: "unreadable" });
+  withModal(b.ui, true);
+  flyRange(b.context, 0, 14);
+  b.context.flyBtn.onClick();
+  assert.equal(b.api.get(b.api.getActiveComp(), "endFrame"), 89);
+  assert.equal(b.api.getOutFrame(layerB), 90);
 });
 
 test("Fly here past the composition's end: No cancels and changes nothing", () => {
@@ -9288,9 +9311,9 @@ test("Drift past the composition's end asks like Fly here, and Yes extends it", 
   context.driftBtn.onClick();
   assert.equal(asked.length, 1);
   assert.equal(asked[0].title, "Extend the timeline");
-  assert.equal(asked[0].question, "This drift ends at frame 14, after your composition's last frame (9). Drift will extend the composition, and the layers that reach its end, to frame 14. Continue?");
-  assert.equal(context.statusLabel.getText(), "Drift (push in) from frame 0 to 14. The composition was extended to frame 14 so the drift isn't cut off.");
-  assert.equal(api.get(api.getActiveComp(), "endFrame"), 14);
+  assert.equal(asked[0].question, "This drift ends at frame 14, after your composition's last frame (9). Drift will extend the composition, and the layers that reach its end, to frame 89 (3 seconds after the drift ends). Continue?");
+  assert.equal(context.statusLabel.getText(), "Drift (push in) from frame 0 to 14. The composition was extended to frame 89 (3 seconds after the drift ends).");
+  assert.equal(api.get(api.getActiveComp(), "endFrame"), 89);
 });
 
 test("Drift past the composition's end: No cancels, no dialog refuses", () => {

@@ -352,17 +352,26 @@ function planMove(noun) {
   if (from < comp.start) throw new Error("Start is before the composition's first frame (" + comp.start + ").");
   return { map: map, from: from, to: to, comp: comp };
 }
-// true = the composition was extended, false = no need, null = the user said No (already told).
+// A composition extended for a move gets this many seconds after the move, so playback doesn't hit
+// the end and snap back to the start.
+var EXTEND_PAD_SECONDS = 3;
+function extendPadFrames() {
+  var fps = 25;
+  try { var f = Number(api.get(api.getActiveComp(), "fps")); if (f > 0) fps = f; } catch (e) {}
+  return Math.round(fps * EXTEND_PAD_SECONDS);
+}
+// The new end frame when extended, false = no need, null = the user said No (already told).
 function extendForMove(plan, noun, button) {
   if (plan.to <= plan.comp.end) return false;
   var dialog = questionDialog();
   if (!dialog) throw new Error("End is after your composition's last frame (" + plan.comp.end + "). Set End to " + plan.comp.end + " or earlier, or lengthen the composition first.");
+  var newEnd = plan.to + extendPadFrames();
   if (!dialog.showQuestion("Extend the timeline", "This " + noun + " ends at frame " + plan.to + ", after your composition's last frame (" + plan.comp.end +
-    "). " + button + " will extend the composition, and the layers that reach its end, to frame " + plan.to + ". Continue?")) {
+    "). " + button + " will extend the composition, and the layers that reach its end, to frame " + newEnd + " (" + EXTEND_PAD_SECONDS + " seconds after the " + noun + " ends). Continue?")) {
     say("Cancelled. Set End to " + plan.comp.end + " or earlier to stay within your composition.");
     return null;
   }
-  return !!GeoScene.extendComp(plan.to);
+  return GeoScene.extendComp(newEnd) ? newEnd : false;
 }
 function moveFieldsOn(plan) {
   flyStartField.setValue(plan.to);
@@ -385,7 +394,7 @@ flyBtn.onClick = guard(function () {
   } finally { api.setFrame(previous); }
   GeoScene.recordFlight(map, { kind: "flight", start: from, end: to, from: viewOf(begin), to: viewOf(t.cam), name: t.name, easing: easing.id, arc: arc.id });
   var msg = "Flight to " + t.name + ": frames " + range.start + "–" + range.end + ".";
-  if (extended) msg += " The composition was extended to frame " + to + " so the flight isn't cut off.";
+  if (extended) msg += " The composition was extended to frame " + extended + " (" + EXTEND_PAD_SECONDS + " seconds after the flight ends).";
   if (t.world) msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
   msg += " Press Build imagery (Imagery tab) for sharp imagery along the way.";
   moveFieldsOn(plan);
@@ -419,7 +428,7 @@ driftBtn.onClick = guard(function () {
   var range = GeoScene.flyCamera(map, GeoFly.driftPath(begin, end, to - from + 1), from);
   GeoScene.recordFlight(map, { kind: "drift", start: from, end: to, from: begin, to: end, move: move.id });
   var msg = "Drift (" + move.name.toLowerCase() + ") from frame " + range.start + " to " + range.end + ".";
-  if (extended) msg += " The composition was extended to frame " + to + " so the drift isn't cut off.";
+  if (extended) msg += " The composition was extended to frame " + extended + " (" + EXTEND_PAD_SECONDS + " seconds after the drift ends).";
   moveFieldsOn(plan);
   say(msg);
   resetImageryPlan();

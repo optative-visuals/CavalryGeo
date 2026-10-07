@@ -54,8 +54,8 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   World view picked it flies back out). The two fields then move on, so pick another place and
   press **Fly here** again to chain a second flight that starts where the first ended. If the
   flight ends after your composition's last frame, Fly here asks first; on Yes it lengthens the
-  composition, the layers that reach its end and the play range to the end of the flight, and on
-  No it changes nothing. Build imagery afterwards for sharp imagery along the way.
+  composition, the layers that reach its end and the play range to 3 seconds after the end of the
+  flight (so playback doesn't snap back to the start), and on No it changes nothing. Build imagery afterwards for sharp imagery along the way.
 - **Easing and Zoom-out:** under the Fly row, **Easing** sets how a flight accelerates —
   **Smooth** (the classic ease in and out), **Gentle** (a softer, rounder start and finish),
   **Snappy** (slow, then a quick dash, then a firm stop) or **Overshoot** (arrives a little too
