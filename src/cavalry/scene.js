@@ -989,7 +989,8 @@ var GeoScene = (function () {
     var comp = im.meta.sourceComp, out = [];
     try {
       withComp(comp, mapComp, function () {
-        var kids = api.getChildren(comp), names = kids.map(function (id) { return String(api.getNiceName(id)); });
+        // The source comp is active, so getCompLayers lists its layers (getChildren on a comp id is unproven).
+        var kids = api.getCompLayers(false), names = kids.map(function (id) { return String(api.getNiceName(id)); });
         kids.forEach(function (id, i) { if (names[i] === VIEW_NAME) teardownOrder(id).forEach(function (t) { out.push({ id: t, comp: comp }); }); });
         kids.forEach(function (id, i) { if (names[i] === VIEW_MASK_NAME) out.push({ id: id, comp: comp }); });
       });
@@ -1093,12 +1094,13 @@ var GeoScene = (function () {
         api.connect(mask, "id", view, "masks");
       });
       var ref = api.createCompReference(sourceComp);
-      if (typeof api.rename === "function") api.rename(ref, REFERENCE_NAME);
+      api.rename(ref, REFERENCE_NAME);
       api.parent(ref, outer);
       api.set(ref, identityTransform());
       filter = api.create(REPROJECT_TYPE, "Cavalry Geo Reproject");
       api.set(filter, { allowViewportClipping: false, samplingQuality: 1 });
       api.connect(filter, "id", ref, "filters");
+      api.parent(filter, outer); // kept with its imagery (like the highlight glow), not loose at the comp root
       FILTER_CAMERA_ATTRS.forEach(function (attr, i) { api.connect(map.cameraId, A.CAMERA_ARRAY_ATTR + "." + i, filter, attr, true); });
       viewDriver(0, meta);
     }

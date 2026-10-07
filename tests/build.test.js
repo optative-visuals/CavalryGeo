@@ -2456,8 +2456,6 @@ test("an error in a build step tears down the new group and keeps the old imager
   assert.equal(footageCount(api), 48);
 });
 
-// F10: a tile marked empty (404/204 on a previous download) must not show up as
-// missing again on the next plan, or it gets re-downloaded forever.
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
 const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
 const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
@@ -2480,7 +2478,7 @@ function inConn(api, id, attr) { return api.getInConnection(id, attr); }
 function bentParts(api, im) {
   const ref = api.getChildren(im.groupId).find((id) => api.getNiceName(id) === "Imagery source");
   const filter = api._connections.find((c) => c[2] === ref && c[3] === "filters");
-  const top = inComp(api, im.meta.sourceComp, () => api.getChildren(im.meta.sourceComp));
+  const top = inComp(api, im.meta.sourceComp, () => api.getCompLayers(false));
   const view = top.find((id) => api.getNiceName(id) === "View");
   const mask = top.find((id) => api.getNiceName(id) === "View mask");
   return { ref, filter: filter && filter[0], view, mask, top };
@@ -2582,6 +2580,7 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
   [["position.x", 0], ["position.y", 0], ["rotation.z", 0], ["scale.x", 1], ["scale.y", 1]].forEach(([a, v]) => assert.equal(api.get(p.ref, a), v, a));
   assert.equal(api._connections.filter((c) => c[2] === p.ref && c[3] === "filters").length, 1);
   assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.equal(api.getParent(p.filter), r.groupId, "the filter is kept in the Imagery group");
   assert.equal(api.get(p.filter, "allowViewportClipping"), false);
   assert.equal(api.get(p.filter, "samplingQuality"), 1);
   ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((a, i) => assert.equal(inConn(api, p.filter, a), map.cameraId + ".array." + i, a));
@@ -2723,6 +2722,19 @@ test("Bent imagery: a throw mid-build leaves no new source comp and the map comp
   assert.equal(context.GeoScene.findImagery(map).length, 0);
 });
 
+test("Bent imagery: a throw after the source comp exists deletes it and leaves the map comp active", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const before = api.getCompLayers(false).slice().sort();
+  api.createCompReference = function () { throw new Error("no reference"); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  assert.throws(() => job.step(0), /no reference/);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.deepEqual(compIds(api), [], "the new source comp is deleted");
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before, "nothing left in the map comp");
+  assert.equal(context.GeoScene.findImagery(map).length, 0);
+});
+
 test("Bent imagery: an abandoned half-built bent group is found and removed by the next build", () => {
   const { context, api, map, src } = bentFixture();
   const plan = context.GeoScene.planImagery(map, src, {});
@@ -2735,6 +2747,8 @@ test("Bent imagery: an abandoned half-built bent group is found and removed by t
   assert.equal(imageryGroups(api).length, 1);
 });
 
+// F10: a tile marked empty (404/204 on a previous download) must not show up as
+// missing again on the next plan, or it gets re-downloaded forever.
 test("planImagery excludes tiles marked empty from missing (F10)", () => {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4);
