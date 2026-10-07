@@ -135,3 +135,9 @@ test("driftPath: endpoints, gentle easing, short way round", () => {
   const d = F.driftPath({ lat: 0, lon: 179.99, zoom: 4 }, { lat: 0, lon: -179.99, zoom: 4 }, 5);
   assert.ok(d.every((q) => Math.abs(q.lon) > 179.98), JSON.stringify(d));
 });
+
+test("driftEnd: panning up near the pole stays inside the map's latitude limit", () => {
+  const r = F.driftEnd({ lat: 85, lon: 0, zoom: 10 }, "up", 1920, 1080);
+  assert.ok(r.lat <= 85.0511287798 + 1e-9 && r.lat > 84.9);
+  assert.ok(F.driftEnd({ lat: -85, lon: 0, zoom: 10 }, "down", 1920, 1080).lat >= -85.0511287798 - 1e-9);
+});

@@ -82,7 +82,7 @@ var GeoFly = (function () {
     if (move === "in") res.zoom = clampZoom(start.zoom + DRIFT_ZOOM);
     else if (move === "out") res.zoom = clampZoom(start.zoom - DRIFT_ZOOM);
     else if (move === "left" || move === "right") res.lon = wrapLon(start.lon + (move === "right" ? 1 : -1) * DRIFT_PAN * compW * perPx / D2R);
-    else if (move === "up" || move === "down") res.lat = latFromY(mercY(start.lat) + (move === "up" ? 1 : -1) * DRIFT_PAN * compH * perPx);
+    else if (move === "up" || move === "down") res.lat = Math.max(-MAX_LAT, Math.min(MAX_LAT, latFromY(mercY(start.lat) + (move === "up" ? 1 : -1) * DRIFT_PAN * compH * perPx)));
     return res;
   }
 

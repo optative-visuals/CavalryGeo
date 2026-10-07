@@ -397,7 +397,7 @@ flyBtn.onClick = guard(function () {
 // Redoes the flight under the playhead with the current Easing and Zoom-out, keeping its frames
 // and destination. It leaves from where the flight began (read before its keys are rewritten).
 updateFlightBtn.onClick = guard(function () {
-  var map = currentMap(), rec = GeoScene.flightAt(map, playhead());
+  var map = currentMap(), cr = GeoScene.compFrameRange(), rec = GeoScene.flightAt(map, Math.max(cr.start, Math.min(cr.end, playhead())));
   if (!rec) throw new Error("Put the playhead inside a flight made with Fly here first.");
   if (rec.kind === "drift") throw new Error("That's a drift — choose a move and press Drift to redo it.");
   var easing = pickedEasing(), arc = pickedArc(), begin = GeoScene.flightStart(map, rec);

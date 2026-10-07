@@ -70,7 +70,8 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   (a little closer or further) or **Pan left / right / up / down** (a slide of about 5 % of the
   frame) — set **From:** and **To:**, and press **Drift**. It starts from where the camera is at
   From, moves gently, and the two fields move on, so drifts chain after flights and after each
-  other. Like a flight it asks before lengthening the composition. Everything Fly here and Drift
+  other. Like a flight it asks before lengthening the composition. Pans follow the map's own directions (west / east / north / south), so on a rotated camera
+  they won't line up with the screen edges. Everything Fly here and Drift
   make is ordinary keyframes on the camera, so you can still edit them by hand.
 - **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
   **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map

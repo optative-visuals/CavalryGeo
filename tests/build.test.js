@@ -9374,3 +9374,53 @@ test("Update flight on a flight after frame 0 that is not chained starts from th
   context.updateFlightBtn.onClick();
   nearly(camSeries(api, map, 30, 50), context.GeoFly.path(before, rec.to, 21, context.GeoScene.compSize().width, { easing: "gentle", arc: "normal" }));
 });
+
+test("Update flight with the playhead past the comp end still finds a flight that ends at the comp end", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 480, 500);
+  context.flyBtn.onClick();
+  api.setFrame(700);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 480–500) updated: Smooth, Normal zoom-out.");
+});
+
+test("Update flight keeps the record's place so the later chained flight still wins at the shared frame", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  context.results = [{ name: "Rome, Italy", lat: 41.9, lon: 12.5, bbox: { south: 41.8, north: 42, west: 12.4, east: 12.6 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  context.flyBtn.onClick(); // 20-40
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].start, 0);
+  assert.equal(recs[1].start, 20);
+  const at = context.GeoScene.flightAt(map, 20);
+  assert.equal(at.start, 20);
+  assert.equal(at.name, "Rome");
+});
+
+test("Update flight on a comp starting at frame 10 starts from the recorded view and reads no frame before it", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  api.set(api.getActiveComp(), { startFrame: 10, playbackStart: 10 });
+  const map = flyParis(context);
+  flyRange(context, 10, 30);
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  const seen = [], orig = api.setFrame;
+  api.setFrame = (f) => { seen.push(f); return orig(f); };
+  api.setFrame(20);
+  seen.length = 0;
+  context.updateFlightBtn.onClick();
+  assert.ok(seen.indexOf(9) < 0, "read frame 9");
+  nearly(camSeries(api, map, 10, 30), context.GeoFly.path(rec.from, rec.to, 21, context.GeoScene.compSize().width, { easing: "smooth", arc: "normal" }));
+});

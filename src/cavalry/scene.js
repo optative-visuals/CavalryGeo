@@ -1057,8 +1057,11 @@ var GeoScene = (function () {
 
   function recordFlight(map, rec) {
     if (typeof api.setUserData !== "function") return;
-    var kept = readFlights(map).filter(function (r) { return r.end <= rec.start || r.start >= rec.end; });
-    kept.push(rec);
+    var all = readFlights(map), kept = all.filter(function (r) { return r.end <= rec.start || r.start >= rec.end; });
+    var gone = all.filter(function (r) { return kept.indexOf(r) < 0; });
+    // An Update flight replaces exactly its own record: keep it in place so latest-made order holds.
+    if (gone.length === 1 && gone[0].start === rec.start && gone[0].end === rec.end) kept.splice(all.indexOf(gone[0]), 0, rec);
+    else kept.push(rec);
     api.setUserData(map.cameraId, FLIGHTS_KEY, kept);
   }
 
