@@ -416,3 +416,10 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
     assert.ok(Math.abs(got - S.stepOpacity(n, t, step)) < 1e-9);
   }));
 });
+
+test("the opacity expression treats non-numbers as the defaults", () => {
+  const expr = E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step: 0 });
+  const got = Function("night", "twilight", "step", "return eval(" + JSON.stringify(expr) + ");")(NaN, undefined, "x");
+  assert.ok(isFinite(got));
+  assert.ok(Math.abs(got - require("../src/core/sun.js").stepOpacity(55, 1, 0)) < 1e-9);
+});

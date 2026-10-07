@@ -17,7 +17,8 @@ var GeoSun = (function () {
   function dayOfYear(day, month) {
     var m = Math.max(1, Math.min(12, Math.round(num(month, 1)))), n = 0;
     for (var k = 0; k < m - 1; k++) n += MONTH_DAYS[k];
-    return n + Math.max(1, Math.round(num(day, 1)));
+    var len = m === 2 ? 29 : MONTH_DAYS[m - 1]; // 29 Feb is day 60
+    return n + Math.max(1, Math.min(len, Math.round(num(day, 1))));
   }
 
   function subsolar(doy, utc) {
@@ -66,15 +67,20 @@ var GeoSun = (function () {
     return ring;
   }
 
-  // The night side as a path on the map. The flat projections repeat the world, so a ring that
-  // runs past +-180 is also drawn shifted a world over (the globe shows each place once).
+  // The night side as a path on the map. The flat projections repeat the world, so the ring is
+  // drawn once for every world-width shift that reaches the visible span cam.lon +- 180 (the
+  // globe shows each place once).
   function nightPath(cam, doy, utc, depression, cav) {
-    var ring = nightRing(doy, utc, depression), rings = [ring], lo = 0, hi = 0, k;
+    var ring = nightRing(doy, utc, depression), rings = [], lo = Infinity, hi = -Infinity, k;
     for (k = 0; k < ring.length; k++) { if (ring[k][0] < lo) lo = ring[k][0]; if (ring[k][0] > hi) hi = ring[k][0]; }
     if (Math.round(num(cam.projection, 0)) < 2) {
-      if (hi > 180) rings.push(ring.map(function (p) { return [p[0] - 360, p[1]]; }));
-      if (lo < -180) rings.push(ring.map(function (p) { return [p[0] + 360, p[1]]; }));
-    }
+      var c = num(cam.lon, 0);
+      var from = Math.floor((c - 180 - hi) / 360), to = Math.ceil((c + 180 - lo) / 360);
+      for (k = from; k <= to; k++) {
+        var sh = k * 360;
+        if (hi + sh > c - 180 + 1e-9 && lo + sh < c + 180 - 1e-9) rings.push(sh === 0 ? ring : ring.map(function (p) { return [p[0] + sh, p[1]]; }));
+      }
+    } else rings.push(ring);
     var enc = GeoCodec.encodeLayer({ kind: "polygon", features: [{ rings: rings }] });
     return GeoRuntime.buildPath(enc, cam, 100, {}, cav.Path);
   }

@@ -17,6 +17,8 @@ test("dayOfYear on a non-leap calendar", () => {
   assert.equal(S.dayOfYear(21, 6), 172);
   assert.equal(S.dayOfYear(31, 12), 365);
   assert.equal(S.dayOfYear(29, 2), 60);
+  assert.equal(S.dayOfYear(31, 2), 60);
+  assert.equal(S.dayOfYear(31, 4), 120);
 });
 
 test("subsolar point", () => {
@@ -88,7 +90,7 @@ test("stepOpacity", () => {
 
 test("timeText", () => {
   assert.equal(S.timeText(172, 14.5), "21 Jun · 14:30 UTC");
-  assert.equal(S.timeText(1, 24), "01 Jan · 00:00 UTC".replace("01", "1"));
+  assert.equal(S.timeText(1, 24), "1 Jan · 00:00 UTC");
   assert.equal(S.timeText(172, 14.999), "21 Jun · 14:59 UTC");
 });
 
@@ -98,4 +100,24 @@ test("timeLabel writes the text at the corner", () => {
   assert.equal(t.length, 1);
   assert.equal(t[0][1], "21 Jun · 14:30 UTC");
   assert.equal(t[0][4] > 0, true);
+});
+
+test("nightPath covers cam.lon +- 180 on flat maps wherever the camera looks", () => {
+  const lonsOf = (p) => p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").map((c) => c[1]);
+  const P = require("../src/core/projection.js");
+  // pole-containing cap, camera at 180: the 180..360 half must be drawn too
+  const cam = { lat: 0, lon: 180, zoom: 1, rotation: 0, projection: 0 };
+  const proj = P.makeProjector(cam), out = [0, 0];
+  proj(180, 0, out); const x180 = out[0]; proj(360, 0, out); const x360 = out[0];
+  const xs = lonsOf(S.nightPath(cam, 172, 12, 0, cav));
+  assert.ok(xs.some((x) => x > x180 + 1e-6 && x <= x360 + 1e-6), "points in 180..360");
+  assert.ok(xs.some((x) => x < x180 - 1e-6), "and the original half");
+  // day 80 20:00, ring -156..36, camera 170: 180..260 covered by the +360 copy
+  const cam2 = { lat: 0, lon: 170, zoom: 1, rotation: 0, projection: 0 };
+  const p2 = P.makeProjector(cam2);
+  p2(180, 0, out); const a = out[0]; p2(260, 0, out); const b = out[0];
+  const xs2 = lonsOf(S.nightPath(cam2, 80, 20, 0, cav));
+  assert.ok(xs2.some((x) => x > a && x < b), "points in 180..260");
+  // a camera-centred pole cap needs just one ring
+  assert.equal(S.nightPath({ lat: 0, lon: 0, zoom: 1, rotation: 0, projection: 0 }, 172, 12, 0, cav).cmds.filter((c) => c[0] === "close").length, 1);
 });

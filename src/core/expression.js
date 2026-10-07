@@ -253,7 +253,9 @@ var GeoExpression = (function () {
   // Same formula as GeoSun.stepOpacity (a unit test keeps them equal); no runtime source needed.
   function nightOpacityExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_OPACITY_INPUTS) +
-      "(_i1 >= 0.5 ? (1 - Math.pow(1 - Math.max(0, Math.min(100, _i0)) / 100, 1 / 4)) * 100 : (Math.round(_i2) === 0 ? Math.max(0, Math.min(100, _i0)) : 0));\n";
+      "var _n = isFinite(Number(_i0)) ? Math.max(0, Math.min(100, Number(_i0))) : 55;\n" +
+      "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1, _s = isFinite(Number(_i2)) ? Math.round(Number(_i2)) : 0;\n" +
+      "(_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n";
   }
   function timeLabelExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
