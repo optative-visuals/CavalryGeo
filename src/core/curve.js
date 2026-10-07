@@ -49,6 +49,8 @@ var GeoCurve = (function () {
     var project = GeoProjection.makeProjector(gc.cam, true);
     var g1 = greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, 1 / 3);
     var g2 = greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, 2 / 3);
+    // On the flat projections a leg that crosses +-180 between samples would streak across the map: draw the plain arc.
+    if (gc.cam && gc.cam.projection < 2 && (Math.abs(g1[0] - gc.aLon) > 180 || Math.abs(g2[0] - g1[0]) > 180 || Math.abs(gc.bLon - g2[0]) > 180)) return handles(p0, p1, opts);
     var q1 = [0, 0], q2 = [0, 0];
     project(g1[0], g1[1], q1);
     project(g2[0], g2[1], q2);

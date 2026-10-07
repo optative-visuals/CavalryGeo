@@ -93,6 +93,10 @@ test("greatCircleHandles: arc lifts the middle on Arc's side, flip mirrors, lean
   const l1 = at(lean.p0, lean.p1, lean.h, 1 / 3), l2 = at(lean.p0, lean.p1, lean.h, 2 / 3), f1 = at(flat.p0, flat.p1, flat.h, 1 / 3), f2 = at(flat.p0, flat.p1, flat.h, 2 / 3);
   const a = (l1[0] - f1[0]) * nrm[0] + (l1[1] - f1[1]) * nrm[1], b = (l2[0] - f2[0]) * nrm[0] + (l2[1] - f2[1]) * nrm[1];
   assert.ok(b > a + 1, "positive lean lifts nearer the end stop more");
+  assert.ok(b > 0 && a > 0, "lean keeps lifting both thirds");
+  const even = setup(cam, { arc: 50, lean: 0 });
+  const e1 = at(even.p0, even.p1, even.h, 1 / 3), e2 = at(even.p0, even.p1, even.h, 2 / 3);
+  close((e1[0] - f1[0]) * nrm[0] + (e1[1] - f1[1]) * nrm[1], (e2[0] - f2[0]) * nrm[0] + (e2[1] - f2[1]) * nrm[1], 1e-6);
 });
 
 test("greatCircleHandles: drag offsets blend into the thirds", () => {
@@ -100,6 +104,27 @@ test("greatCircleHandles: drag offsets blend into the thirds", () => {
   const base = setup(cam, { arc: 0 }), drag = setup(cam, { arc: 0 }, [30, 0], [0, 0]);
   const b = at(base.p0, base.p1, base.h, 1 / 3), d = at(drag.p0, drag.p1, drag.h, 1 / 3);
   close(d[0] - b[0], 20, 1e-6); close(d[1] - b[1], 0, 1e-6);
+});
+
+test("greatCircleHandles: a leg across the date line on flat projections falls back to the plain arc; the globe keeps the great circle", () => {
+  const TK = [139.69, 35.68], LA = [-118.24, 34.05], opts = { arc: 30, lean: 10, flip: 0 };
+  [0, 1].forEach((projection) => {
+    const cam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection }, proj = P.makeProjector(cam, true), p0 = [0, 0], p1 = [0, 0];
+    proj(TK[0], TK[1], p0); proj(LA[0], LA[1], p1);
+    const h = C.greatCircleHandles(p0, p1, { cam, aLon: TK[0], aLat: TK[1], bLon: LA[0], bLat: LA[1], offA: [0, 0], offB: [0, 0] }, opts);
+    assert.deepEqual(h, C.handles(p0, p1, opts), "projection " + projection);
+  });
+  const cam = { lat: 20, lon: 180, zoom: 1, rotation: 0, projection: 2 }, proj = P.makeProjector(cam, true), p0 = [0, 0], p1 = [0, 0];
+  proj(TK[0], TK[1], p0); proj(LA[0], LA[1], p1);
+  const g = C.greatCircleHandles(p0, p1, { cam, aLon: TK[0], aLat: TK[1], bLon: LA[0], bLat: LA[1], offA: [0, 0], offB: [0, 0] }, opts);
+  assert.notDeepEqual(g, C.handles(p0, p1, opts));
+  const NY = [-74, 40.7], SG = [103.8, 1.35];
+  [0, 1].forEach((projection) => {
+    const cam2 = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection }, pr = P.makeProjector(cam2, true), a = [0, 0], b = [0, 0];
+    pr(NY[0], NY[1], a); pr(SG[0], SG[1], b);
+    const h = C.greatCircleHandles(a, b, { cam: cam2, aLon: NY[0], aLat: NY[1], bLon: SG[0], bLat: SG[1], offA: [0, 0], offB: [0, 0] }, opts);
+    assert.notDeepEqual(h, C.handles(a, b, opts), "NY to Singapore keeps the great circle on projection " + projection);
+  });
 });
 
 test("greatCircleHandles: identical and antipodal stops fall back to Arc", () => {

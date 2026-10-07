@@ -192,7 +192,10 @@ adding street layers.
 - [ ] 25b. In Controls, change Route 1 · Arc height → every leg of the route changes.
 - [ ] 25b2. Label → Routes: set Shape = Great circle, add London and Tokyo, Create route → on a
       flat map the leg bows toward the north pole; on the globe it hugs the surface. Raise Arc
-      height → extra lift on top. In Controls, set Route 1 · Shape to 0 → it becomes the plain
+      height → extra lift on top (picking Great circle set Arc height to 0; picking Arc again
+      brings back 30). Add Tokyo and Los Angeles as a route on a flat map → the leg is a plain arc
+      across the Pacific, not a streak the long way round; on the globe it follows the great
+      circle. Very long legs may sit tens of pixels off the true path. In Controls, set Route 1 · Shape to 0 → it becomes the plain
       arc again. Reopen Cavalry → the Shape dropdown remembers Great circle. Refresh controls on
       an older map → its routes gain a Route n · Shape row.
 - [ ] 25c. Select a leg's handle helper and change Lean, Flip side or shape by hand there → only

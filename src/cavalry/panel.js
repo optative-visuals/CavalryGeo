@@ -1111,7 +1111,13 @@ var routeShapePicker = new ui.DropDown();
   try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
   routeShapePicker.setValue(s.routeShape === 1 ? 1 : 0);
 })();
-routeShapePicker.onValueChanged = guard(function () { GeoNet.updateSettings({ routeShape: routeShapePicker.getValue() === 1 ? 1 : 0 }); });
+routeShapePicker.onValueChanged = guard(function () {
+  var shape = routeShapePicker.getValue() === 1 ? 1 : 0;
+  GeoNet.updateSettings({ routeShape: shape });
+  // Great circle starts with no extra bow; back to Arc restores the default one.
+  if (shape === 1) arcField.setValue(0);
+  else if (arcField.getValue() === 0) arcField.setValue(30);
+});
 var labelsAtStops = new ui.Checkbox(false);
 var TRAVELLER_KINDS = [null, "plane", "arrow", "dot", "layer"];
 var travellerPicker = new ui.DropDown();

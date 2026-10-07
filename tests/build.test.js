@@ -4593,6 +4593,20 @@ test("preview overlay: pins, labels, route legs and stops in the overlay's colou
   assert.equal(fills(p._draw, "#a63d2f").length + strokes(p._draw, "#a63d2f").length, 0);
 });
 
+test("preview overlay: a shape-1 route leg is drawn differently from a shape-0 one", () => {
+  const legPath = (shape) => {
+    const { context } = buildSandbox({ setup: installNe });
+    const { p } = makePreview(context);
+    p.setWidth(320);
+    p.showCamera({ lat: 45, lon: 2, zoom: 1 }, "camera");
+    const leg = { from: { lon: -60, lat: 40 }, to: { lon: 60, lat: 40 }, arc: 0, lean: 0, flip: false, shape };
+    p.setOverlay(Object.assign({}, OVERLAY, { routes: [{ stops: [leg.from, leg.to], legs: [leg] }] }));
+    p._render();
+    return JSON.stringify(strokes(p._draw, "#a63d2f")[0].path);
+  };
+  assert.notEqual(legPath(1), legPath(0));
+});
+
 test("preview draft and spot: dashed accent line with dots, and a white ring", () => {
   const { context } = buildSandbox({ setup: installNe });
   const { p } = makePreview(context);
@@ -10086,6 +10100,20 @@ test("Routes: the Shape dropdown offers Arc and Great circle, default Arc", () =
   const { context } = buildSandbox();
   assert.deepEqual(plain(context.routeShapePicker._entries), ["Arc", "Great circle"]);
   assert.equal(context.routeShapePicker.getValue(), 0);
+});
+
+test("Routes: picking Great circle sets Arc height to 0; back to Arc restores 30 only from 0", () => {
+  const { context } = buildSandbox();
+  context.arcField.setValue(55);
+  context.routeShapePicker.setValue(1); context.routeShapePicker.onValueChanged();
+  assert.equal(context.arcField.getValue(), 0);
+  context.routeShapePicker.setValue(0); context.routeShapePicker.onValueChanged();
+  assert.equal(context.arcField.getValue(), 30);
+  context.arcField.setValue(45);
+  context.routeShapePicker.setValue(1); context.routeShapePicker.onValueChanged();
+  context.arcField.setValue(20);
+  context.routeShapePicker.setValue(0); context.routeShapePicker.onValueChanged();
+  assert.equal(context.arcField.getValue(), 20, "a hand-set value is kept");
 });
 
 test("Routes: Create route passes the picked Shape to the handle helpers", () => {

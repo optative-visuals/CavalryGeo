@@ -108,7 +108,7 @@ var GeoPreviewPanel = (function () {
       var accent = overlay.colors.accent, legs = new cavalry.Path(), stopRings = new cavalry.Path(), pins = new cavalry.Path(), labels = new cavalry.Path();
       var has = { legs: false, stops: false, pins: false, labels: false };
       (overlay.routes || []).forEach(function (r) {
-        (r.legs || []).forEach(function (l) { polyline(legs, GeoPreview.legCurve(view, l.from, l.to, { arc: l.arc, lean: l.lean, flip: l.flip })); has.legs = true; });
+        (r.legs || []).forEach(function (l) { polyline(legs, GeoPreview.legCurve(view, l.from, l.to, { arc: l.arc, lean: l.lean, flip: l.flip, shape: l.shape })); has.legs = true; });
         (r.stops || []).forEach(function (s) { var q = GeoPreview.toPx(view, s.lon, s.lat); stopRings.addEllipse(q[0], sy(q[1]), 3, 3); has.stops = true; });
       });
       (overlay.pins || []).forEach(function (s) { var q = GeoPreview.toPx(view, s.lon, s.lat); pins.addEllipse(q[0], sy(q[1]), 3, 3); has.pins = true; });

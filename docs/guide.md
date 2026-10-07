@@ -258,8 +258,10 @@ can't be baked: Bake skips them.
 - Under **Label → Routes**, search stops and press **Add stop** for each place in order — two
   stops make a flight, more make a journey. Pick a **Shape**: **Arc** (a simple bow, the default)
   or **Great circle** (each leg follows the shortest path over the Earth, the way a real flight
-  does). Set **Arc height %** (how far the legs bow to start with), tick **Labels at stops** if you want a label beside each circle (it follows when you drag
-  the stop), and press **Create route**.
+  does). Picking **Great circle** sets **Arc height %** to 0 (the exact great circle); picking Arc
+  again puts it back to 30. Set **Arc height %** (how far the legs bow), tick **Labels at stops**
+  if you want a label beside each circle (it follows when you drag the stop), and press
+  **Create route**.
 - **Click to add stops.** Each click on the Routes preview adds the next stop, named after the place you clicked (or its coordinates). The route you're building is drawn as a dashed line; Remove selected and Clear still edit the list. Create route makes it. Zoom the preview with − / + or by pressing the scroll wheel and dragging up / down (around the point you pressed).
 - Each stop is a green circle you can drag in the viewer, and the circles ride along with the
   camera. Each leg is a Bézier line attached to its two stops, so dragging a stop bends its legs
@@ -274,11 +276,13 @@ can't be baked: Bake skips them.
   gave a route yourself is kept. A duplicated route takes the next free number.
 - **Great circle** legs look like a gentle sweep: on a flat map they bow toward the nearer pole
   (London to Tokyo climbs over the north), and on the globe they hug the surface. **Arc height**
-  still works: it adds extra lift on top of the great circle. Change your mind later with
-  **Route n · Shape** in the map's Controls (0 is arc, 1 is great circle). Routes made by an
-  earlier version get the Shape setting when you press **Refresh controls**. Very long legs are a
-  close fit rather than exact, and on a flat map a leg that crosses the date line still goes the
-  long way round.
+  still works: 0 gives the exact great circle and more adds extra bow on top. Change your mind
+  later with **Route n · Shape** in the map's Controls (0 is arc, 1 is great circle). Shape applies
+  to routes made with the current Routes section, not to older script routes; routes made by an
+  earlier version get the Shape setting when you press **Refresh controls**. Very long legs (a
+  third of the world or more) are a close fit rather than exact and can sit noticeably off the
+  true path, from tens up to a couple of hundred pixels on a world-sized view. Legs that cross the
+  date line on the flat map and Equal Earth draw as a plain arc.
 - The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
   once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
   Controls: their values live on the route's handle helpers (inside its "Route helpers" group),
