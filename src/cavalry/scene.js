@@ -325,13 +325,14 @@ var GeoScene = (function () {
   }
   // A leg's trim end is the user's when it is keyframed, connected to anything, or set by hand
   // to something other than fully drawn (100): such a leg gets no draw helper.
-  // The leg's own clip end helper (clipEnd), connected to the trim end, does not count.
-  function trimTaken(line, clipEnd) {
+  // The leg's own clip end or draw helper on the trim end is ours: only keys can make it the user's
+  // (api.get then returns the driven value, so it is never read).
+  function trimTaken(line, clipEnd, draw) {
     var from = "";
     try { from = String(api.getInConnection(line, "stroke.trimEnd") || ""); } catch (e) { from = ""; }
-    if (clipEnd && from.indexOf(clipEnd + ".") === 0) from = "";
     var keys = [];
     try { keys = api.getKeyframeTimes(line, "stroke.trimEnd") || []; } catch (e) { keys = []; }
+    if ((clipEnd && from.indexOf(clipEnd + ".") === 0) || (draw && from.indexOf(draw + ".") === 0)) return keys.length > 0;
     if (from || keys.length > 0) return true;
     var v = NaN;
     try { v = Number(api.get(line, "stroke.trimEnd")); } catch (e) { v = NaN; }
@@ -1641,11 +1642,17 @@ var GeoScene = (function () {
             l.clipStart = addLegClip(map, parent, l.line, name, "start", a, b, l.startHandle);
             changed = true;
           }
-          // A trim end the user has taken over (keyed, wired elsewhere or set by hand) loses the clip end.
-          if (l.clipEnd && layerThere(l.clipEnd) && trimTaken(l.line, l.clipEnd)) {
-            api.deleteLayer(l.clipEnd);
-            l.clipEnd = null;
-            changed = true;
+          // A clip end nobody connected the trim end to (and the user did not take it over) goes back on it;
+          // a trim end the user has taken over (keyed, wired elsewhere or set by hand) loses the clip end.
+          if (l.clipEnd && layerThere(l.clipEnd)) {
+            var cur = "";
+            try { cur = String(api.getInConnection(l.line, "stroke.trimEnd") || ""); } catch (e) { cur = ""; }
+            if (!cur && !trimTaken(l.line)) api.connect(l.clipEnd, A.DRIVER_OUTPUT_ATTR, l.line, "stroke.trimEnd", true);
+            if (trimTaken(l.line, l.clipEnd, l.draw)) {
+              api.deleteLayer(l.clipEnd);
+              l.clipEnd = null;
+              changed = true;
+            }
           }
           var from = "";
           try { from = String(api.getInConnection(l.line, "stroke.trimEnd") || ""); } catch (e) { from = ""; }
@@ -2414,10 +2421,10 @@ var GeoScene = (function () {
       var b = (rec.blurs || [])[i], bp = b && layerThere(b) ? api.getParent(b) : null;
       if (!(bp && bp !== g && api.getParent(bp) === g)) {
         b = null;
-        var lay = out.layers[i], from = "";
-        try { from = lay ? String(api.getInConnection(lay, "filters") || "") : ""; } catch (e) { from = ""; }
-        var fid = from.indexOf(".") > 0 ? from.slice(0, from.indexOf(".")) : "";
-        if (fid && layerThere(fid) && grandchildren().indexOf(fid) >= 0 && typeof api.getLayerType === "function" && api.getLayerType(fid) === "blurFilter") { b = fid; out.blurAdopted = true; }
+        var lay = out.layers[i], inner = grandchildren();
+        for (var q = 0; lay && q < inner.length && !b; q++) {
+          if (typeof api.getLayerType === "function" && api.getLayerType(inner[q]) === "blurFilter" && blurOnLayer(inner[q], lay)) { b = inner[q]; out.blurAdopted = true; }
+        }
       }
       out.blurs.push(b || null);
     });
@@ -2542,6 +2549,11 @@ var GeoScene = (function () {
     if (isNew(track, layer)) { api.parent(layer, g); api.set(layer, identityTransform()); }
     return [layer, helper];
   }
+  // Whether this Fast Blur already sits in the layer's filters (a layer's own "filters" input reads back
+  // empty; the blur's outputs list "layer.filters.N", whatever other filters the layer has).
+  function blurOnLayer(blur, layer) {
+    try { return (api.getOutConnections(blur, "id") || []).some(function (c) { return String(c).indexOf(layer + ".filters.") === 0; }); } catch (e) { return false; }
+  }
   // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
   // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
   // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
@@ -2576,10 +2588,9 @@ var GeoScene = (function () {
         setOne(b, "amount", { x: 0, y: 0 });
         api.parent(b, holder);
       }
-      var onLayer = "", driven = "";
-      try { onLayer = String(api.getInConnection(layer, "filters") || ""); } catch (e) { onLayer = ""; }
+      var driven = "";
       try { driven = String(api.getInConnection(b, "amount") || ""); } catch (e) { driven = ""; }
-      if (onLayer.indexOf(b + ".") !== 0) api.connect(b, "id", layer, "filters");
+      if (!blurOnLayer(b, layer)) api.connect(b, "id", layer, "filters");
       if (driven.indexOf(out.blurHelper + ".") !== 0) api.connect(out.blurHelper, A.DRIVER_OUTPUT_ATTR, b, "amount", true);
       out.blurs[i] = b;
     });

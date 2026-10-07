@@ -511,8 +511,12 @@ test("route clip helpers: trim start / trim end / fade follow GeoCurve.visibleSp
   const far = Object.assign({}, inputs, { camLat: -65, camLon: -100 });
   assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, far)), 0);
   near(run(expr.end, Object.assign({ draw: 70 }, far)), 70);
-  // Flat map / Equal Earth / Arc shape: identical to today.
-  [Object.assign({}, inputs, { camProjection: 0 }), Object.assign({}, inputs, { camProjection: 1 }), Object.assign({}, inputs, { shape: 0 })].forEach((f) => {
+  // An Arc-shaped leg on the globe is clipped too.
+  near(run(expr.end, Object.assign({ draw: 100 }, inputs, { shape: 0 })), span.s1 * 100);
+  assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, far, { shape: 0 })), 0);
+  assert.equal(run(expr.fade, Object.assign({ fromOpacity: 0, toOpacity: 0 }, inputs, { shape: 0 })), 100);
+  // Flat map / Equal Earth: identical to today.
+  [Object.assign({}, inputs, { camProjection: 0 }), Object.assign({}, inputs, { camProjection: 1 })].forEach((f) => {
     near(run(expr.start, Object.assign({ draw: 100 }, f)), 0);
     near(run(expr.end, Object.assign({ draw: 100 }, f)), 100);
     assert.equal(run(expr.fade, Object.assign({ fromOpacity: 100, toOpacity: 0 }, f)), 0, "stops' opacities still fade the leg");

@@ -195,20 +195,24 @@ var GeoExpression = (function () {
   // from the line itself.
   var CLIP_INPUTS = FADE_INPUTS.concat([["aX", 0], ["aY", 0], ["bX", 0], ["bY", 0], ["startX", 0], ["startY", 0], ["endX", 0], ["endY", 0],
     ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0], ["draw", 100]]);
-  // Only a great-circle leg on the globe is clipped; the span (null = all hidden) is _sp.
-  var CLIP_SRC = "var _gl = _i10 >= 0.5 && Math.round(_i15) === 2;\n" +
+  // Every leg on the globe is clipped (whatever its Shape); the span (null = all hidden) is _sp.
+  // The fade only asks whether anything is in front.
+  var CLIP_SRC = "var _gl = Math.round(_i15) === 2;\n" +
+    "var _gc = {cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19};\n" +
     "var _sp = _gl ? GeoCurve.visibleSpan([_i2, _i3], [_i4, _i5], [_i6, _i7], [_i8, _i9], " +
-    "{cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19}) : {s0: 0, s1: 1};\n";
-  function clipExpression(curveSrc, meta, body) {
-    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(CLIP_INPUTS) + CLIP_SRC + body + "\n";
+    "_gc) : {s0: 0, s1: 1};\n";
+  function clipExpression(curveSrc, meta, body, src) {
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(CLIP_INPUTS) + (src || CLIP_SRC) + body + "\n";
   }
+  var FADE_SRC = "var _gl = Math.round(_i15) === 2;\n" +
+    "var _gc = {cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19};\n";
   // Trim start: the span's start, never past the draw (so trim start <= trim end).
   function routeClipStartExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "Math.min(_sp ? _sp.s0 * 100 : 0, _i20);"); }
   // Trim end: the draw, held at the span's end.
   function routeClipEndExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_sp ? Math.min(_i20, _sp.s1 * 100) : _i20);"); }
   // Opacity: fully shown unless none of the leg is visible; legs that are not clipped still
   // fade with their stops.
-  function routeClipFadeExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_gl ? (_sp ? 100 : 0) : Math.min(_i0, _i1));"); }
+  function routeClipFadeExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_gl ? (GeoCurve.anyVisible(_gc) ? 100 : 0) : Math.min(_i0, _i1));", FADE_SRC); }
 
   // Route travellers: a leg's copy sits at the tip of its draw-on (Cavalry wraps 100 % back
   // to the start, so stop just short) and only shows on the leg currently drawing.

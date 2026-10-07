@@ -188,6 +188,8 @@ function makeFakeApi() {
       if (d === "promotedAttributes") { (promoted[c] = promoted[c] || []).push({ attribute: a + "." + b, name: "", notes: "" }); return; }
       // Like Cavalry: a Bounding Box's shapes list appends each connection (inputShapes.0, inputShapes.1, ...).
       if (d === "inputShapes") d = "inputShapes." + connections.filter(function (k) { return k[2] === c && /^inputShapes\.\d+$/.test(k[3]); }).length;
+      // Like Cavalry: a layer's filters list appends each connection (filters.0, filters.1, ...); "filters" itself reads back as nothing.
+      if (d === "filters") d = "filters." + connections.filter(function (k) { return k[2] === c && /^filters\.\d+$/.test(k[3]); }).length;
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
@@ -2495,7 +2497,7 @@ function compIds(api) { return Object.keys(api._comps).filter((id) => id !== "co
 function inConn(api, id, attr) { return api.getInConnection(id, attr); }
 function bentParts(api, im) {
   const ref = api.getChildren(im.groupId).find((id) => api.getNiceName(id) === "Imagery source");
-  const filter = api._connections.find((c) => c[2] === ref && c[3] === "filters");
+  const filter = api._connections.find((c) => c[2] === ref && /^filters\.\d+$/.test(c[3]));
   const top = inComp(api, im.meta.sourceComp, () => api.getCompLayers(false));
   const view = top.find((id) => api.getNiceName(id) === "View");
   const mask = top.find((id) => api.getNiceName(id) === "View mask");
@@ -2596,7 +2598,7 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
   assert.equal(api.getCompFromReference(p.ref), comp);
   assert.equal(api._layerComp[p.ref], "comp#1");
   [["position.x", 0], ["position.y", 0], ["rotation.z", 0], ["scale.x", 1], ["scale.y", 1]].forEach(([a, v]) => assert.equal(api.get(p.ref, a), v, a));
-  assert.equal(api._connections.filter((c) => c[2] === p.ref && c[3] === "filters").length, 1);
+  assert.equal(api._connections.filter((c) => c[2] === p.ref && /^filters\.\d+$/.test(c[3])).length, 1);
   assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
   assert.equal(api.getParent(p.filter), r.groupId, "the filter is kept in the Imagery group");
   assert.equal(api.get(p.filter, "allowViewportClipping"), false);
@@ -8163,6 +8165,7 @@ test("prepareRoutes: a leg whose trim end was set by hand to 50 counts as taken 
   const G = context.GeoScene, map = routeMap(context);
   const r = G.createRoute(map, STOPS3, { arc: 30 });
   unnumber(api, G, r);
+  api.deleteLayer(plain(api.getUserDataKey(r.groupId, "geoRoute")).legs[1].clipEnd); // the user let go of the clip end
   api.set(r.legs[1], { "stroke.trimEnd": 50 });
   G.prepareRoutes(map);
   const draws = drawsOf(api, G, r.groupId);
@@ -8445,7 +8448,7 @@ test("highlights: Glow sits directly below the extract with a blur inside its gr
   const g = context.GeoScene.createHighlight(map, extract, "glow", { start: 0, duration: 25 }), rec = hlRec(api, g);
   assert.ok(directlyAbove(api, extract, g), "the extract stays on top");
   assert.ok(api.hasFill(rec.shape));
-  assert.equal(api.getInConnection(rec.shape, "filters"), rec.blur + ".id");
+  assert.equal(api.getInConnection(rec.shape, "filters.0"), rec.blur + ".id");
   assert.equal(api.getParent(rec.blur), g);
   assert.deepEqual(plain(api.get(rec.blur, "amount")), { x: 20, y: 20 });
   assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [0, 25]);
@@ -8821,7 +8824,7 @@ test("change effect: Pulse -> Glow removes the oscillator and fade, adds a blur,
   [old.osc, old.fade, old.shape].forEach((id) => assert.equal(api.layerExists(id), false, id));
   assert.equal(rec.osc, undefined); assert.equal(rec.fade, undefined);
   assert.equal(api.getParent(rec.blur), g);
-  assert.equal(api.getInConnection(rec.shape, "filters"), rec.blur + ".id");
+  assert.equal(api.getInConnection(rec.shape, "filters.0"), rec.blur + ".id");
   assert.deepEqual(plain(api.getKeyframeTimes(g, "opacity")), [], "the group's Amount keys are gone");
   assert.equal(api.get(g, "opacity"), 100);
   assert.deepEqual(plain(api.getKeyframeTimes(rec.shape, "opacity")), [5, 15]);
@@ -10585,7 +10588,7 @@ test("clipped legs: a new leg gets clip start / clip end / fade helpers wired to
       assert.equal(api.getParent(h), d.helpers);
       assert.equal(api.hasAttribute(h, "array.20"), true);
       assert.equal(api.hasAttribute(h, "array.21"), false);
-      assert.match(api.get(h, "expression"), /GeoCurve\.visibleSpan/);
+      assert.match(api.get(h, "expression"), /GeoCurve\.(visibleSpan|anyVisible)/);
       assert.deepEqual([IN(h, CIN("aX")), IN(h, CIN("aY")), IN(h, CIN("bX")), IN(h, CIN("bY"))],
         [l.line + ".generator.startPosition.x", l.line + ".generator.startPosition.y", l.line + ".generator.endPosition.x", l.line + ".generator.endPosition.y"]);
       assert.deepEqual([IN(h, CIN("startX")), IN(h, CIN("startY")), IN(h, CIN("endX")), IN(h, CIN("endY"))],
@@ -10708,6 +10711,7 @@ test("clipped legs: deleting a route takes the clip helpers with it", () => {
 });
 
 // ---- Day & night: the night steps blurred into a smooth gradient ----
+const filtersOf = (api, layer) => api._connections.filter((c) => c[2] === layer && String(c[3]).indexOf("filters.") === 0).map((c) => c[0]);
 const dnBlurIn = (context, name) => "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_BLUR_INPUTS, name);
 
 test("day & night blur: a new overlay gets four Fast Blurs on the night layers, driven by one Night blur helper", () => {
@@ -10730,7 +10734,7 @@ test("day & night blur: a new overlay gets four Fast Blurs on the night layers, 
     assert.equal(api.getLayerType(b), "blurFilter");
     assert.equal(api.getNiceName(b), "Night blur " + a + "°");
     assert.equal(api.getParent(b), holder);
-    assert.equal(api.getInConnection(rec.layers[i], "filters"), b + ".id");
+    assert.deepEqual(filtersOf(api, rec.layers[i]), [b]);
     assert.equal(api.getInConnection(b, "amount"), rec.blurHelper + ".id");
   });
   const f = G.findDayNight(map);
@@ -10763,7 +10767,7 @@ test("day & night blur: Add again makes a deleted blur or helper once, wired lik
   assert.equal(now.blurs[0], rec.blurs[0]); assert.notEqual(now.blurs[1], rec.blurs[1]);
   assert.notEqual(now.blurHelper, rec.blurHelper);
   now.blurs.forEach((b, i) => {
-    assert.equal(api.getInConnection(now.layers[i], "filters"), b + ".id");
+    assert.deepEqual(filtersOf(api, now.layers[i]), [b]);
     assert.equal(api.getInConnection(b, "amount"), now.blurHelper + ".id");
   });
   assert.equal(api.getInConnection(now.blurHelper, dnBlurIn(context, "zoom")), map.cameraId + ".array.2");
@@ -10776,7 +10780,7 @@ test("day & night blur: Add again makes a deleted blur or helper once, wired lik
   const back = G.addDayNight(map, { dayOfYear: 90, utcTime: 6 }), fresh = dnRec(api, g);
   assert.equal(back.restored, 4);
   assert.deepEqual(fresh.blurs, now.blurs);
-  fresh.blurs.forEach((b, i) => assert.equal(api.getInConnection(fresh.layers[i], "filters"), b + ".id"));
+  fresh.blurs.forEach((b, i) => assert.deepEqual(filtersOf(api, fresh.layers[i]), [b]));
 });
 
 test("day & night blur: a Controls refresh gives an older overlay its blurs, once, and the Twilight row drives the blur helper", () => {
@@ -10787,11 +10791,11 @@ test("day & night blur: a Controls refresh gives an older overlay its blurs, onc
   rec.blurs.forEach((b) => api.deleteLayer(b)); api.deleteLayer(rec.blurHelper);
   const old = Object.assign({}, rec); delete old.blurs; delete old.blurHelper;
   api.setUserData(g, "geoDayNight", old);
-  rec.layers.forEach((id) => assert.equal(api.getInConnection(id, "filters"), ""));
+  rec.layers.forEach((id) => assert.deepEqual(filtersOf(api, id), []));
   const s = context.GeoControlPanel.sync(map), now = dnRec(api, g);
   assert.equal(now.blurs.length, 4); assert.ok(now.blurHelper);
   now.blurs.forEach((b, i) => {
-    assert.equal(api.getInConnection(now.layers[i], "filters"), b + ".id");
+    assert.deepEqual(filtersOf(api, now.layers[i]), [b]);
     assert.equal(api.getInConnection(b, "amount"), now.blurHelper + ".id");
     assert.equal(api.getParent(b), api.getParent(now.helpers[0]));
   });
@@ -10826,4 +10830,78 @@ test("day & night blur: a failure while making an overlay leaves no blur behind"
   api.setUserData = real;
   assert.equal(api.getCompLayers(false).length, before);
   assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "blurFilter").length, 0);
+});
+
+test("clipped legs: a refresh keeps the clip end and the draw -> clip end -> trim end chain, whatever value the driven trim end reads back", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  const d0 = routeData(api, r.groupId);
+  // Cavalry reads a connected attribute as its driven value (the clip end's s1 * 100, or Travel %).
+  [60, 100, 0].forEach((driven) => {
+    d0.legs.forEach((l) => api.set(l.line, { "stroke.trimEnd": driven }));
+    [0, 1].forEach(() => {
+      G.prepareRoutes(map);
+      const d = routeData(api, r.groupId);
+      d.legs.forEach((l, i) => {
+        assert.equal(l.clipEnd, d0.legs[i].clipEnd, "driven " + driven);
+        assert.equal(api.layerExists(l.clipEnd), true);
+        assert.equal(trimChain(api, l.line), l.draw + ".id");
+        assert.equal(api.getInConnection(l.line, "stroke.trimEnd"), l.clipEnd + ".id");
+      });
+    });
+  });
+  // The camera turned so the legs are clipped changes nothing about the wiring.
+  api.set(map.cameraId, { "array.0": 0, "array.1": -60, "array.4": 2 });
+  G.prepareRoutes(map);
+  assert.deepEqual(routeData(api, r.groupId).legs.map((l) => l.clipEnd), d0.legs.map((l) => l.clipEnd));
+  // A clip end that lost its place on the trim end goes back on it.
+  api.disconnect(d0.legs[0].clipEnd, "id", d0.legs[0].line, "stroke.trimEnd");
+  api.set(d0.legs[0].line, { "stroke.trimEnd": 100 });
+  G.prepareRoutes(map);
+  assert.equal(api.getInConnection(d0.legs[0].line, "stroke.trimEnd"), d0.legs[0].clipEnd + ".id");
+  assert.equal(trimChain(api, d0.legs[0].line), d0.legs[0].draw + ".id");
+});
+
+test("clipped legs: a clip end whose draw helper is gone gets a new draw on it, and keeps the chain", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context), G = context.GeoScene;
+  const r = G.createRoute(map, ABC, { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  api.deleteLayer(d.legs[0].draw); delete d.legs[0].draw; api.setUserData(r.groupId, "geoRoute", d);
+  api.set(d.legs[0].line, { "stroke.trimEnd": 60 });
+  G.prepareRoutes(map);
+  const now = routeData(api, r.groupId);
+  assert.equal(now.legs[0].clipEnd, d.legs[0].clipEnd);
+  assert.ok(now.legs[0].draw);
+  assert.equal(trimChain(api, now.legs[0].line), now.legs[0].draw + ".id");
+  const count = api.getCompLayers(false).length;
+  G.prepareRoutes(map);
+  assert.equal(api.getCompLayers(false).length, count);
+});
+
+test("day & night blur: Refresh controls three times and Add again leave exactly one blur per night layer, also beside a user's own filter", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const own = api.create("blurFilter", "Mine");
+  api.connect(own, "id", rec.layers[2], "filters");
+  for (let k = 0; k < 3; k++) context.GeoControlPanel.sync(map);
+  G.addDayNight(map, { dayOfYear: 90, utcTime: 6 });
+  const now = dnRec(api, g);
+  assert.deepEqual(now.blurs, rec.blurs);
+  now.layers.forEach((id, i) => {
+    const on = filtersOf(api, id);
+    assert.ok(on.includes(now.blurs[i]));
+    assert.equal(on.filter((f) => api.getNiceName(f).indexOf("Night blur") === 0).length, 1, "one night blur on layer " + i);
+  });
+  assert.equal(filtersOf(api, now.layers[2]).length, 2);
+  assert.equal(api.getInConnection(now.layers[0], "filters"), "", "like Cavalry, the filters input itself reads back empty");
+  // A copy of the record without blurs finds the blurs by what they are connected to.
+  const old = Object.assign({}, now); delete old.blurs; delete old.blurHelper;
+  api.setUserData(g, "geoDayNight", old);
+  const f = G.findDayNight(map);
+  assert.deepEqual(plain(f.blurs), now.blurs); assert.equal(f.blurHelper, now.blurHelper);
+  context.GeoControlPanel.sync(map);
+  assert.deepEqual(dnRec(api, g).blurs, now.blurs);
 });

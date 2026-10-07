@@ -209,3 +209,27 @@ test("visibleSpan: identical and antipodal stops", () => {
   assert.equal(C.visibleSpan([0, 0], [10, 0], [0, 0], [0, 0], { cam, aLon: 170, aLat: 0, bLon: 170, bLat: 0 }), null);
   assert.deepEqual(plainSpan(C.visibleSpan([0, 0], [10, 0], [0, 0], [0, 0], { cam, aLon: 0, aLat: 0, bLon: 180, bLat: 0 })), { s0: 0, s1: 1 });
 });
+
+test("visibleSpan: stops dragged off their places (end points offset) still map onto the leg the scene draws", () => {
+  const cam = { lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 };
+  [[[25, -10], [0, 0]], [[0, 0], [-15, 20]], [[30, 15], [-20, -25]]].forEach(([offA, offB]) => {
+    const proj = P.makeProjector(cam, false), p0 = [0, 0], p1 = [0, 0];
+    proj(L[0], L[1], p0); proj(T[0], T[1], p1);
+    p0[0] += offA[0]; p0[1] += offA[1]; p1[0] += offB[0]; p1[1] += offB[1];
+    const gc = { cam, aLon: L[0], aLat: L[1], bLon: T[0], bLat: T[1], offA, offB };
+    const h = C.greatCircleHandles(p0, p1, gc, { arc: 0 }), span = C.visibleSpan(p0, p1, h.start, h.end, gc);
+    assert.equal(span.s0, 0);
+    assert.ok(span.s1 > 0.1 && span.s1 < 0.95, "s1 " + span.s1);
+    const want = limbCrossing(cam, L, T, 0, 1), got = alongLeg(p0, p1, h, span.s1);
+    // The dragged curve is bent towards the dragged ends, so the crossing is only approximate: stay near the limb point.
+    assert.ok(Math.hypot(got[0] - want[0], got[1] - want[1]) < 40, "off by " + Math.hypot(got[0] - want[0], got[1] - want[1]));
+  });
+});
+
+test("anyVisible: agrees with visibleSpan", () => {
+  [[0, -30], [0, 110], [-65, -100], [45, 60]].forEach(([lat, lon]) => {
+    const cam = { lat, lon, zoom: 2, rotation: 0, projection: 2 }, l = leg(cam);
+    assert.equal(C.anyVisible(l.gc), l.span !== null);
+  });
+  assert.equal(C.anyVisible({ cam: { projection: 0, lat: 0, lon: 0, zoom: 1 }, aLon: 0, aLat: 0, bLon: 90, bLat: 0 }), true);
+});

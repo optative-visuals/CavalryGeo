@@ -180,14 +180,13 @@ adding street layers.
 
 ## Label → Routes
 
-- [ ] 21z. Globe, Shape = Great circle, London → Tokyo, camera centred on London: the leg runs from London and
+- [ ] 21z. Globe (try Shape = Arc and Great circle), London → Tokyo, camera west of London (lon −30): the leg runs from London and
       stops exactly at the edge of the globe (no gap, no hairline across the disc); rotate the camera towards
       Tokyo → the visible part slides along the leg until the whole leg shows, then the London end is cut off
       at the edge; rotate to the far side → the leg is gone. Animate Travel % with a Plane traveller → it
       rides the visible part and disappears at the edge instead of travelling round the back. Flat and
       Equal Earth: legs look exactly as before. An older route: Refresh controls → it clips the same way, and a
-      second refresh changes nothing (if the legs look different afterwards, check the clip helpers
-      read the line's start / end positions and offsets).
+      second refresh changes nothing (the draw-on keeps working).
 
 - [ ] 22. World map (Web Mercator): Label → Routes → add Paris, Lyon and Marseille → Create route
       → a "Route 1: Paris → Lyon → Marseille" group with 3 green stop circles above 2 legs, each

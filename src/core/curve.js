@@ -72,6 +72,21 @@ var GeoCurve = (function () {
     return out;
   }
 
+  // Whether any of the great circle between the stops is on the visible hemisphere (the cheap
+  // part of visibleSpan: sampling only). Flat maps: always.
+  function anyVisible(gc) {
+    var cam = gc && gc.cam;
+    if (!cam || Math.round(cam.projection || 0) !== 2) return true;
+    var project = GeoProjection.makeProjector(cam, true), tmp = [0, 0];
+    var w = angleBetween(unit(gc.aLon, gc.aLat), unit(gc.bLon, gc.bLat));
+    if (w < 1e-9 || w > Math.PI - 1e-6) return project(gc.aLon, gc.aLat, tmp) || project(gc.bLon, gc.bLat, tmp);
+    for (var i = 0; i <= 64; i++) {
+      var g = greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, i / 64);
+      if (project(g[0], g[1], tmp)) return true;
+    }
+    return false;
+  }
+
   // Which part of a globe leg is on the visible hemisphere, as fractions { s0, s1 } of the leg's
   // own screen length (0 = first stop, 1 = last), or null when none of it is. The leg is the cubic
   // through p0 (+ startOff), p1 (+ endOff). gc: { cam, aLon, aLat, bLon, bLat }. Flat maps show the
@@ -127,6 +142,6 @@ var GeoCurve = (function () {
     return { s0: s0, s1: s1 };
   }
 
-  return { handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles, visibleSpan: visibleSpan };
+  return { handles: handles, greatCirclePoint: greatCirclePoint, greatCircleHandles: greatCircleHandles, visibleSpan: visibleSpan, anyVisible: anyVisible };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoCurve;
