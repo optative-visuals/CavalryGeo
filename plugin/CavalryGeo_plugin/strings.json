@@ -1,0 +1,19 @@
+[{
+  "type": "layerStrings",
+  "value": {
+    "author": "cavalryGeo",
+    "layerType": "reproject",
+    "niceName": "Cavalry Geo Reproject",
+    "layerInfo": "Bends Cavalry Geo imagery onto the globe and Equal Earth. Cavalry Geo adds and connects it for you when you build imagery.",
+    "language": "en",
+    "attributes": {
+      "camLat": ["Camera Latitude", "Connected from the map camera."],
+      "camLon": ["Camera Longitude", "Connected from the map camera."],
+      "camZoom": ["Camera Zoom", "Connected from the map camera."],
+      "camRotation": ["Camera Rotation", "Connected from the map camera."],
+      "camProjection": ["Camera Projection", "Connected from the map camera: 0 Web Mercator, 1 Equal Earth, 2 globe."],
+      "viewScale": ["View Scale", "Set every frame by Cavalry Geo: how much the imagery source is shrunk."],
+      "viewOffset": ["View Offset", "Set every frame by Cavalry Geo: the centre of the imagery source's visible area."]
+    }
+  }
+}]

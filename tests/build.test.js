@@ -41,12 +41,17 @@ function makeFakeApi() {
   var overrides = {};  // layerId -> { attr: { hardMin, ... } }
   var paints = {};     // layerId -> { fill, stroke }
   var PROMOTED_SLOT = /^promotedAttributes\.(\d+)\.(name|notes)$/;
+  // Compositions: the map comp (COMP_ID, state in `comp`) plus any made with createComp. Each
+  // layer remembers the comp it was created or added in; layers go into the active comp.
+  var activeComp = COMP_ID, comps = {}, layerComp = {}, compRefs = {}, deletingComp = false;
+  comps[COMP_ID] = comp;
+  var layerTypes = [{ name: "Group", type: "group" }, { name: "Cavalry Geo Reproject", type: "cavalryGeo::reproject" }];
 
   function ensure(id) { if (!store[id]) store[id] = {}; return store[id]; }
   // Like Cavalry: a layer with no parent sits at the composition's top level.
-  function siblingsOf(id) { var key = parents[id] || COMP_ID; return childOrder[key] || (childOrder[key] = []); }
+  function siblingsOf(id) { var key = parents[id] || layerComp[id] || COMP_ID; return childOrder[key] || (childOrder[key] = []); }
   function leave(id) { var sib = siblingsOf(id), i = sib.indexOf(id); if (i >= 0) sib.splice(i, 1); }
-  function addToComp(id) { outFrames[id] = comp.endFrame + 1; delete parents[id]; (childOrder[COMP_ID] = childOrder[COMP_ID] || []).unshift(id); return id; }
+  function addToComp(id) { outFrames[id] = comps[activeComp].endFrame + 1; delete parents[id]; layerComp[id] = activeComp; (childOrder[activeComp] = childOrder[activeComp] || []).unshift(id); return id; }
   // One step up (toward the top of the Scene Window) or down within the layer's container.
   function step(id, by) {
     var sib = siblingsOf(id), i = sib.indexOf(id), j = i + by;
@@ -80,6 +85,7 @@ function makeFakeApi() {
     },
     createEditable: function (path, name) { var id = "editable#" + (nextId++); niceNames[id] = name; return addToComp(id); },
     parent: function (id, parentId) {
+      if (layerComp[id] && layerComp[parentId] && layerComp[id] !== layerComp[parentId]) throw new Error("Can't parent a layer into another composition");
       leave(id);
       parents[id] = parentId;
       (childOrder[parentId] = childOrder[parentId] || []).unshift(id); // newly parented layers land on top
@@ -89,14 +95,15 @@ function makeFakeApi() {
       var former = parents[id];
       leave(id);
       delete parents[id];
-      var top = childOrder[COMP_ID] = childOrder[COMP_ID] || [], at = former ? top.indexOf(former) : -1;
+      var key = layerComp[id] || COMP_ID, top = childOrder[key] = childOrder[key] || [], at = former ? top.indexOf(former) : -1;
       if (at >= 0) top.splice(at + 1, 0, id); else top.unshift(id);
     },
     getParent: function (id) { return parents[id] || ""; },
     getInFrame: function () { return 0; },
     getOutFrame: function (id) { return outFrames[id]; },
     setOutFrame: function (id, f) { outFrames[id] = f; },
-    getChildren: function (parentId) { return (childOrder[parentId] || []).slice(); },
+    // A composition's top-level layers are listed only while it is the active comp.
+    getChildren: function (parentId) { return comps[parentId] && parentId !== activeComp ? [] : (childOrder[parentId] || []).slice(); },
     getNiceName: function (id) { return niceNames[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
     setFrame: function (f) { frame = f; },
@@ -118,13 +125,24 @@ function makeFakeApi() {
     addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return addToComp(id); },
     layerExists: function (id) { return Object.prototype.hasOwnProperty.call(niceNames, id); },
     deleteLayer: function (id) {
+      // Like Cavalry: deleting a composition deletes it and its layers (never the active comp);
+      // a layer can only be deleted while its own comp is active.
+      if (comps[id]) {
+        if (id === activeComp) throw new Error("Can't delete the active composition");
+        var wasDeleting = deletingComp;
+        deletingComp = true;
+        try { (childOrder[id] || []).slice().forEach(function (c) { this.deleteLayer(c); }, this); } finally { deletingComp = wasDeleting; }
+        delete comps[id]; delete niceNames[id]; delete childOrder[id]; delete store[id];
+        return;
+      }
+      if (!deletingComp && layerComp[id] && layerComp[id] !== activeComp) throw new Error("Can't delete a layer of an inactive composition: " + id);
       (childOrder[id] || []).slice().forEach(function (c) { this.deleteLayer(c); }, this);
       leave(id);
       // Like Cavalry: a deleted layer's promotions and connections go with it.
       Object.keys(promoted).forEach(function (c) { promoted[c] = promoted[c].filter(function (p) { return p.attribute.indexOf(id + ".") !== 0; }); });
       delete promoted[id]; delete userData[id];
       for (var ci = connections.length - 1; ci >= 0; ci--) { if (connections[ci][0] === id || connections[ci][2] === id) connections.splice(ci, 1); }
-      delete niceNames[id]; delete parents[id]; delete childOrder[id]; delete store[id];
+      delete niceNames[id]; delete parents[id]; delete childOrder[id]; delete store[id]; delete layerComp[id];
     },
     addDynamic: function (id, arr) {
       var o = ensure(id), n = 0;
@@ -137,7 +155,7 @@ function makeFakeApi() {
     getCustomAttributeName: function (id, attr) { return (attrNames[id] || {})[attr] || ""; },
     hasAttribute: function (id, attr) { return ensure(id)[attr] !== undefined; },
     set: function (id, obj) {
-      if (id === COMP_ID) { Object.keys(obj).forEach(function (k) { if (k in comp) comp[k] = obj[k]; }); }
+      if (comps[id]) { Object.keys(obj).forEach(function (k) { if (k in comps[id]) comps[id][k] = obj[k]; }); }
       var o = ensure(id);
       Object.keys(obj).forEach(function (k) {
         // Like Cavalry: a JavaScript Utility has no transform attributes.
@@ -149,8 +167,8 @@ function makeFakeApi() {
     },
     get: function (id, attr) {
       if (id === COMP_ID && attr === "resolution") return { x: 1920, y: 1080 };
-      if (id === COMP_ID && attr === "frameRange") return { x: comp.startFrame, y: comp.endFrame };
-      if (id === COMP_ID && attr in comp) return comp[attr];
+      if (comps[id] && attr === "frameRange") return { x: comps[id].startFrame, y: comps[id].endFrame };
+      if (comps[id] && attr in comps[id]) return comps[id][attr];
       var pm = PROMOTED_SLOT.exec(attr);
       if (pm && promoted[id] && promoted[id][Number(pm[1])]) return promoted[id][Number(pm[1])][pm[2]];
       var k = keyframes[id] && keyframes[id][attr];
@@ -228,8 +246,31 @@ function makeFakeApi() {
     _promoted: function (id) { return (promoted[id] || []).map(function (p) { return p.attribute; }); },
     _overrides: overrides,
     _connections: connections,
-    getCompLayers: function () { return Object.keys(niceNames); },
-    getActiveComp: function () { return COMP_ID; },
+    // The active comp's layers only.
+    getCompLayers: function () { return Object.keys(niceNames).filter(function (id) { return !comps[id] && (layerComp[id] || COMP_ID) === activeComp; }); },
+    getActiveComp: function () { return activeComp; },
+    setActiveComp: function (id) { if (!comps[id]) throw new Error("Not a composition: " + id); activeComp = id; },
+    // Like Cavalry (perhaps): the new comp may become the active one; a fresh comp has its own
+    // defaults (not the map comp's), so a build has to copy what it needs.
+    createComp: function (name) {
+      var id = "compNode#" + (nextId++);
+      comps[id] = { startFrame: 0, endFrame: 99, playbackStart: 0, playbackEnd: 99, resolution: { x: 1000, y: 1000 }, fps: 30, backgroundColor: { r: 0, g: 0, b: 0, a: 255 } };
+      niceNames[id] = name;
+      activeComp = id;
+      return id;
+    },
+    // A Composition Reference layer, added to the active comp.
+    createCompReference: function (compId) {
+      if (!comps[compId]) throw new Error("Not a composition: " + compId);
+      var id = "compositionReference#" + (nextId++);
+      niceNames[id] = niceNames[compId]; compRefs[id] = compId;
+      return addToComp(id);
+    },
+    getCompFromReference: function (id) { return compRefs[id] || ""; },
+    getAllLayerTypes: function () { return layerTypes.map(function (t) { return { name: t.name, type: t.type }; }); },
+    _layerTypes: layerTypes,
+    _comps: comps,
+    _layerComp: layerComp,
     getSelection: function () { return selection.slice(); },
     select: function (ids) { selection = ids.slice(); },
     // Like Cavalry: these take no arguments and act on the selected layer.
@@ -1152,6 +1193,24 @@ test("GeoScene.extendComp: one layer failing never stops the rest, and a Cavalry
   assert.equal(api.get(comp, "endFrame"), 15);
 });
 
+test("GeoScene.extendComp: a bent imagery source comp is lengthened too, and the map comp is active again", () => {
+  const { context, api, map, src } = bentFixture();
+  const r = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const comp = context.GeoScene.findImagery(map)[0].meta.sourceComp;
+  const inner = inComp(api, comp, () => api.create("group", "Tile"));
+  api.setActiveComp(comp); api.set(comp, { playbackEnd: 9 }); api.setActiveComp("comp#1");
+  const mapLayer = api.create("group", "Map layer");
+  const ext = context.GeoScene.extendComp(20);
+  assert.equal(ext.oldEnd, 9);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.equal(api.get("comp#1", "endFrame"), 20);
+  assert.equal(api.get(comp, "endFrame"), 20, "the source comp reaches the new end");
+  assert.equal(api.get(comp, "playbackEnd"), 20, "its play range followed");
+  assert.equal(api.getOutFrame(inner), 21, "its layers were extended");
+  assert.equal(api.getOutFrame(mapLayer), 21);
+  assert.ok(r.groupId);
+});
+
 // F13: newly added base layers must not bury an existing pin/label/extract - restack
 // base layers below all overlays, ordered countries (lowest) ... cities (highest).
 test("GeoScene.restackBaseLayers moves base layers to back in draw-order-descending order, never touching overlays", () => {
@@ -1952,7 +2011,7 @@ test("planImagery samples every frame and lists missing tiles", () => {
   assert.deepEqual([plan.lo, plan.hi], [4, 4]);
   assert.equal(api.getFrame(), 3, "playhead restored");
   api.set(map.cameraId, { "array.4": 1 });
-  assert.throws(() => context.GeoScene.planImagery(map, src, {}), /Imagery needs the Web Mercator projection/);
+  assert.equal(context.GeoScene.planImagery(map, src, {}).bent, true, "Equal Earth plans bent imagery (with the plugin)");
 });
 
 test("planImagery refuses a plan over the tile cap with the updated message (F1)", () => {
@@ -2413,6 +2472,298 @@ test("an error in a build step tears down the new group and keeps the old imager
   assert.throws(() => job.step(0), /boom/);
   assert.deepEqual(imageryGroups(api), [old.groupId]);
   assert.equal(footageCount(api), 48);
+});
+
+// ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
+const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
+// A globe camera at lon 170 sees across the date line (tiles east of it are shifted by one world).
+function bentFixture(cam) {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("World", Object.assign({ lat: 0, lon: 170, zoom: 3, rotation: 0, projection: 2 }, cam || {}));
+  const src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  return { context, api, map, src };
+}
+// Runs fn with comp active, then puts the map comp back.
+function inComp(api, comp, fn) {
+  const was = api.getActiveComp();
+  api.setActiveComp(comp);
+  try { return fn(); } finally { api.setActiveComp(was); }
+}
+function compIds(api) { return Object.keys(api._comps).filter((id) => id !== "comp#1"); }
+function inConn(api, id, attr) { return api.getInConnection(id, attr); }
+function bentParts(api, im) {
+  const ref = api.getChildren(im.groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  const filter = api._connections.find((c) => c[2] === ref && c[3] === "filters");
+  const top = inComp(api, im.meta.sourceComp, () => api.getCompLayers(false));
+  const view = top.find((id) => api.getNiceName(id) === "View");
+  const mask = top.find((id) => api.getNiceName(id) === "View mask");
+  return { ref, filter: filter && filter[0], view, mask, top };
+}
+
+test("Bent imagery: an all-Web-Mercator plan is not bent", () => {
+  const { context, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.bent, undefined);
+  assert.equal(plan.tiles.length, 48);
+});
+
+test("Bent imagery: a globe camera plans wrapped tiles from bentTileSet and the visible region", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.bent, true);
+  assert.equal(plan.mode, "tiles");
+  const set = context.GeoTiles.bentTileSet(context.GeoScene.sampleCamera(map), 1920, 1080, src.minZoom, src.maxZoom, context.GeoReproject.visibleRegion);
+  assert.deepEqual(plain(plan.tiles), plain(set.tiles));
+  assert.deepEqual([plan.lo, plan.hi], [set.lo, set.hi]);
+  assert.deepEqual(plain(plan.items), plain(set.tiles.map((t) => context.GeoBlocks.wrapRect(context.GeoBlocks.tileRect(t)))));
+  assert.ok(plan.items.some((r) => r.shift === 1), "tiles east of the date line are shifted one world");
+  assert.ok(plan.items.every((r) => r.x0 >= 0 && r.x0 < Math.pow(2, r.z)), "canonical x");
+  assert.equal(plan.missing.length, 0, "every file already downloaded");
+  assert.equal(plan.cached, plan.items.length);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("Bent imagery: a rect needed at two shifts is listed once in missing, and cached counts it", () => {
+  const { context, map, src } = bentFixture({ lat: 80, lon: 170, zoom: 2 }); // pole in view: every longitude
+  context.GeoNet.cachedTile = () => null;
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.bent, true);
+  const key = (r) => context.GeoBlocks.rectKey(r);
+  const keys = plan.items.map(key);
+  assert.ok(keys.length > new Set(keys).size, "some rect is placed at two shifts");
+  assert.equal(plan.missing.length, new Set(keys).size, "downloaded once");
+  assert.equal(new Set(plan.missing.map(key)).size, plan.missing.length);
+  assert.equal(plan.cached, 0);
+});
+
+test("Bent imagery: EOX large images plan from blocksForWrappedTiles", () => {
+  const { context, api, map } = bentFixture();
+  fakeCurl(api); context.GeoFetch._reset();
+  const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {});
+  assert.equal(plan.bent, true);
+  assert.equal(plan.mode, "images");
+  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForWrappedTiles(plan.tiles)));
+  assert.ok(plan.items.some((r) => r.shift === 1));
+});
+
+test("Bent imagery: without the plugin the plan stops with the install message and nothing is made", () => {
+  const { context, api, map, src } = bentFixture();
+  api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
+  const before = api.getCompLayers(false).length;
+  assert.equal(context.GeoScene.reprojectAvailable(), false);
+  assert.throws(() => context.GeoScene.planImagery(map, src, {}), (e) => e.message === PLUGIN_MISSING);
+  assert.equal(api.getCompLayers(false).length, before);
+  assert.deepEqual(compIds(api), []);
+  assert.equal(api.getActiveComp(), "comp#1");
+  delete api.getAllLayerTypes;
+  assert.equal(context.GeoScene.reprojectAvailable(), false);
+  assert.equal(context.GeoScene.REPROJECT_TYPE, "cavalryGeo::reproject");
+});
+
+test("Bent imagery: the plugin present is detected by its type", () => {
+  const { context } = bentFixture();
+  assert.equal(context.GeoScene.reprojectAvailable(), true);
+});
+
+test("Bent imagery: the build makes the source comp, the reference with the filter, View and mask, and drivers", () => {
+  const { context, api, map, src } = bentFixture();
+  api.set("comp#1", { endFrame: 50, startFrame: 2, fps: 24 });
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api.getActiveComp(), "comp#1");
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  const im = found[0], comp = im.meta.sourceComp;
+  assert.equal(im.groupId, r.groupId);
+  assert.deepEqual(compIds(api), [comp]);
+  assert.deepEqual(plain(im.meta), { camera: map.cameraId, category: "imagery", group: r.groupId, cacheKey: "eox",
+    sourceMeta: plain(context.GeoSources.meta(src, {})), bent: true, sourceComp: comp });
+  // The source composition.
+  assert.equal(api.getNiceName(comp), "Imagery source: EOX Sentinel-2 · World");
+  assert.deepEqual(plain(api.get(comp, "resolution")), { x: 4104, y: 4104 }, "big enough for the whole view box");
+  assert.deepEqual(plain(api.get(comp, "frameRange")), { x: 2, y: 50 });
+  assert.equal(api.get(comp, "fps"), 24);
+  const bg = api.get(comp, "backgroundColor");
+  assert.equal(typeof bg === "string" ? bg.slice(7) : bg.a, typeof bg === "string" ? "00" : 0, "transparent background");
+  // The map-comp group: the reference with one filter.
+  assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
+  assert.equal(api.getParent(r.groupId), map.groupId);
+  assert.equal(api.get(r.groupId, "hidden"), false);
+  const p = bentParts(api, im);
+  assert.ok(p.ref, "reference layer");
+  assert.equal(api.getCompFromReference(p.ref), comp);
+  assert.equal(api._layerComp[p.ref], "comp#1");
+  [["position.x", 0], ["position.y", 0], ["rotation.z", 0], ["scale.x", 1], ["scale.y", 1]].forEach(([a, v]) => assert.equal(api.get(p.ref, a), v, a));
+  assert.equal(api._connections.filter((c) => c[2] === p.ref && c[3] === "filters").length, 1);
+  assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.equal(api.getParent(p.filter), r.groupId, "the filter is kept in the Imagery group");
+  assert.equal(api.get(p.filter, "allowViewportClipping"), false);
+  assert.equal(api.get(p.filter, "autoPadding"), false);
+  assert.equal(api.get(p.filter, "samplingQuality"), 1);
+  ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((a, i) => assert.equal(inConn(api, p.filter, a), map.cameraId + ".array." + i, a));
+  // View drivers in the map comp, parented to the group.
+  const size = { width: 1920, height: 1080 };
+  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"] };
+  VIEW_WHICH.forEach((which) => {
+    const from = inConn(api, targets[which][0], targets[which][1]);
+    assert.ok(from, which + " is driven");
+    const d = from.split(".")[0];
+    assert.equal(from, d + ".id");
+    assert.equal(api.getParent(d), r.groupId, which);
+    assert.equal(api._layerComp[d], "comp#1");
+    const meta = d === im.driverId ? plain(im.meta) : undefined;
+    assert.equal(api.get(d, "expression"), context.GeoExpression.imageryViewExpression(context.GEO_REPROJECT_SRC, which, size, meta), which);
+    [0, 1, 2, 3, 4].forEach((i) => assert.equal(inConn(api, d, "array." + i), map.cameraId + ".array." + i));
+  });
+  assert.equal(inConn(api, p.view, "position"), im.driverId + ".id", "the tagged driver is the View position one");
+  // In the source comp: View masked by View mask, level groups with tiles and level drivers.
+  assert.ok(p.view && p.mask);
+  assert.equal(api._layerComp[p.view], comp);
+  assert.ok(api._connections.some((c) => c[0] === p.mask && c[1] === "id" && c[2] === p.view && c[3] === "masks"));
+  const kids = inComp(api, comp, () => api.getChildren(p.view));
+  const levels = kids.filter((id) => /^z \d+$/.test(api.getNiceName(id)));
+  assert.deepEqual(levels.map((id) => api.getNiceName(id)).sort(), Array.from(new Set(plan.items.map((it) => "z " + it.z))).sort());
+  const drivers = kids.filter((id) => /^Imagery driver: /.test(api.getNiceName(id)));
+  assert.equal(drivers.length, 3 * levels.length);
+  drivers.forEach((d) => {
+    assert.equal(api._layerComp[d], comp);
+    [0, 1, 2].forEach((i) => assert.equal(inConn(api, d, "array." + i), map.cameraId + ".array." + i));
+    [3, 4].forEach((i) => { assert.equal(inConn(api, d, "array." + i), ""); assert.equal(api.get(d, "array." + i), 0); });
+  });
+  levels.forEach((lg) => ["position", "scale", "opacity"].forEach((a) => assert.ok(drivers.includes(inConn(api, lg, a).split(".")[0]), a)));
+  const everything = api.getCompLayers(false).concat(inComp(api, comp, () => api.getCompLayers(false)));
+  assert.ok(!everything.some((id) => /rotation/.test(api.getNiceName(id))), "no rotation driver");
+  // Footage placed at the unwrapped (shifted) rects.
+  let shifted = 0;
+  levels.forEach((lg) => {
+    const L = Number(api.getNiceName(lg).slice(2)), its = plan.items.filter((it) => it.z === L);
+    const origin = context.GeoBlocks.levelOrigin(its.map((it) => context.GeoBlocks.placedRect(it)));
+    const expected = Array.from(its, (it) => context.GeoBlocks.rectLocal(context.GeoBlocks.placedRect(it), origin).join(",")).sort();
+    const tiles = inComp(api, comp, () => api.getChildren(lg));
+    tiles.forEach((t) => assert.equal(api._layerComp[t], comp));
+    assert.deepEqual(tiles.map((t) => api.get(t, "position.x") + "," + api.get(t, "position.y")).sort(), expected);
+    its.filter((it) => it.shift === 1).forEach((it) => {
+      const pos = context.GeoBlocks.rectLocal(context.GeoBlocks.placedRect(it), origin);
+      assert.equal(pos[0], context.GeoBlocks.rectLocal(it, origin)[0] + Math.pow(2, L) * 256, "n tiles east");
+      shifted++;
+    });
+  });
+  assert.ok(shifted > 0);
+  assert.equal(r.tiles, plan.items.length);
+  assert.equal(api.getCompLayers(false).filter((id) => /^footageShape#/.test(id)).length, 0, "no footage in the map comp");
+});
+
+test("Bent imagery: a second bent build replaces the first, layer by layer, then deletes its source comp", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const first = context.GeoScene.buildImagery(map, src, {}, plan);
+  const oldComp = context.GeoScene.findImagery(map)[0].meta.sourceComp;
+  const deleted = [];
+  const realDelete = api.deleteLayer.bind(api);
+  api.deleteLayer = function (id) { deleted.push([id, api.getActiveComp(), api._layerComp[id]]); return realDelete(id); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  const steps = stepToEnd(job, 0, () => assert.equal(api.getActiveComp(), "comp#1", "map comp active after every step"));
+  const last = steps[steps.length - 1];
+  assert.equal(last.done, true);
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, last.result.groupId);
+  assert.notEqual(found[0].meta.sourceComp, oldComp);
+  assert.deepEqual(compIds(api), [found[0].meta.sourceComp]);
+  assert.equal(api.layerExists(first.groupId), false);
+  assert.ok(steps.filter((s) => s.phase === "cleanup").length > 10, "old tiles deleted a few at a time");
+  assert.deepEqual(deleted[deleted.length - 1].slice(0, 2), [oldComp, "comp#1"], "the old source comp goes last");
+  const groupAt = deleted.findIndex((d) => d[0] === first.groupId);
+  const sourceDeletes = deleted.filter((d) => d[2] === oldComp);
+  assert.ok(sourceDeletes.length > 10, "source layers deleted one by one");
+  sourceDeletes.forEach((d) => assert.equal(d[1], oldComp, "with the source comp active"));
+  assert.ok(deleted.findIndex((d) => d[2] === oldComp) < groupAt && deleted.map((d) => d[2]).lastIndexOf(oldComp) < groupAt, "source layers before the map-comp group");
+});
+
+test("Bent imagery: flat and bent builds of the same source replace each other", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  const flat = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  assert.equal(context.GeoScene.findImagery(map)[0].meta.bent, undefined);
+  api.set(map.cameraId, { "array.4": 2 });
+  const bent = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  let found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, bent.groupId);
+  assert.equal(found[0].meta.bent, true);
+  assert.equal(api.layerExists(flat.groupId), false);
+  const comp = found[0].meta.sourceComp;
+  api.set(map.cameraId, { "array.4": 0 });
+  const flat2 = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, flat2.groupId);
+  assert.equal(api.layerExists(bent.groupId), false);
+  assert.deepEqual(compIds(api), [], "the bent source comp is deleted");
+  assert.equal(api._comps[comp], undefined);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 0, "the filter is gone");
+});
+
+test("Bent imagery: cancel during tiles discards the new group and deletes the new source comp", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const old = context.GeoScene.buildImagery(map, src, {}, plan);
+  const oldComp = context.GeoScene.findImagery(map)[0].meta.sourceComp;
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  for (let i = 0; i < 4; i++) { const s = job.step(0); assert.equal(s.phase, "tiles"); }
+  assert.equal(compIds(api).length, 2);
+  assert.equal(job.cancel(), true);
+  const steps = stepToEnd(job, 0, () => assert.equal(api.getActiveComp(), "comp#1"));
+  const last = steps[steps.length - 1];
+  assert.equal(last.cancelled, true);
+  assert.ok(steps.length > 1);
+  assert.deepEqual(compIds(api), [oldComp]);
+  assert.deepEqual(imageryGroups(api), [old.groupId]);
+  assert.equal(context.GeoScene.findImagery(map).length, 1);
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 1, "only the old filter is left");
+});
+
+test("Bent imagery: a throw mid-build leaves no new source comp and the map comp active", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  let calls = 0;
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  job.step(0); job.step(0);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.throws(() => job.step(0), /boom/);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.deepEqual(compIds(api), []);
+  assert.deepEqual(imageryGroups(api), []);
+  assert.equal(context.GeoScene.findImagery(map).length, 0);
+});
+
+test("Bent imagery: a throw after the source comp exists deletes it and leaves the map comp active", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const before = api.getCompLayers(false).slice().sort();
+  api.createCompReference = function () { throw new Error("no reference"); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  assert.throws(() => job.step(0), /no reference/);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.deepEqual(compIds(api), [], "the new source comp is deleted");
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before, "nothing left in the map comp");
+  assert.equal(context.GeoScene.findImagery(map).length, 0);
+});
+
+test("Bent imagery: an abandoned half-built bent group is found and removed by the next build", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const abandoned = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  abandoned.step(0); abandoned.step(0);
+  assert.equal(context.GeoScene.findImagery(map).length, 1, "findable from the first step");
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(context.GeoScene.findImagery(map).length, 1);
+  assert.equal(compIds(api).length, 1);
+  assert.equal(imageryGroups(api).length, 1);
 });
 
 // F10: a tile marked empty (404/204 on a previous download) must not show up as

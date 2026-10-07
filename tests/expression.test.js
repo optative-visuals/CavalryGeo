@@ -167,6 +167,34 @@ test("imagery level drivers: position, scale and opacity", () => {
   assert.throws(() => E.imageryLevelExpression(src, "rotation", level), /Unknown imagery driver/);
 });
 
+test("imagery view drivers: position, scale, mask size, filter scale and offset match GeoReproject.view", () => {
+  const { buildReprojectSource } = require("../tools/buildlib.js");
+  const RP = require("../src/core/reproject.js");
+  const src = buildReprojectSource(), size = { width: 1920, height: 1080 };
+  const cams = [{ lat: 40, lon: 10, zoom: 6, rotation: 20, projection: 2 }, { lat: -20, lon: 170, zoom: 3, rotation: 0, projection: 1 }];
+  for (const cam of cams) {
+    const v = RP.view(cam, 1920, 1080);
+    const named = { camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection };
+    const indexed = { n0: cam.lat, n1: cam.lon, n2: cam.zoom, n3: cam.rotation, n4: cam.projection };
+    const want = {
+      position: [-v.cx * v.scale, -v.cy * v.scale], scale: [v.scale, v.scale], maskSize: [v.w * v.scale + 4, v.h * v.scale + 4],
+      viewScale: v.scale, viewOffset: [v.cx, v.cy]
+    };
+    for (const which of Object.keys(want)) {
+      for (const ctx of [named, indexed]) {
+        const got = vm.runInNewContext(E.imageryViewExpression(src, which, size), Object.assign({}, ctx));
+        assert.deepEqual(typeof got === "number" ? got : Array.from(got), want[which], which);
+      }
+    }
+  }
+  const meta = { camera: "javaScript#1", category: "imagery", bent: true };
+  const tagged = E.imageryViewExpression(src, "viewScale", size, meta);
+  assert.deepEqual(E.readTag(tagged, "GEO_META"), meta);
+  assert.ok(tagged.indexOf("/*GEO_META") === 0);
+  assert.equal(E.readTag(E.imageryViewExpression(src, "viewScale", size), "GEO_META"), null);
+  assert.throws(() => E.imageryViewExpression(src, "rotation", size), /Unknown imagery view driver: rotation/);
+});
+
 test("route helper expressions: end point, handles (plugin and hand mode) and fade", () => {
   const vm = require("node:vm");
   const fs = require("node:fs");

@@ -24,7 +24,8 @@ from OpenStreetMap — on a flat map, a spinning globe, or zoomed into a street.
 ### Satellite imagery and camera flights
 Put real satellite imagery under your map that stays sharp as the camera zooms. **Fly here**
 animates a smooth zoom‑out, travel and zoom‑in between places, from the whole world down to a
-city.
+city. Imagery works on Web Mercator, Equal Earth and the globe (the last two need the
+bundled Cavalry Geo Reproject plugin, installed once by dragging it into Cavalry).
 
 ![The end of a camera flight into Paris, over satellite imagery](docs/images/flight.jpg)
 

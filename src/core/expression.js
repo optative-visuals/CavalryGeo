@@ -156,6 +156,17 @@ var GeoExpression = (function () {
     else throw new Error("Unknown imagery driver: " + attr);
     return runtimeSrc + "\n;\n" + inputPrelude(IMAGERY_INPUTS) + call + "\n";
   }
+  // Bent imagery: the source composition's View / mask and the filter follow the visible
+  // region (GeoReproject, inlined runtime source); the map comp's size is baked in.
+  var IMAGERY_VIEW_RESULTS = {
+    position: "[-_v.cx * _v.scale, -_v.cy * _v.scale];", scale: "[_v.scale, _v.scale];",
+    maskSize: "[_v.w * _v.scale + 4, _v.h * _v.scale + 4];", viewScale: "_v.scale;", viewOffset: "[_v.cx, _v.cy];"
+  };
+  function imageryViewExpression(runtimeSrc, which, size, meta) {
+    if (!Object.prototype.hasOwnProperty.call(IMAGERY_VIEW_RESULTS, which)) throw new Error("Unknown imagery view driver: " + which);
+    return (meta ? writeTag("GEO_META", meta) + "\n" : "") + runtimeSrc + "\n;\n" + inputPrelude(IMAGERY_INPUTS) +
+      "var _v = GeoReproject.view(" + CAM + ", " + Number(size.width) + ", " + Number(size.height) + ");\n" + IMAGERY_VIEW_RESULTS[which] + "\n";
+  }
 
   function routeEndPointExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(END_POINT_INPUTS) + "[_i0 + _i2, _i1 + _i3];\n";
@@ -312,7 +323,7 @@ var GeoExpression = (function () {
     highlightLayerExpression: highlightLayerExpression, highlightFadeExpression: highlightFadeExpression,
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
-    labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression,
+    labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression, imageryViewExpression: imageryViewExpression,
     routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
     CALLOUT_GEOM_INPUTS: CALLOUT_GEOM_INPUTS, CALLOUT_DRAW_INPUTS: CALLOUT_DRAW_INPUTS, calloutEdgeExpression: calloutEdgeExpression, calloutBendExpression: calloutBendExpression, calloutDrawExpression: calloutDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,

@@ -1,0 +1,24 @@
+[{
+  "author": "cavalryGeo",
+  "type": "reproject",
+  "superType": "thirdPartyFilter",
+  "version": "1.0",
+  "skslFile": "reproject.sksl",
+  "attributes": {
+    "camLat": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camLon": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camZoom": { "type": "double", "default": 2, "min": 0, "max": 22, "step": 0.01 },
+    "camRotation": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camProjection": { "type": "double", "default": 0, "min": 0, "max": 2, "step": 1 },
+    "viewScale": { "type": "double", "default": 1, "min": 0, "step": 0.01 },
+    "viewOffset": { "type": "double2", "default": { "x": 0, "y": 0 } },
+    "allowViewportClipping": { "default": false },
+    "samplingQuality": { "default": 1 }
+  },
+  "triggers": {
+    "out": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"]
+  },
+  "UI": {
+    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"]
+  }
+}]

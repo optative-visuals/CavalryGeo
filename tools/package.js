@@ -6,12 +6,8 @@ const { execFileSync } = require("node:child_process");
 const { ROOT } = require("./buildlib.js");
 const { createZip } = require("./ziplib.js");
 
-const version = require(path.join(ROOT, "package.json")).version;
-const dist = path.join(ROOT, "dist");
-
-execFileSync(process.execPath, [path.join(__dirname, "build.js")], { stdio: "inherit" });
-
-const INSTALL = [
+function installText(version) {
+  return [
   "Cavalry Geo v" + version,
   "",
   "1. In Cavalry, choose Help > Show Scripts Folder.",
@@ -19,6 +15,7 @@ const INSTALL = [
   "   not inside another folder).",
   "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one. On a Mac, hold Option while dragging and choose Merge: Replace would delete your settings (keys, saved styles) and downloads.",
   "3. Open Scripts > CavalryGeo. No restart needed.",
+  "4. Imagery on the globe or Equal Earth? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install. Nothing else needs it.",
   "",
   "Tested on Windows and macOS.",
   "",
@@ -27,6 +24,7 @@ const INSTALL = [
   "Guide and source: https://github.com/optative-visuals/CavalryGeo",
   ""
 ].join("\r\n");
+}
 
 function collect(dir, prefix, out) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -37,12 +35,24 @@ function collect(dir, prefix, out) {
   return out;
 }
 
-const files = [
-  { name: "CavalryGeo.js", data: fs.readFileSync(path.join(dist, "CavalryGeo.js")) },
-  ...collect(path.join(dist, "CavalryGeo_assets"), "CavalryGeo_assets/", []),
-  { name: "LICENSE.txt", data: fs.readFileSync(path.join(ROOT, "LICENSE")) },
-  { name: "INSTALL.txt", data: Buffer.from(INSTALL, "utf8") }
-];
-const zipPath = path.join(dist, "CavalryGeo-v" + version + ".zip");
-fs.writeFileSync(zipPath, createZip(files));
-console.log("Packaged " + files.length + " files -> " + zipPath + " (" + (fs.statSync(zipPath).size / 1e6).toFixed(1) + " MB)");
+function packageFiles(dist, version) {
+  return [
+    { name: "CavalryGeo.js", data: fs.readFileSync(path.join(dist, "CavalryGeo.js")) },
+    ...collect(path.join(dist, "CavalryGeo_assets"), "CavalryGeo_assets/", []),
+    ...collect(path.join(dist, "CavalryGeo_plugin"), "CavalryGeo_plugin/", []),
+    { name: "LICENSE.txt", data: fs.readFileSync(path.join(ROOT, "LICENSE")) },
+    { name: "INSTALL.txt", data: Buffer.from(installText(version), "utf8") }
+  ];
+}
+
+if (require.main === module) {
+  const version = require(path.join(ROOT, "package.json")).version;
+  const dist = path.join(ROOT, "dist");
+  execFileSync(process.execPath, [path.join(__dirname, "build.js")], { stdio: "inherit" });
+  const files = packageFiles(dist, version);
+  const zipPath = path.join(dist, "CavalryGeo-v" + version + ".zip");
+  fs.writeFileSync(zipPath, createZip(files));
+  console.log("Packaged " + files.length + " files -> " + zipPath + " (" + (fs.statSync(zipPath).size / 1e6).toFixed(1) + " MB)");
+} else {
+  module.exports = { packageFiles, installText };
+}
