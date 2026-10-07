@@ -1660,10 +1660,11 @@ var GeoScene = (function () {
 
   // ---- Callouts ------------------------------------------------------------------------------
   // A callout is a group in the map group: a text label that the user drags in the viewport, with
-  // Cavalry's own text background (a Custom Shape fed by the text, sitting directly below it and
-  // following its position, rotation and scale), a dot at the place following the
-  // camera, and two Basic Lines (label edge -> bend -> place) whose ends small helper scripts work out
-  // every frame from the dot and a Bounding Box reading the label. Deleting the group removes it all.
+  // Cavalry's own text background (a Custom Shape fed by the text, sitting directly below it as its
+  // sibling and following its position, rotation and scale), a dot at the place following the
+  // camera, and two Basic Lines (box edge -> bend -> place) whose ends small helper scripts work out
+  // every frame from the dot and a Bounding Box reading the label and its box together. Deleting the
+  // group removes it all.
   var CALLOUT_KEY = "geoCallout", CALLOUT_NUMBER_KEY = "geoCalloutNumber";
   var CALLOUT_NAMES = ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"];
   var CALLOUT_OFFSET = [160, 100], CALLOUT_MARGIN = 40, CALLOUT_DOT = 6, CALLOUT_LINE_WIDTH = 3, CALLOUT_LABEL_W = 240;
@@ -1678,22 +1679,82 @@ var GeoScene = (function () {
     });
   }
   // Gives every callout a lasting number (a duplicated group copies its number and takes the next free one).
-  function prepareCallouts(map) { numberGroups(calloutGroups(map), CALLOUT_NUMBER_KEY, "Callout"); }
+  // A copied group's record is pointed at its own members (nothing is written while it already is).
+  function prepareCallouts(map) {
+    var groups = calloutGroups(map);
+    numberGroups(groups, CALLOUT_NUMBER_KEY, "Callout");
+    if (typeof api.setUserData !== "function") return;
+    groups.forEach(function (g) {
+      var rec = userData(g, CALLOUT_KEY) || {}, m = calloutMembers(g, rec), fixed = {}, changed = false;
+      Object.keys(rec).forEach(function (k) { fixed[k] = rec[k]; });
+      CALLOUT_NAMES.forEach(function (k) { if (rec[k] && m[k] && m[k] !== rec[k]) { fixed[k] = m[k]; changed = true; } });
+      if (rec.draws) {
+        fixed.draws = rec.draws.map(function (id, i) { if (m.draws[i] && m.draws[i] !== id) changed = true; return m.draws[i] || id; });
+      }
+      if (changed) { try { api.setUserData(g, CALLOUT_KEY, fixed); } catch (e) { /* read again next time */ } }
+    });
+  }
 
   // A callout group's own members. A recorded member counts only while it belongs to this group: the
   // label, box, dot and lines are its children, the helpers children of a group inside it (a duplicated
-  // group copies the record, which still names the original's layers); anything else is null.
+  // group copies the record, which still names the original's layers). Otherwise the group's own
+  // member of that kind is used, as for highlights: the label is the Text child, the box the Custom
+  // Shape child, the dot and the two lines the children named "... dot", "... line 1" and
+  // "... line 2"; in the helpers group the size is the Bounding Box and the place, fade, edge, bend
+  // and the two draws the scripts tagged with their category (a draw by its Index input, else by
+  // the "... draw 1" / "... draw 2" name). A member the record never had is not looked for.
   var CALLOUT_DIRECT = ["label", "box", "dot", "line1", "line2"];
+  var CALLOUT_HELPER_CATEGORY = { place: "calloutPlace", fade: "calloutFade", edge: "calloutEdge", bend: "calloutBend" };
   function calloutMembers(g, rec) {
-    function own(id, direct) {
+    var kids = null, helperKids = null, taken = {};
+    function type(k) { return typeof api.getLayerType === "function" ? String(api.getLayerType(k)) : ""; }
+    function nameEnds(k, tail) { var n = String(api.getNiceName(k)); return n.slice(n.length - tail.length) === tail; }
+    function own(id, isDirect) {
       if (!id || !layerThere(id)) return null;
       var parent = api.getParent(id);
-      if (direct) return parent === g ? id : null;
+      if (isDirect) return parent === g ? id : null;
       return parent && parent !== g && api.getParent(parent) === g ? id : null;
     }
+    function direct() { kids = kids || api.getChildren(g); return kids; }
+    // The helpers group's children: the group inside this one that holds them (named "... helpers", else the first).
+    function helpers() {
+      if (!helperKids) {
+        var groups = direct().filter(function (k) { return type(k) === "group"; });
+        var holder = groups.filter(function (k) { return nameEnds(k, " helpers"); })[0] || groups[0];
+        helperKids = holder ? api.getChildren(holder) : [];
+      }
+      return helperKids;
+    }
+    function category(k) { var m = GeoExpression.readTag(readExpr(k, A.CAMERA_EXPR_ATTR), "GEO_META"); return m ? m.category : ""; }
+    function drawIndex(k) {
+      var v = NaN;
+      try { v = Number(api.get(k, A.CAMERA_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.CALLOUT_DRAW_INPUTS, "index"))); } catch (e) { v = NaN; }
+      if (v === 0 || v === 1) return v;
+      return nameEnds(k, " draw 1") ? 0 : nameEnds(k, " draw 2") ? 1 : -1;
+    }
+    var tests = {
+      label: function (k) { return type(k) === "textShape"; },
+      box: function (k) { return type(k) === "customShape"; },
+      dot: function (k) { return (type(k) === "basicShape" || type(k) === "ellipse") && nameEnds(k, " dot"); },
+      line1: function (k) { return type(k) === "basicLine" && nameEnds(k, " line 1"); },
+      line2: function (k) { return type(k) === "basicLine" && nameEnds(k, " line 2"); },
+      size: function (k) { return type(k) === "boundingBox"; }
+    };
+    Object.keys(CALLOUT_HELPER_CATEGORY).forEach(function (name) { tests[name] = function (k) { return category(k) === CALLOUT_HELPER_CATEGORY[name]; }; });
+    function pick(id, isDirect, test) {
+      var found = own(id, isDirect);
+      if (!found) {
+        var pool = isDirect ? direct() : helpers();
+        for (var i = 0; i < pool.length && !found; i++) { if (!taken[pool[i]] && test(pool[i])) found = pool[i]; }
+      }
+      if (found) taken[found] = true;
+      return found || null;
+    }
     var out = {};
-    CALLOUT_NAMES.forEach(function (k) { out[k] = own(rec[k], CALLOUT_DIRECT.indexOf(k) >= 0); });
-    out.draws = (rec.draws || []).map(function (id) { return own(id, false); });
+    CALLOUT_NAMES.forEach(function (k) { out[k] = rec[k] ? pick(rec[k], CALLOUT_DIRECT.indexOf(k) >= 0, tests[k]) : null; });
+    out.draws = (rec.draws || []).map(function (id, i) {
+      return id ? pick(id, false, function (k) { return category(k) === "calloutDraw" && drawIndex(k) === i; }) : null;
+    });
     return out;
   }
 
@@ -1701,6 +1762,8 @@ var GeoScene = (function () {
     return calloutGroups(map).map(function (g) {
       var rec = userData(g, CALLOUT_KEY) || {}, out = calloutMembers(g, rec);
       out.groupId = g; out.number = calloutNumber(g); out.text = String(rec.text == null ? "" : rec.text);
+      // The notes follow the label's words as they are now (the record holds the text it started with).
+      if (out.label && api.hasAttribute(out.label, A.TEXT_ATTR)) { try { out.text = String(api.get(out.label, A.TEXT_ATTR)); } catch (e) { /* the recorded words */ } }
       return out;
     });
   }
@@ -1744,7 +1807,7 @@ var GeoScene = (function () {
       };
       var feed = function (id, sources) { sources.forEach(function (s, i) { api.connect(s[0], s[1], id, CA + "." + i, true); }); };
 
-      // The label (its position stays the user's) and its background box, which rides along as its child.
+      // The label (its position stays the user's) and its background box, the label's sibling just below it.
       var label = track(api.create(A.TEXT_LAYER_TYPE, label0 + " label"));
       setOne(label, A.TEXT_ATTR, words);
       applyStyle(label, { fill: look.colors.text });

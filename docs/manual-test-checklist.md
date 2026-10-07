@@ -150,6 +150,9 @@ adding street layers.
 - [ ] 19j. Pick a different style and **Apply to map** (Map tab → Style) → the callout's line, dot, text and box recolour.
 - [ ] 19k. Select a callout's label, dot or line → **Bake** says "Callouts are already Cavalry layers, so
       there's nothing to bake."; selected with a map layer, the layer bakes and the callout parts are skipped.
+- [ ] 19l. Select the Callout 1 group and press Ctrl+D, then **Refresh controls** → the copy is a "Callout 2: ..."
+      group with its own "Callout 2 · ..." rows in Overlay controls; dragging the copy's label moves only the copy,
+      and the copy's line and dot still follow its place when the camera moves.
 
 ## Label → Routes
 

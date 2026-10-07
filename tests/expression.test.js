@@ -298,6 +298,16 @@ test("callout geometry: edge, bend and the two draw-on lines", () => {
   // place left of the box
   assert.deepEqual(edge({ placeX: -300 }), [0, 50]);
   assert.deepEqual(bend({ placeX: -300 }), [-40, 50]);
+  // the elbow never goes past the place: a place within 40 px of the edge puts the bend on the place's x, farther keeps 40
+  assert.deepEqual(bend({ placeX: 230 }), [230, 50]);
+  assert.deepEqual(bend({ placeX: 200 }), [200, 50]);
+  assert.deepEqual(bend({ placeX: 240 }), [240, 50]);
+  assert.deepEqual(bend({ placeX: 241 }), [240, 50]);
+  assert.deepEqual(bend({ placeX: -15 }), [-15, 50]);
+  assert.deepEqual(bend({ placeX: -15, style: 0 }), [0, 50]);
+  assert.deepEqual(bend({ placeX: 230, elbow: 10 }), [210, 50]);
+  // a place inside the box (the wrong side of the edge) keeps the bend on the edge
+  assert.deepEqual(bend({ placeX: 150 }), [200, 50]);
   // draw split, Elbow: label to bend first (40 px), then bend to place
   const len2 = Math.hypot(400 - 240, -110 - 50);
   const both = (d) => [draw({ draw: d, index: 0 }), draw({ draw: d, index: 1 })];
@@ -307,10 +317,10 @@ test("callout geometry: edge, bend and the two draw-on lines", () => {
   close(split[0], 100); close(split[1], 0);
   const half = both((40 + len2 / 2) / (40 + len2) * 100);
   close(half[0], 100); close(half[1], 50);
-  // Straight: line 1 is zero length so it is always full; line 2 follows Draw %
+  // Straight: line 1 is zero length, so it is full once Draw % starts and empty at 0; line 2 follows Draw %
   for (const d of [0, 25, 100]) {
     const s = [draw({ style: 0, draw: d, index: 0 }), draw({ style: 0, draw: d, index: 1 })];
-    close(s[0], 100); close(s[1], d);
+    close(s[0], d > 0 ? 100 : 0); close(s[1], d);
   }
   // everything collapsed: both lines follow Draw %
   const flat = { placeX: 200, placeY: 50, style: 0 };

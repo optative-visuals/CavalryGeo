@@ -8794,25 +8794,133 @@ test("callouts: a failure part way through leaves nothing behind and keeps the s
   assert.equal(G.findCallouts(map).length, 0);
 });
 
-test("callouts: a duplicated group (a copied record and number, none of the members) resolves to nothing and is renumbered", () => {
+// Mirrors Ctrl+D on a callout group: every layer in the group is copied (new ids, same names, types and
+// attributes), the copy's internal connections point at the copies, and the user data is copied as it
+// was (the record still names the original's layers). The copy lands on top of the map group's children.
+function duplicateCallout(api, groupId, parentId) {
+  const copies = {}, all = [];
+  const copyTree = (src) => {
+    const dst = api.create(api.getLayerType(src), api.getNiceName(src));
+    copies[src] = dst; all.push(src);
+    const attrs = ["expression", "text", "hidden"]; for (let i = 0; i < 12; i++) attrs.push("array." + i);
+    attrs.forEach((a) => {
+      if (!api.hasAttribute(src, a)) return;
+      api.set(dst, { [a]: api.get(src, a) });
+      const custom = api.getCustomAttributeName(src, a); if (custom) api.renameAttribute(dst, a, custom);
+    });
+    api.getChildren(src).slice().reverse().forEach((kid) => api.parent(copyTree(kid), dst));
+    return dst;
+  };
+  const copy = copyTree(groupId);
+  all.forEach((src) => {
+    api.getInConnectedAttributes(src).forEach((attr) => {
+      const from = api.getInConnection(src, attr), at = from.indexOf(".");
+      api.connect(copies[from.slice(0, at)] || from.slice(0, at), from.slice(at + 1), copies[src], attr, true);
+    });
+  });
+  ["geoCallout", "geoCalloutNumber"].forEach((k) => api.setUserData(copy, k, api.getUserDataKey(groupId, k)));
+  api.parent(copy, parentId);
+  return copy;
+}
+
+test("callouts: a duplicated callout adopts its own members, is renumbered, and a second sync changes nothing", () => {
   const { context, api } = buildSandbox();
   const map = calloutMap(context), G = context.GeoScene;
-  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
-  const copy = api.create("group", "Callout 1: Paris");
-  api.parent(copy, map.groupId);
-  api.setUserData(copy, "geoCallout", api.getUserDataKey(a, "geoCallout"));
-  api.setUserData(copy, "geoCalloutNumber", 1);
-  const found = G.findCallouts(map).filter((c) => c.groupId === copy)[0];
-  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(found[k], null, k));
-  assert.deepEqual(plain(found.draws), [null, null]);
-  const parts = plain(G.calloutParts(map)), rec = coRec(api, a);
-  assert.equal(parts[copy], true);
-  assert.equal(parts[rec.label], true, "the original's own members are still parts");
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, a);
+  const copy = duplicateCallout(api, a, map.groupId);
+  const found = G.findCallouts(map), mine = found.filter((c) => c.groupId === copy)[0], orig = found.filter((c) => c.groupId === a)[0];
+  assert.deepEqual(found.map((c) => c.groupId), [copy, a], "the copy sits on top");
+  const own = (id) => api.getParent(id) === copy || api.getParent(api.getParent(id)) === copy;
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => {
+    assert.ok(mine[k] && mine[k] !== rec[k] && own(mine[k]), k + " is the copy's own");
+    assert.equal(orig[k], rec[k], k + " of the original is unaffected");
+  });
+  assert.equal(api.getLayerType(mine.label), "textShape"); assert.equal(api.getLayerType(mine.box), "customShape");
+  assert.equal(api.getLayerType(mine.size), "boundingBox");
+  assert.equal(mine.draws.length, 2);
+  mine.draws.forEach((d, i) => { assert.ok(d && d !== rec.draws[i] && own(d)); assert.equal(api.get(d, "array.9"), i, "draw " + (i + 1) + " by its Index input"); });
+  assert.deepEqual(plain(orig.draws), rec.draws);
+  const parts = plain(G.calloutParts(map));
+  [copy, mine.label, mine.box, mine.place, mine.draws[0], mine.draws[1], api.getParent(mine.place)].forEach((id) => assert.equal(parts[id], true, String(id)));
+  // The record still names the original until prepareCallouts points it at the copy's own members.
+  assert.deepEqual(coRec(api, copy), rec);
   G.prepareCallouts(map);
-  assert.equal(G.calloutNumber(a), 1);
-  assert.equal(G.calloutNumber(copy), 2);
+  assert.deepEqual([G.calloutNumber(a), G.calloutNumber(copy)], [1, 2]);
   assert.equal(api.getNiceName(copy), "Callout 2: Paris");
-  assert.deepEqual(G.findCallouts(map).filter((c) => c.groupId === a)[0].label, rec.label);
+  const fixed = coRec(api, copy);
+  ["label", "box", "dot", "line1", "line2", "size", "place", "fade", "edge", "bend"].forEach((k) => assert.equal(fixed[k], mine[k], k));
+  assert.deepEqual(fixed.draws, plain(mine.draws));
+  assert.equal(fixed.lon, rec.lon); assert.equal(fixed.text, "Paris");
+  assert.deepEqual(coRec(api, a), rec, "the original's record is untouched");
+  // Stable: nothing is written the second time.
+  const writes = []; const real = api.setUserData;
+  api.setUserData = function (id, key) { writes.push(id + ":" + key); return real.apply(api, arguments); };
+  G.prepareCallouts(map);
+  api.setUserData = real;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(coRec(api, copy), fixed);
+  // A draw is told apart by its Index input, not by its name.
+  const names = mine.draws.map((d) => api.getNiceName(d));
+  api.rename(mine.draws[0], names[1]); api.rename(mine.draws[1], names[0]);
+  assert.deepEqual(plain(G.findCallouts(map)[0].draws), plain(mine.draws));
+});
+
+test("callouts: a duplicated callout gets its own Controls rows, and the original's stay as they were", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const a = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, a);
+  const before = context.GeoControlPanel.sync(map), slots0 = plain(slotsOf(api, before.valuesId));
+  const copy = duplicateCallout(api, a, map.groupId);
+  const r = context.GeoControlPanel.sync(map), slots = plain(slotsOf(api, r.valuesId));
+  assert.equal(G.calloutNumber(copy), 2);
+  const names = plain(promotedNames(api, r.components.overlay));
+  ["Draw %", "Line colour", "Line width", "Dot size", "Text colour", "Box colour", "Hide box"].forEach((n) => {
+    assert.ok(names.includes("Callout 1 · " + n), "Callout 1 · " + n);
+    assert.ok(names.includes("Callout 2 · " + n), "Callout 2 · " + n);
+  });
+  Object.keys(slots0).filter((k) => k.indexOf("callout:" + a + ":") === 0).forEach((k) => assert.equal(slots[k], slots0[k], k));
+  const mine = coRec(api, copy);
+  assert.notEqual(slots["callout:" + copy + ":draw"], slots["callout:" + a + ":draw"]);
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.8"), r.valuesId + "." + slots["callout:" + a + ":draw"]));
+  const list = api._promoted(r.components.overlay);
+  assert.ok(list.includes(mine.label + ".fontSize") && list.includes(rec.label + ".fontSize"));
+  // Moving the copy's label leaves the original's alone.
+  api.set(mine.label, { position: [-300, 200] });
+  assert.notDeepEqual(plain(api.get(rec.label, "position")), [-300, 200]);
+  // A second sync changes nothing.
+  const writes = []; const real = api.setUserData;
+  api.setUserData = function (id, key) { if (key === "geoCallout") writes.push(id); return real.apply(api, arguments); };
+  const again = context.GeoControlPanel.sync(map);
+  api.setUserData = real;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(plain(slotsOf(api, again.valuesId)), slots);
+  assert.deepEqual(plain(api._promoted(again.components.overlay)), plain(list));
+});
+
+test("callouts in Controls: the notes follow the label's words as they are now", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const notesOf = (r) => api.get(r.components.overlay, "promotedAttributes." + plain(promotedNames(api, r.components.overlay)).indexOf("Callout 1 · Draw %") + ".notes");
+  assert.equal(notesOf(context.GeoControlPanel.sync(map)), "Paris");
+  api.set(rec.label, { text: "Lutetia" });
+  assert.equal(G.findCallouts(map)[0].text, "Lutetia");
+  assert.equal(notesOf(context.GeoControlPanel.sync(map)), "Lutetia");
+  api.deleteLayer(rec.label);
+  assert.equal(G.findCallouts(map)[0].text, "Paris", "without the label, the recorded words");
+});
+
+test("callouts: a map style applied after a Controls sync lands on the Controls values, not the lines", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, light = context.GeoStyles.builtIn("Light"), dark = context.GeoStyles.builtIn("Dark");
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map), slot = slotsOf(api, r.valuesId)["callout:" + g + ":color"];
+  assert.ok(slot, "the Line colour row has a slot");
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "stroke.strokeColor"), r.valuesId + "." + slot));
+  G.applyMapStyle(map, light);
+  assert.equal(api.get(r.valuesId, slot), light.colors.accent, "the Controls value took the colour");
+  [rec.line1, rec.line2].forEach((id) => assert.equal(api.get(id, "stroke.strokeColor"), dark.colors.accent, "the line itself is untouched"));
+  assert.equal(api.get(rec.dot, "material.materialColor"), light.colors.accent, "an unconnected member is styled directly");
 });
 
 test("callouts: a late failure (a trim connection, or the record) removes the helpers group and every helper", () => {
