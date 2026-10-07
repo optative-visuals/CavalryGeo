@@ -252,6 +252,16 @@ adding street layers.
       with a message.
 - [ ] 41c. Fly to a place, then search another place and press Fly here again → the second flight
       starts where the first ended (the fields moved on: From: = the old **To:**).
+- [ ] 41d. Fly here with Easing **Snappy** and Zoom-out **High** → play: a quick dash, a higher pull-back
+      than the default. Close and reopen the panel → Easing and Zoom-out show the same choices.
+      Easing **Overshoot** → the flight arrives slightly too close, then settles back to the place.
+- [ ] 41e. Make a flight, put the playhead inside it, change Easing and Zoom-out, press **Update
+      flight** → "Flight to … updated: …"; the flight keeps its frames and destination and plays with
+      the new feel. With the playhead outside every flight → asks you to put it inside one.
+- [ ] 41f. Pick **Pan left**, set From: and To: → **Drift** → "Drift (pan left) from frame … to …";
+      the view slides gently left. Try Push in, Pull out, Pan right / up / down. From: and To: move on
+      so a second Drift chains. Put the playhead inside a drift and press **Update flight** → "That's
+      a drift …". A **To:** past the composition's end asks to extend, like Fly here.
 - [ ] 42. Build imagery again → the question counts only the new images → Yes → only those download → the old imagery stays until the new
       one is built, then swaps at once and "Removing the old imagery…" shows → play: sharper levels
       fade in, no flashes or see-through frames; past zoom Z the top level just gets softer.

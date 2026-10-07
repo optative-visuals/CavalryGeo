@@ -522,7 +522,7 @@ test("Label has a Pins / Routes tab bar; old section names still land in the rig
 test("every button's onClick can be invoked against an empty scene without an error escaping guard()", () => {
   const { context } = buildSandbox();
   const buttonNames = [
-    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
+    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "updateFlightBtn", "driftBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
@@ -581,7 +581,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Update flight", "Drift", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -836,7 +836,7 @@ test("Map tab: a note under the Fly row says what Fly here does, and hides with 
   assert.equal(context.flyNote._textColor, "#8a8a8a");
   const items = context.sectionPages.pages[0]._items;
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
-  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 1] === context.flyNote, "the note sits right after the Fly row");
+  assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 3] === context.flyNote, "the note sits under the Fly, Easing and Drift rows");
   assert.equal(context.flyNote.isHidden(), true, "hidden with no map");
   createWorldMap(context);
   assert.equal(context.flyNote.isHidden(), false, "shown with a map");
@@ -3684,7 +3684,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
     "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
-  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -9135,4 +9135,186 @@ test("rebuilding a recorded flight with new easing / arc replaces exactly its ke
   camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
   S.flyCamera(map, F.path(start, rec.to, 20, S.compSize().width, { easing: "snappy", arc: "low" }), rec.start);
   camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
+});
+
+// Camera feel: Map tab controls (Easing, Zoom-out, Update flight, Drift).
+function flyParis(context) {
+  createWorldMap(context);
+  context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  return context.currentMap();
+}
+function camSeries(api, map, a, b) {
+  const out = [], back = api.getFrame();
+  for (let f = a; f <= b; f++) { api.setFrame(f); out.push({ lat: api.get(map.cameraId, "array.0"), lon: api.get(map.cameraId, "array.1"), zoom: api.get(map.cameraId, "array.2") }); }
+  api.setFrame(back);
+  return out;
+}
+function flightsOf(api, map) { return plain(api.getUserDataKey(map.cameraId, "geoFlights")) || []; }
+const nearly = (a, b) => { assert.equal(a.length, b.length); a.forEach((p, i) => ["lat", "lon", "zoom"].forEach((k) => assert.ok(Math.abs(p[k] - b[i][k]) < 1e-9, k + " at " + i))); };
+
+test("Map tab: Easing / Zoom-out and Drift rows sit right after the Fly row with the exact choices", () => {
+  const { context, ui } = buildSandbox();
+  const items = context.sectionPages.pages[0]._items;
+  const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
+  const i = items.indexOf(flyRow);
+  assert.ok(holds(items[i + 1], context.easingPicker) && holds(items[i + 1], context.arcPicker) && holds(items[i + 1], context.updateFlightBtn));
+  assert.ok(holds(items[i + 2], context.driftPicker) && holds(items[i + 2], context.driftBtn));
+  assert.equal(context.easingLabel.getText(), "Easing");
+  assert.equal(context.arcLabel.getText(), "Zoom-out");
+  assert.equal(context.driftLabel.getText(), "Drift move");
+  assert.deepEqual(plain(context.easingPicker._entries), ["Smooth", "Gentle", "Snappy", "Overshoot"]);
+  assert.deepEqual(plain(context.arcPicker._entries), ["Low", "Normal", "High"]);
+  assert.deepEqual(plain(context.driftPicker._entries), ["Push in", "Pull out", "Pan left", "Pan right", "Pan up", "Pan down"]);
+  assert.equal(context.updateFlightBtn.getText(), "Update flight");
+  assert.equal(context.driftBtn.getText(), "Drift");
+  assert.equal(context.easingPicker.getValue(), 0);
+  assert.equal(context.arcPicker.getValue(), 1);
+  assert.equal(context.driftPicker.getValue(), 0);
+});
+
+test("Map tab: Easing, Zoom-out and Drift move are remembered in settings, other settings kept", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  context.easingPicker.setValue(2); context.easingPicker.onValueChanged();
+  context.arcPicker.setValue(2); context.arcPicker.onValueChanged();
+  context.driftPicker.setValue(4); context.driftPicker.onValueChanged();
+  const s = settingsOf(api);
+  assert.equal(s.flyEasing, "snappy"); assert.equal(s.flyArc, "high"); assert.equal(s.driftMove, "up"); assert.equal(s.mapStyle, "Mono");
+  const again = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(s); } }).context;
+  assert.equal(again.easingPicker.getValue(), 2);
+  assert.equal(again.arcPicker.getValue(), 2);
+  assert.equal(again.driftPicker.getValue(), 4);
+  const junk = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ flyEasing: 7, flyArc: "x" }); } }).context;
+  assert.equal(junk.easingPicker.getValue(), 0);
+  assert.equal(junk.arcPicker.getValue(), 1);
+});
+
+test("Fly here with Snappy and High keys the matching path and records the flight", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  context.easingPicker.setValue(2); context.arcPicker.setValue(2);
+  flyRange(context, 0, 20);
+  const begin = camSeries(api, map, 0, 0)[0];
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  assert.equal(rec.kind, "flight"); assert.equal(rec.name, "Paris"); assert.equal(rec.easing, "snappy"); assert.equal(rec.arc, "high");
+  assert.equal(rec.start, 0); assert.equal(rec.end, 20);
+  assert.deepEqual(plain(rec.from), { lat: begin.lat, lon: begin.lon, zoom: begin.zoom });
+  assert.ok(Math.abs(rec.to.lat - 48.8566) < 0.2 && rec.to.zoom > 5);
+  const s = context.GeoScene.compSize();
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(rec.from, rec.to, 21, s.width, { easing: "snappy", arc: "high" }));
+});
+
+test("Update flight rebuilds the flight under the playhead with the new Easing and Zoom-out", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  const before = flightsOf(api, map)[0];
+  context.easingPicker.setValue(3); context.arcPicker.setValue(0);
+  api.setFrame(10);
+  context.statusLabel.setText("");
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 0–20) updated: Overshoot, Low zoom-out.");
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].easing, "overshoot"); assert.equal(recs[0].arc, "low");
+  assert.deepEqual(plain(recs[0].to), plain(before.to));
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(before.from, before.to, 21, context.GeoScene.compSize().width, { easing: "overshoot", arc: "low" }));
+  assert.equal(api.getFrame(), 10);
+});
+
+test("Update flight resets the imagery plan", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  let reset = 0;
+  const orig = context.resetImageryPlan;
+  context.resetImageryPlan = function () { reset++; return orig.apply(this, arguments); };
+  api.setFrame(5);
+  context.updateFlightBtn.onClick();
+  assert.equal(reset, 1);
+});
+
+test("Update flight outside any flight, or inside a drift, says what to do", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  flyParis(context);
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Put the playhead inside a flight made with Fly here first.");
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  api.setFrame(50);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Put the playhead inside a flight made with Fly here first.");
+  flyRange(context, 30, 60);
+  context.driftBtn.onClick();
+  api.setFrame(40);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: That's a drift — choose a move and press Drift to redo it.");
+});
+
+test("Drift keys a gentle move from the camera at From, records it and moves the boxes on", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 40, "array.1": 10, "array.2": 6 });
+  context.driftPicker.setValue(2); // Pan left
+  flyRange(context, 30, 60);
+  const start = camSeries(api, map, 30, 30)[0];
+  context.driftBtn.onClick();
+  const F = context.GeoFly, end = F.driftEnd(start, "left", 1920, 1080);
+  nearly(camSeries(api, map, 30, 60), F.driftPath(start, end, 31));
+  assert.equal(context.statusLabel.getText(), "Drift (pan left) from frame 30 to 60.");
+  const rec = flightsOf(api, map).filter((r) => r.kind === "drift")[0];
+  assert.equal(rec.move, "left"); assert.equal(rec.start, 30); assert.equal(rec.end, 60);
+  assert.equal(context.flyStartField.getValue(), 60);
+  assert.equal(context.flyEndField.getValue(), 90);
+});
+
+test("Drift past the composition's end asks like Fly here, and Yes extends it", () => {
+  const { context, api, ui } = buildSandbox();
+  flyWorld(context);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
+  context.driftBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Extend the timeline");
+  assert.equal(context.statusLabel.getText(), "Drift (push in) from frame 0 to 14. The composition was extended to frame 14 so the drift isn't cut off.");
+  assert.equal(api.get(api.getActiveComp(), "endFrame"), 14);
+});
+
+test("Drift past the composition's end: No cancels, no dialog refuses", () => {
+  const a = buildSandbox();
+  const map = flyWorld(a.context);
+  withModal(a.ui, false);
+  flyRange(a.context, 0, 14);
+  a.context.driftBtn.onClick();
+  assert.match(a.context.statusLabel.getText(), /^Cancelled\./);
+  camTimes(a.api, map).forEach((t) => assert.deepEqual(t, []));
+  const b = buildSandbox();
+  flyWorld(b.context);
+  flyRange(b.context, 0, 14);
+  b.context.driftBtn.onClick();
+  assert.match(b.context.statusLabel.getText(), /^Error: End is after your composition's last frame/);
+});
+
+test("a Drift over an older flight removes that flight's record", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  flyRange(context, 10, 30);
+  context.driftBtn.onClick();
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].kind, "drift");
 });

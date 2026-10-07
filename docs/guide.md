@@ -56,6 +56,22 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   flight ends after your composition's last frame, Fly here asks first; on Yes it lengthens the
   composition, the layers that reach its end and the play range to the end of the flight, and on
   No it changes nothing. Build imagery afterwards for sharp imagery along the way.
+- **Easing and Zoom-out:** under the Fly row, **Easing** sets how a flight accelerates —
+  **Smooth** (the classic ease in and out), **Gentle** (a softer, rounder start and finish),
+  **Snappy** (slow, then a quick dash, then a firm stop) or **Overshoot** (arrives a little too
+  close, then settles back to the place). **Zoom-out** sets how far the camera pulls back on a
+  long flight: **Low** stays close to the ground, **Normal** is the usual arc, **High** rises
+  higher for a bigger view of the trip. Both are remembered for next time.
+- **Update flight:** put the playhead anywhere inside a flight you made with **Fly here**, change
+  Easing or Zoom-out, and press **Update flight** — the same flight is redone with the new choices,
+  keeping its frames and its destination. If the playhead is not inside a flight, or is inside a
+  drift, it tells you so.
+- **Drift:** for a small, calm move on the spot. Pick a **Drift move** — **Push in** or **Pull out**
+  (a little closer or further) or **Pan left / right / up / down** (a slide of about 5 % of the
+  frame) — set **From:** and **To:**, and press **Drift**. It starts from where the camera is at
+  From, moves gently, and the two fields move on, so drifts chain after flights and after each
+  other. Like a flight it asks before lengthening the composition. Everything Fly here and Drift
+  make is ordinary keyframes on the camera, so you can still edit them by hand.
 - **Animating by hand:** keyframe **Camera · Zoom**, **Camera · Centre latitude / longitude** or
   **Camera · Rotation** on the map's Controls layer (or on the Camera layer). Everything in the map
   follows.
