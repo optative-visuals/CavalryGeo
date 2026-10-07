@@ -338,6 +338,43 @@ var GeoScene = (function () {
   // world transform (rewriting the local one), so every layer is reset right after it is
   // parented. A holder's position is driven, so only its rotation and scale are reset; the
   // helper utilities have no transform at all.
+  // The camera and the two stops' places feed a handle helper's great-circle inputs.
+  function wireHandleExtras(map, handle, aPosition, bPosition) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, at = function (name) { return CA + "." + E.inputIndex(E.HANDLE_INPUTS, name); };
+    ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach(function (name, i) { api.connect(map.cameraId, CA + "." + i, handle, at(name), true); });
+    api.connect(aPosition, CA + ".5", handle, at("aLon"), true);
+    api.connect(aPosition, CA + ".6", handle, at("aLat"), true);
+    api.connect(bPosition, CA + ".5", handle, at("bLon"), true);
+    api.connect(bPosition, CA + ".6", handle, at("bLat"), true);
+  }
+
+  // A route made before great circles has handle helpers with only the first 14 inputs. Adds the
+  // rest (shape Arc, so the look is unchanged), connects them and writes the current expression.
+  // A helper that already has all its inputs is left alone, so a second refresh changes nothing.
+  function upgradeHandles(map, g) {
+    var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    if (!rec || !rec.legs || !rec.stops) return;
+    var last = CA + "." + (E.HANDLE_INPUTS.length - 1);
+    var cam = readCamera(map.cameraId), values = { camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection };
+    rec.legs.forEach(function (l) {
+      var a = rec.stops[l.from], b = rec.stops[l.to];
+      if (!a || !b || !a.position || !b.position || !layerThere(a.position) || !layerThere(b.position)) return;
+      [["start", l.startHandle], ["end", l.endHandle]].forEach(function (w) {
+        var h = w[1];
+        if (!h || !layerThere(h) || api.hasAttribute(h, last)) return;
+        for (var i = 0; i < E.HANDLE_INPUTS.length; i++) {
+          var name = E.HANDLE_INPUTS[i][0], attr = CA + "." + i;
+          if (api.hasAttribute(h, attr)) continue;
+          api.addDynamic(h, CA, "double");
+          try { api.renameAttribute(h, attr, name); } catch (e) { /* display name only */ }
+          setOne(h, attr, values[name] !== undefined ? values[name] : E.HANDLE_INPUTS[i][1]);
+        }
+        wireHandleExtras(map, h, a.position, b.position);
+        setOne(h, A.CAMERA_EXPR_ATTR, E.routeHandleExpression(GEO_CURVE_SRC, { camera: map.cameraId, category: "legHandle" }, w[0]));
+      });
+    });
+  }
+
   function buildRoute(map, stops, pairs, opts, track, number) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
     var look = styleOf(map);
@@ -406,9 +443,11 @@ var GeoScene = (function () {
         [b.holder, "position.x"], [b.holder, "position.y"], [b.circle, "position.x"], [b.circle, "position.y"]];
       var handle = {};
       ["start", "end"].forEach(function (which) {
-        var h = utility(name + " " + which + " handle", E.HANDLE_INPUTS, { arc: arc, handX: seed[which][0], handY: seed[which][1] },
+        var h = utility(name + " " + which + " handle", E.HANDLE_INPUTS, { arc: arc, handX: seed[which][0], handY: seed[which][1], shape: opts.shape ? 1 : 0,
+          camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection, aLon: a.lon, aLat: a.lat, bLon: b.lon, bLat: b.lat },
           E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which));
         feed(h, sources);
+        wireHandleExtras(map, h, a.position, b.position);
         api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
         handle[which] = h;
       });
@@ -1293,6 +1332,7 @@ var GeoScene = (function () {
     var groups = routeGroups(map, mapLayers, routes, order);
     numberRoutes(map, groups);
     groups.forEach(function (g) {
+      try { upgradeHandles(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { prepareTravel(map, g, mapLayers); } catch (e) { /* the next Controls refresh tries again */ }
     });
   }
@@ -2443,7 +2483,7 @@ var GeoScene = (function () {
         if (!a || !b || !l.line || !layerThere(l.line)) return;
         var h = l.startHandle && layerThere(l.startHandle) ? l.startHandle : null;
         function hv(name, dflt) { if (!h) return dflt; var v = inputValue(h, CA + E.inputIndex(E.HANDLE_INPUTS, name)); return isFinite(v) ? v : dflt; }
-        route.legs.push({ from: a, to: b, arc: hv("arc", 30), lean: hv("lean", 0), flip: !!hv("flip", 0) });
+        route.legs.push({ from: a, to: b, arc: hv("arc", 30), lean: hv("lean", 0), flip: !!hv("flip", 0), shape: hv("shape", 0) >= 0.5 ? 1 : 0 });
       });
       if (route.stops.length) out.routes.push(route);
     });

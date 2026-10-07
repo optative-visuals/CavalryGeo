@@ -209,6 +209,26 @@ test("legCurve runs from stop to stop and bulges to the same side as the real le
   assert.ok(Math.abs(straight[8][1] - pa[1]) < 1e-9, "arc 0 is straight");
 });
 
+test("legCurve with shape 1 follows the projected great circle; shape 0 is unchanged", () => {
+  const GeoCurve = require("../src/core/curve.js"), GeoProjection = require("../src/core/projection.js");
+  const view = { lat: 45, lon: 70, zoom: 1, width: 640, height: 360 };
+  const a = { lon: -0.12, lat: 51.5 }, b = { lon: 139.7, lat: 35.7 };
+  const pts = P.legCurve(view, a, b, { arc: 0, lean: 0, flip: false, shape: 1 });
+  assert.equal(pts.length, 17);
+  const segDist = (p, s, e) => { const dx = e[0] - s[0], dy = e[1] - s[1], t = Math.max(0, Math.min(1, ((p[0] - s[0]) * dx + (p[1] - s[1]) * dy) / (dx * dx + dy * dy || 1))); return Math.hypot(p[0] - s[0] - t * dx, p[1] - s[1] - t * dy); };
+  const away = (curve, lon, lat) => { const px = P.toPx(view, lon, lat); return Math.min.apply(null, curve.slice(1).map((p, i) => segDist(px, curve[i], p))); };
+  // The curve is built through the great circle's points at 1/3 and 2/3 ...
+  [1 / 3, 2 / 3].forEach((t) => { const g = GeoCurve.greatCirclePoint(a.lon, a.lat, b.lon, b.lat, t); assert.ok(away(pts, g[0], g[1]) <= 1, "through the point at " + t); });
+  // ... and for a leg the cubic fits well (London to New York) the projected midpoint is on it too.
+  const ny = { lon: -74, lat: 40.7 }, nyPts = P.legCurve(view, a, ny, { arc: 0, shape: 1 }), nyMid = GeoCurve.greatCirclePoint(a.lon, a.lat, ny.lon, ny.lat, 0.5);
+  assert.ok(away(nyPts, nyMid[0], nyMid[1]) <= 1, "near the projected great-circle midpoint");
+  const straight = P.legCurve(view, a, b, { arc: 0 }), shape0 = P.legCurve(view, a, b, { arc: 0, shape: 0 });
+  assert.deepEqual(shape0, straight);
+  const m = P.toPx(view, a.lon, a.lat), n = P.toPx(view, b.lon, b.lat);
+  assert.ok(Math.hypot(straight[8][0] - (m[0] + n[0]) / 2, straight[8][1] - (m[1] + n[1]) / 2) < 1e-9, "arc 0 shape 0 is the straight line");
+  assert.ok(Math.abs(pts[8][1] - straight[8][1]) > 5, "the great circle leaves the straight line");
+});
+
 test("dashPolyline dashes along every segment; dashes() still dashes a rectangle", () => {
   const segs = P.dashPolyline([[0, 0], [10, 0], [10, 10]], 4, 2);
   assert.deepEqual(segs[0], [0, 0, 4, 0]);

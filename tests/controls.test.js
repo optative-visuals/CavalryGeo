@@ -100,11 +100,25 @@ test("new-style route: the same four rows (Arc height on the handle helpers) plu
     travellers: [{ routeId: "g2", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "u1", state: {} }] }]
   }));
   assert.deepEqual(p.rows.filter((r) => r.label.indexOf("Route 1") === 0).map((r) => r.label), [
-    "Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width",
+    "Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Shape (0 arc · 1 great circle)", "Route 1 · Colour", "Route 1 · Width",
     "Route 1 · Traveller hide", "Route 1 · Traveller size", "Route 1 · Traveller colour", "Route 1 · Traveller faces direction"
   ]);
   assert.deepEqual(row(p, "Route 1 · Arc height").link, [{ layer: "h1", attr: "array.8" }, { layer: "h2", attr: "array.8" }]);
   assert.ok(p.rows.filter((r) => r.label.indexOf("Route 1") === 0).every((r) => r.notes === "C → D"));
+});
+
+test("new-style route: a Shape row right after Arc height, on every handle helper's shape input", () => {
+  const leg = (id, s, e) => ({ id, number: 1, state: {}, start: { id: s, state: {} }, end: { id: e, state: {} } });
+  const p = G.plan(model({ newRoutes: [{ id: "g2", name: "C → D", number: 1, title: "C → D", legs: [leg("l3", "h1", "h2"), leg("l4", "h3", "h4")], draws: [] }] }));
+  const names = p.rows.map((r) => r.label), at = names.indexOf("Route 1 · Arc height");
+  assert.equal(names[at + 1], "Route 1 · Shape (0 arc · 1 great circle)");
+  const r = row(p, "Route 1 · Shape (0 arc · 1 great circle)");
+  assert.deepEqual(r.link, [{ layer: "h1", attr: "array.14" }, { layer: "h2", attr: "array.14" }, { layer: "h3", attr: "array.14" }, { layer: "h4", attr: "array.14" }]);
+  assert.deepEqual(r.overrides, { hardMin: 0, hardMax: 1, step: 1 });
+  assert.equal(r.type, "double");
+  assert.equal(r.notes, "C → D");
+  assert.equal(r.key, "route:g2:shape");
+  assert.ok(G.STATE_ATTRS.handle.indexOf("array.14") >= 0);
 });
 
 test("a route without a number falls back to its name; data sets read Data n with their title as notes", () => {
@@ -222,7 +236,7 @@ test("new routes: shared stop rows, then four rows per route and no per-leg rows
   }));
   assert.deepEqual(labels(p).slice(5), [
     "Stops · Hide", "Stops · Colour", "Stops · Size",
-    "A → B · Arc height", "A → B · Colour", "A → B · Width"
+    "A → B · Arc height", "A → B · Shape (0 arc · 1 great circle)", "A → B · Colour", "A → B · Width"
   ]);
   assert.deepEqual(row(p, "Stops · Size").link, [
     { layer: "c1", attr: "generator.radius.x" }, { layer: "c1", attr: "generator.radius.y" },
@@ -245,7 +259,7 @@ test("new routes: an old-style route and a new one share the route name numberin
   ["c1", "n1", "n1s", "n1e"].forEach((id) => assert.ok(ids.indexOf(id) >= 0, id));
   assert.deepEqual(G.STATE_ATTRS.stop, ["hidden", "material.materialColor", "generator.radius.x", "generator.radius.y"]);
   assert.deepEqual(G.STATE_ATTRS.newLeg, ["stroke.strokeColor", "stroke.width"]);
-  assert.deepEqual(G.STATE_ATTRS.handle, ["array.8", "array.9", "array.10", "array.11", "array.12", "array.13"]);
+  assert.deepEqual(G.STATE_ATTRS.handle, ["array.8", "array.9", "array.10", "array.11", "array.12", "array.13", "array.14"]);
 });
 
 test("travellers: hide, size, colour (plugin markers) and faces direction after the route's rows", () => {

@@ -219,6 +219,12 @@ function makeFakeApi() {
       if (arguments.length) throw new Error("Argument count does not match function definition. Expected 0 but got " + arguments.length);
       selection.forEach(function (id) { step(id, -1); });
     },
+    // Test helper: drops an array's inputs from index n on (and what feeds them), like a route made by an older version.
+    _truncate: function (id, arr, n) {
+      var o = ensure(id);
+      Object.keys(o).forEach(function (k) { var m = k.indexOf(arr + ".") === 0 && /^\d+$/.test(k.slice(arr.length + 1)); if (m && Number(k.slice(arr.length + 1)) >= n) delete o[k]; });
+      for (var ci = connections.length - 1; ci >= 0; ci--) { var c = connections[ci]; if (c[2] === id && c[3].indexOf(arr + ".") === 0 && Number(c[3].slice(arr.length + 1)) >= n) connections.splice(ci, 1); }
+    },
     _promoted: function (id) { return (promoted[id] || []).map(function (p) { return p.attribute; }); },
     _overrides: overrides,
     _connections: connections,
@@ -6017,6 +6023,7 @@ test("controls: two maps with the same name each keep their own Controls (never 
 
 // ---- Routes remake --------------------------------------------------------------------
 const GeoCurveT = require("../src/core/curve.js");
+const GeoExpressionT = require("../src/core/expression.js");
 const GeoProjT = require("../src/core/projection.js");
 function routeMap(context) { createWorldMap(context); return context.GeoScene.findMaps()[0]; }
 const ABC = [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }, { name: "C", lon: 20, lat: 0 }];
@@ -6072,6 +6079,89 @@ test("routes: stops ride with the camera and legs are wired to them", () => {
     [a.holder + ".position.x", a.holder + ".position.y", a.circle + ".position.x", a.circle + ".position.y", b.holder + ".position.x", b.holder + ".position.y", b.circle + ".position.x", b.circle + ".position.y"]);
   assert.match(api.get(leg.startHandle, "expression"), /GeoCurve\.handles[\s\S]*\.start\)\);/);
   assert.match(api.get(leg.endHandle, "expression"), /\.end\)\);/);
+});
+
+const HIN = (name) => "array." + GeoExpressionT.inputIndex(GeoExpressionT.HANDLE_INPUTS, name);
+const LONDON = { name: "London", lon: -0.12, lat: 51.5 }, TOKYO = { name: "Tokyo", lon: 139.7, lat: 35.7 };
+
+test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both stops' places wired in", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, [LONDON, TOKYO, { name: "Cairo", lon: 31.2, lat: 30 }], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId), IN = (id, attr) => api.getInConnection(id, attr);
+  assert.equal(d.legs.length, 2);
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [l.startHandle, l.endHandle].forEach((h) => {
+      assert.equal(api.hasAttribute(h, "array.23"), true);
+      assert.equal(api.hasAttribute(h, "array.24"), false);
+      assert.equal(api.get(h, HIN("shape")), 1);
+      ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((n, i) => assert.equal(IN(h, HIN(n)), map.cameraId + ".array." + i, n));
+      assert.equal(IN(h, HIN("aLon")), a.position + ".array.5");
+      assert.equal(IN(h, HIN("aLat")), a.position + ".array.6");
+      assert.equal(IN(h, HIN("bLon")), b.position + ".array.5");
+      assert.equal(IN(h, HIN("bLat")), b.position + ".array.6");
+      assert.match(api.get(h, "expression"), /greatCircleHandles/);
+    });
+  });
+});
+
+test("routes: shape defaults to 0 (Arc)", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  routeData(api, r.groupId).legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.get(h, HIN("shape")), 0)));
+});
+
+test("prepareRoutes: an older route's handle helpers gain the new inputs (connected, shape 0), keep their offsets, and a second refresh changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId), hs = [];
+  d.legs.forEach((l) => hs.push(l.startHandle, l.endHandle));
+  api.set(d.legs[0].startHandle, { [HIN("lean")]: 25, [HIN("flip")]: 1, [HIN("handX")]: 3, [HIN("handY")]: -4 });
+  const old = hs.map((h) => { const o = {}; for (let i = 0; i < 14; i++) o[i] = api.get(h, "array." + i); return o; });
+  hs.forEach((h) => { api._truncate(h, "array", 14); api.set(h, { expression: "OLD" }); });
+  hs.forEach((h) => assert.equal(api.hasAttribute(h, "array.14"), false));
+  context.GeoScene.prepareRoutes(map);
+  const IN = (id, attr) => api.getInConnection(id, attr);
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
+      assert.equal(api.hasAttribute(h, "array.23"), true);
+      assert.equal(api.get(h, HIN("shape")), 0);
+      assert.equal(IN(h, HIN("camLon")), map.cameraId + ".array.1");
+      assert.equal(IN(h, HIN("camProjection")), map.cameraId + ".array.4");
+      assert.equal(IN(h, HIN("aLon")), a.position + ".array.5");
+      assert.equal(IN(h, HIN("bLat")), b.position + ".array.6");
+      const expr = api.get(h, "expression");
+      assert.ok(expr.indexOf("greatCircleHandles") >= 0 && new RegExp("\\." + which + "\\)\\);\\s*$").test(expr), which + " handle expression");
+    });
+  });
+  hs.forEach((h, k) => { for (let i = 0; i < 14; i++) assert.equal(api.get(h, "array." + i), old[k][i], "input " + i + " of helper " + k); });
+  const snap = () => JSON.stringify([api._connections, hs.map((h) => [api.get(h, "expression"), Array.from({ length: 24 }, (_, i) => api.get(h, "array." + i))])]);
+  const before = snap();
+  context.GeoScene.prepareRoutes(map);
+  assert.equal(snap(), before, "a second refresh changes nothing");
+});
+
+test("controls: the Shape row's value drives every handle helper's shape input", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const s = context.GeoControlPanel.sync(map);
+  const slot = slotsOf(api, s.valuesId)["route:" + r.groupId + ":shape"];
+  assert.ok(slot, "a shape slot");
+  routeData(api, r.groupId).legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.getInConnection(h, HIN("shape")), s.valuesId + "." + slot)));
+  assert.equal(api.get(s.valuesId, slot), 0);
+  assert.ok(plain(promotedNames(api, s.components.overlay)).indexOf("Route 1 · Shape (0 arc · 1 great circle)") >= 0);
+});
+
+test("previewModel reports a leg's shape", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  context.GeoScene.createRoute(map, [LONDON, TOKYO], { arc: 40, labels: false, shape: 1 });
+  assert.equal(plain(context.GeoScene.previewModel(map)).routes[0].legs[0].shape, 1);
 });
 
 test("routes: styles, trim, starting arc and hand values seeded with the plugin's shape", () => {
@@ -6235,7 +6325,7 @@ test("controls: a new route gets its four rows beside the stop rows; Arc height 
   const s = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, s.components.overlay));
   assert.deepEqual(names.slice(0, 6), ["Labels · Hide", "Labels · Colour", "Labels · Size", "Stops · Hide", "Stops · Colour", "Stops · Size"]);
-  assert.deepEqual(names.slice(6), ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Colour", "Route 1 · Width"]);
+  assert.deepEqual(names.slice(6), ["Route 1 · Travel %", "Route 1 · Arc height", "Route 1 · Shape (0 arc · 1 great circle)", "Route 1 · Colour", "Route 1 · Width"]);
   const d = routeData(api, r.groupId), slots = slotsOf(api, s.valuesId);
   const arc = slots["route:" + r.groupId + ":arc"];
   d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), s.valuesId + "." + arc)));
@@ -7065,8 +7155,8 @@ test("previewModel: pins, labels and a new-style route with its curve settings, 
   assert.deepEqual(m.labels, [{ lon: -9.14, lat: 38.72, text: "Lisbon" }]);
   assert.equal(m.routes.length, 1);
   assert.deepEqual(m.routes[0].stops, [{ lon: 0, lat: 10 }, { lon: 20, lat: 10 }, { lon: 20, lat: 30 }]);
-  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 10 }, to: { lon: 20, lat: 10 }, arc: 40, lean: 0, flip: false });
-  assert.deepEqual(m.routes[0].legs[1], { from: { lon: 20, lat: 10 }, to: { lon: 20, lat: 30 }, arc: 40, lean: 25, flip: true });
+  assert.deepEqual(m.routes[0].legs[0], { from: { lon: 0, lat: 10 }, to: { lon: 20, lat: 10 }, arc: 40, lean: 0, flip: false, shape: 0 });
+  assert.deepEqual(m.routes[0].legs[1], { from: { lon: 20, lat: 10 }, to: { lon: 20, lat: 30 }, arc: 40, lean: 25, flip: true, shape: 0 });
 });
 
 test("previewModel: a stop's place follows Pin here (its position helper), and a curve setting driven by the Controls is read through", () => {
