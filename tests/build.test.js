@@ -522,7 +522,7 @@ test("Label has a Pins / Routes tab bar; old section names still land in the rig
 test("every button's onClick can be invoked against an empty scene without an error escaping guard()", () => {
   const { context } = buildSandbox();
   const buttonNames = [
-    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "tipsGotItBtn", "tipsBtn",
+    "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "updateFlightBtn", "driftBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
     "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn",
@@ -581,7 +581,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Update flight", "Drift", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -758,7 +758,7 @@ test("Fly to asks before a flight that ends after the composition's last frame (
   flyRange(context, 0, 14);
   context.flyBtn.onClick();
   assert.equal(asked.length, 1);
-  assert.match(context.statusLabel.getText(), /The composition was extended to frame 14 so the flight isn't cut off\./);
+  assert.match(context.statusLabel.getText(), /The composition was extended to frame 89 \(3 seconds after the flight ends\)\./);
 });
 
 test("Fly to says nothing extra when the flight stays inside the composition (F9)", () => {
@@ -1043,19 +1043,42 @@ test("Fly here past the composition's end asks, and Yes extends the composition,
   context.flyBtn.onClick();
   assert.equal(asked.length, 1);
   assert.equal(asked[0].title, "Extend the timeline");
-  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 14. Continue?");
-  assert.equal(api.get(comp, "endFrame"), 14);
-  assert.equal(api.get(comp, "frameRange").y, 14);
-  assert.equal(api.get(comp, "playbackEnd"), 14);
-  assert.equal(api.getOutFrame(atEnd), 15);
-  assert.equal(api.getOutFrame(atEndMinusOne), 15);
+  assert.equal(asked[0].question, "This flight ends at frame 14, after your composition's last frame (9). Fly here will extend the composition, and the layers that reach its end, to frame 89 (3 seconds after the flight ends). Continue?");
+  assert.equal(api.get(comp, "endFrame"), 89);
+  assert.equal(api.get(comp, "frameRange").y, 89);
+  assert.equal(api.get(comp, "playbackEnd"), 89);
+  assert.equal(api.getOutFrame(atEnd), 90);
+  assert.equal(api.getOutFrame(atEndMinusOne), 90);
   assert.equal(api.getOutFrame(trimmed), 4, "a layer trimmed to end earlier is left alone");
-  assert.equal(api.getOutFrame(map.cameraId), 15);
+  assert.equal(api.getOutFrame(map.cameraId), 90);
   camTimes(api, map).forEach((t) => assert.deepEqual(t, range(0, 14)));
-  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 14 so the flight isn't cut off."), 0);
+  assert.equal(context.statusLabel.getText().indexOf("Flight to the world view: frames 0–14. The composition was extended to frame 89 (3 seconds after the flight ends)."), 0);
   assert.ok(context.statusLabel.getText().indexOf("Press Build imagery") > 0);
   assert.equal(context.flyStartField.getValue(), 14);
   assert.equal(context.flyEndField.getValue(), 28);
+});
+
+test("Extending pads 3 seconds at the comp's frame rate: 30 fps pads 90 frames, an unreadable rate pads 75 (25 fps)", () => {
+  const a = buildSandbox();
+  flyWorld(a.context);
+  const layer = a.api.create("group", "Reaches the end");
+  a.api.set(a.api.getActiveComp(), { fps: 30 });
+  const asked = withModal(a.ui, true);
+  flyRange(a.context, 0, 14);
+  a.context.flyBtn.onClick();
+  assert.match(asked[0].question, /to frame 104 \(3 seconds after the flight ends\)\. Continue\?$/);
+  assert.equal(a.api.get(a.api.getActiveComp(), "endFrame"), 104);
+  assert.equal(a.api.getOutFrame(layer), 105);
+  assert.match(a.context.statusLabel.getText(), /The composition was extended to frame 104 \(3 seconds after the flight ends\)\./);
+  const b = buildSandbox();
+  flyWorld(b.context);
+  const layerB = b.api.create("group", "Reaches the end");
+  b.api.set(b.api.getActiveComp(), { fps: "unreadable" });
+  withModal(b.ui, true);
+  flyRange(b.context, 0, 14);
+  b.context.flyBtn.onClick();
+  assert.equal(b.api.get(b.api.getActiveComp(), "endFrame"), 89);
+  assert.equal(b.api.getOutFrame(layerB), 90);
 });
 
 test("Fly here past the composition's end: No cancels and changes nothing", () => {
@@ -3684,7 +3707,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
     "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
-  const plainBtns = ["jumpBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
@@ -9071,4 +9094,356 @@ test("Bake: callout parts are skipped, with a message of their own", () => {
   assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
   assert.match(context.statusLabel.getText(), / Skipped 2 callout part\(s\)\./);
   assert.doesNotMatch(context.statusLabel.getText(), /group\(s\) or other/);
+});
+
+// Camera feel: remembered flights.
+const flightRec = (start, end, extra) => Object.assign({ kind: "flight", start, end, from: { lat: 0, lon: 0, zoom: 2 }, to: { lat: 48.85, lon: 2.35, zoom: 12 } }, extra || {});
+
+test("recordFlight stores a record, replaces overlapping ones, keeps others and survives JSON", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  S.recordFlight(map, flightRec(10, 20));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(10, 20)]);
+  S.recordFlight(map, flightRec(15, 30, { easing: "gentle" }));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")), [flightRec(15, 30, { easing: "gentle" })]);
+  S.recordFlight(map, flightRec(40, 50));
+  const all = plain(api.getUserDataKey(map.cameraId, "geoFlights"));
+  assert.equal(all.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(all)), all);
+});
+
+test("flightAt finds the record under the frame, the latest made when several touch it", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  assert.equal(S.flightAt(map, 5), null);
+  S.recordFlight(map, flightRec(10, 20));
+  S.recordFlight(map, flightRec(30, 40));
+  assert.deepEqual(plain(S.flightAt(map, 15)), flightRec(10, 20));
+  assert.equal(S.flightAt(map, 25), null);
+  assert.equal(S.flightAt(map, 9), null);
+  assert.equal(S.flightAt(map, 40).start, 30);
+  // two records touching one frame (stored directly): the later one wins
+  api.setUserData(map.cameraId, "geoFlights", [flightRec(10, 20), flightRec(20, 30, { easing: "snappy" })]);
+  assert.equal(S.flightAt(map, 20).easing, "snappy");
+});
+
+test("flightStart is rec.from at the first frame, else the camera one frame before, playhead restored", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  const first = S.compFrameRange().start;
+  assert.deepEqual(plain(S.flightStart(map, flightRec(first, first + 9))), { lat: 0, lon: 0, zoom: 2 });
+  api.keyframe(map.cameraId, 39, { "array.0": 10, "array.1": 20, "array.2": 5 });
+  api.keyframe(map.cameraId, 40, { "array.0": 50, "array.1": 60, "array.2": 9 });
+  api.setFrame(7);
+  const s = plain(S.flightStart(map, flightRec(40, 60)));
+  assert.deepEqual(s, { lat: 10, lon: 20, zoom: 5 });
+  assert.equal(api.getFrame(), 7);
+});
+
+test("rebuilding a recorded flight with new easing / arc replaces exactly its keys", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  const S = context.GeoScene, F = context.GeoFly;
+  api.keyframe(map.cameraId, 10, { "array.0": 0, "array.1": 0, "array.2": 2 });
+  api.keyframe(map.cameraId, 80, { "array.0": 1, "array.1": 1, "array.2": 3 });
+  const rec = flightRec(30, 49);
+  S.recordFlight(map, rec);
+  const start = S.flightStart(map, rec);
+  S.flyCamera(map, F.path(start, rec.to, 20, S.compSize().width, { easing: "gentle", arc: "high" }), 30);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
+  S.flyCamera(map, F.path(start, rec.to, 20, S.compSize().width, { easing: "snappy", arc: "low" }), rec.start);
+  camTimes(api, map).forEach((t) => assert.deepEqual(t, [10].concat(range(30, 49), [80])));
+});
+
+// Camera feel: Map tab controls (Easing, Zoom-out, Update flight, Drift).
+function flyParis(context) {
+  createWorldMap(context);
+  context.results = [{ name: "Paris, France", lat: 48.8566, lon: 2.3522, bbox: { south: 48.8, north: 48.9, west: 2.2, east: 2.5 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  return context.currentMap();
+}
+function camSeries(api, map, a, b) {
+  const out = [], back = api.getFrame();
+  for (let f = a; f <= b; f++) { api.setFrame(f); out.push({ lat: api.get(map.cameraId, "array.0"), lon: api.get(map.cameraId, "array.1"), zoom: api.get(map.cameraId, "array.2") }); }
+  api.setFrame(back);
+  return out;
+}
+function flightsOf(api, map) { return plain(api.getUserDataKey(map.cameraId, "geoFlights")) || []; }
+const nearly = (a, b) => { assert.equal(a.length, b.length); a.forEach((p, i) => ["lat", "lon", "zoom"].forEach((k) => assert.ok(Math.abs(p[k] - b[i][k]) < 1e-9, k + " at " + i))); };
+
+test("Map tab: Easing / Zoom-out and Drift rows sit right after the Fly row with the exact choices", () => {
+  const { context, ui } = buildSandbox();
+  const items = context.sectionPages.pages[0]._items;
+  const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
+  const i = items.indexOf(flyRow);
+  assert.equal(items[i + 1], context.flyNote);
+  assert.ok(holds(items[i + 2], context.easingPicker) && holds(items[i + 2], context.arcPicker) && holds(items[i + 2], context.updateFlightBtn));
+  assert.ok(holds(items[i + 3], context.driftPicker) && holds(items[i + 3], context.driftBtn));
+  assert.equal(context.easingLabel.getText(), "Easing");
+  assert.equal(context.arcLabel.getText(), "Zoom-out");
+  assert.equal(context.driftLabel.getText(), "Drift move");
+  assert.deepEqual(plain(context.easingPicker._entries), ["Smooth", "Gentle", "Snappy", "Overshoot"]);
+  assert.deepEqual(plain(context.arcPicker._entries), ["Low", "Normal", "High"]);
+  assert.deepEqual(plain(context.driftPicker._entries), ["Push in", "Pull out", "Pan left", "Pan right", "Pan up", "Pan down"]);
+  assert.equal(context.updateFlightBtn.getText(), "Update flight");
+  assert.equal(context.driftBtn.getText(), "Drift");
+  assert.equal(context.easingPicker.getValue(), 0);
+  assert.equal(context.arcPicker.getValue(), 1);
+  assert.equal(context.driftPicker.getValue(), 0);
+});
+
+test("Map tab: Easing, Zoom-out and Drift move are remembered in settings, other settings kept", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono" }); } });
+  context.easingPicker.setValue(2); context.easingPicker.onValueChanged();
+  context.arcPicker.setValue(2); context.arcPicker.onValueChanged();
+  context.driftPicker.setValue(4); context.driftPicker.onValueChanged();
+  const s = settingsOf(api);
+  assert.equal(s.flyEasing, "snappy"); assert.equal(s.flyArc, "high"); assert.equal(s.driftMove, "up"); assert.equal(s.mapStyle, "Mono");
+  const again = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(s); } }).context;
+  assert.equal(again.easingPicker.getValue(), 2);
+  assert.equal(again.arcPicker.getValue(), 2);
+  assert.equal(again.driftPicker.getValue(), 4);
+  const junk = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ flyEasing: 7, flyArc: "x" }); } }).context;
+  assert.equal(junk.easingPicker.getValue(), 0);
+  assert.equal(junk.arcPicker.getValue(), 1);
+});
+
+test("Fly here with Snappy and High keys the matching path and records the flight", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  context.easingPicker.setValue(2); context.arcPicker.setValue(2);
+  flyRange(context, 0, 20);
+  const begin = camSeries(api, map, 0, 0)[0];
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  assert.equal(rec.kind, "flight"); assert.equal(rec.name, "Paris"); assert.equal(rec.easing, "snappy"); assert.equal(rec.arc, "high");
+  assert.equal(rec.start, 0); assert.equal(rec.end, 20);
+  assert.deepEqual(plain(rec.from), { lat: begin.lat, lon: begin.lon, zoom: begin.zoom });
+  assert.ok(Math.abs(rec.to.lat - 48.8566) < 0.2 && rec.to.zoom > 5);
+  const s = context.GeoScene.compSize();
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(rec.from, rec.to, 21, s.width, { easing: "snappy", arc: "high" }));
+});
+
+test("Update flight rebuilds the flight under the playhead with the new Easing and Zoom-out", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  const before = flightsOf(api, map)[0];
+  context.easingPicker.setValue(3); context.arcPicker.setValue(0);
+  api.setFrame(10);
+  context.statusLabel.setText("");
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 0–20) updated: Overshoot, Low zoom-out.");
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].easing, "overshoot"); assert.equal(recs[0].arc, "low");
+  assert.deepEqual(plain(recs[0].to), plain(before.to));
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(before.from, before.to, 21, context.GeoScene.compSize().width, { easing: "overshoot", arc: "low" }));
+  assert.equal(api.getFrame(), 10);
+});
+
+test("Update flight resets the imagery plan", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  let reset = 0;
+  const orig = context.resetImageryPlan;
+  context.resetImageryPlan = function () { reset++; return orig.apply(this, arguments); };
+  api.setFrame(5);
+  context.updateFlightBtn.onClick();
+  assert.equal(reset, 1);
+});
+
+test("Update flight outside any flight, or inside a drift, says what to do", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  flyParis(context);
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Put the playhead inside a flight made with Fly here first.");
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  api.setFrame(50);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Put the playhead inside a flight made with Fly here first.");
+  flyRange(context, 30, 60);
+  context.driftBtn.onClick();
+  api.setFrame(40);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: That's a drift — choose a move and press Drift to redo it.");
+});
+
+test("Drift keys a gentle move from the camera at From, records it and moves the boxes on", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyWorld(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 40, "array.1": 10, "array.2": 6 });
+  context.driftPicker.setValue(2); // Pan left
+  flyRange(context, 30, 60);
+  const start = camSeries(api, map, 30, 30)[0];
+  context.driftBtn.onClick();
+  const F = context.GeoFly, end = F.driftEnd(start, "left", 1920, 1080);
+  nearly(camSeries(api, map, 30, 60), F.driftPath(start, end, 31));
+  assert.equal(context.statusLabel.getText(), "Drift (pan left) from frame 30 to 60.");
+  const rec = flightsOf(api, map).filter((r) => r.kind === "drift")[0];
+  assert.equal(rec.move, "left"); assert.equal(rec.start, 30); assert.equal(rec.end, 60);
+  assert.equal(context.flyStartField.getValue(), 60);
+  assert.equal(context.flyEndField.getValue(), 90);
+});
+
+test("Drift past the composition's end asks like Fly here, and Yes extends it", () => {
+  const { context, api, ui } = buildSandbox();
+  flyWorld(context);
+  const asked = withModal(ui, true);
+  flyRange(context, 0, 14);
+  context.driftBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Extend the timeline");
+  assert.equal(asked[0].question, "This drift ends at frame 14, after your composition's last frame (9). Drift will extend the composition, and the layers that reach its end, to frame 89 (3 seconds after the drift ends). Continue?");
+  assert.equal(context.statusLabel.getText(), "Drift (push in) from frame 0 to 14. The composition was extended to frame 89 (3 seconds after the drift ends).");
+  assert.equal(api.get(api.getActiveComp(), "endFrame"), 89);
+});
+
+test("Drift past the composition's end: No cancels, no dialog refuses", () => {
+  const a = buildSandbox();
+  const map = flyWorld(a.context);
+  withModal(a.ui, false);
+  flyRange(a.context, 0, 14);
+  a.context.driftBtn.onClick();
+  assert.match(a.context.statusLabel.getText(), /^Cancelled\./);
+  camTimes(a.api, map).forEach((t) => assert.deepEqual(t, []));
+  const b = buildSandbox();
+  flyWorld(b.context);
+  flyRange(b.context, 0, 14);
+  b.context.driftBtn.onClick();
+  assert.match(b.context.statusLabel.getText(), /^Error: End is after your composition's last frame/);
+});
+
+test("a Drift over an older flight removes that flight's record", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  flyRange(context, 10, 30);
+  context.driftBtn.onClick();
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].kind, "drift");
+});
+
+test("recordFlight keeps a record that only shares a boundary frame, drops a real overlap", () => {
+  const { context, api } = buildSandbox();
+  const map = flyWorld(context);
+  const S = context.GeoScene;
+  S.recordFlight(map, flightRec(0, 20));
+  S.recordFlight(map, flightRec(20, 40));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")).map((r) => [r.start, r.end]), [[0, 20], [20, 40]]);
+  S.recordFlight(map, flightRec(30, 50));
+  assert.deepEqual(plain(api.getUserDataKey(map.cameraId, "geoFlights")).map((r) => [r.start, r.end]), [[0, 20], [30, 50]]);
+});
+
+test("Update flight on the first of two chained flights rebuilds it and leaves the second alone", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  context.results = [{ name: "Rome, Italy", lat: 41.9, lon: 12.5, bbox: { south: 41.8, north: 42, west: 12.4, east: 12.6 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  context.flyBtn.onClick(); // 20-40, from the old To
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 2);
+  const first = recs[0], secondKeys = camSeries(api, map, 21, 40);
+  context.easingPicker.setValue(2); context.arcPicker.setValue(2);
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 0–20) updated: Snappy, High zoom-out.");
+  nearly(camSeries(api, map, 0, 20), context.GeoFly.path(first.from, first.to, 21, context.GeoScene.compSize().width, { easing: "snappy", arc: "high" }));
+  nearly(camSeries(api, map, 21, 40), secondKeys);
+  assert.equal(flightsOf(api, map).length, 2);
+  // the second flight now starts from the first one's destination
+  api.setFrame(30);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Rome (frames 20–40) updated: Snappy, High zoom-out.");
+  nearly(camSeries(api, map, 21, 40), context.GeoFly.path(first.to, recs[1].to, 21, context.GeoScene.compSize().width, { easing: "snappy", arc: "high" }).slice(1));
+});
+
+test("Update flight on a flight after frame 0 that is not chained starts from the camera one frame before", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  api.keyframe(map.cameraId, 0, { "array.0": 10, "array.1": 20, "array.2": 4 });
+  flyRange(context, 30, 50);
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  const before = camSeries(api, map, 29, 29)[0];
+  context.easingPicker.setValue(1);
+  api.setFrame(40);
+  context.updateFlightBtn.onClick();
+  nearly(camSeries(api, map, 30, 50), context.GeoFly.path(before, rec.to, 21, context.GeoScene.compSize().width, { easing: "gentle", arc: "normal" }));
+});
+
+test("Update flight with the playhead past the comp end still finds a flight that ends at the comp end", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 480, 500);
+  context.flyBtn.onClick();
+  api.setFrame(700);
+  context.updateFlightBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Flight to Paris (frames 480–500) updated: Smooth, Normal zoom-out.");
+});
+
+test("Update flight keeps the record's place so the later chained flight still wins at the shared frame", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  const map = flyParis(context);
+  flyRange(context, 0, 20);
+  context.flyBtn.onClick();
+  context.results = [{ name: "Rome, Italy", lat: 41.9, lon: 12.5, bbox: { south: 41.8, north: 42, west: 12.4, east: 12.6 } }];
+  context.refreshResultPicker();
+  context.resultPicker.setValue(1);
+  context.resultPicker.onValueChanged();
+  context.flyBtn.onClick(); // 20-40
+  api.setFrame(10);
+  context.updateFlightBtn.onClick();
+  const recs = flightsOf(api, map);
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].start, 0);
+  assert.equal(recs[1].start, 20);
+  const at = context.GeoScene.flightAt(map, 20);
+  assert.equal(at.start, 20);
+  assert.equal(at.name, "Rome");
+});
+
+test("Update flight on a comp starting at frame 10 starts from the recorded view and reads no frame before it", () => {
+  const { context, api } = buildSandbox();
+  longComp(api);
+  api.set(api.getActiveComp(), { startFrame: 10, playbackStart: 10 });
+  const map = flyParis(context);
+  flyRange(context, 10, 30);
+  context.flyBtn.onClick();
+  const rec = flightsOf(api, map)[0];
+  const seen = [], orig = api.setFrame;
+  api.setFrame = (f) => { seen.push(f); return orig(f); };
+  api.setFrame(20);
+  seen.length = 0;
+  context.updateFlightBtn.onClick();
+  assert.ok(seen.indexOf(9) < 0, "read frame 9");
+  nearly(camSeries(api, map, 10, 30), context.GeoFly.path(rec.from, rec.to, 21, context.GeoScene.compSize().width, { easing: "smooth", arc: "normal" }));
 });

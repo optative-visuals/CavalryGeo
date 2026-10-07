@@ -79,6 +79,36 @@ var flyEndField = new ui.NumericField(playhead() + 100);
 });
 var flyBtn = GeoStyle.primaryButton("Fly here");
 var flyNote = GeoStyle.note("(animates the camera to the map preview)");
+// Camera feel: how a flight eases, how far it zooms out on the way, a button to redo the flight
+// under the playhead with new choices, and Drift (a small move from the current view, From to To).
+var easingLabel = new ui.Label("Easing");
+var easingPicker = new ui.DropDown();
+var arcLabel = new ui.Label("Zoom-out");
+var arcPicker = new ui.DropDown();
+var updateFlightBtn = GeoStyle.button("Update flight");
+var driftLabel = new ui.Label("Drift move");
+var driftPicker = new ui.DropDown();
+var driftBtn = GeoStyle.button("Drift");
+GeoFly.EASINGS.forEach(function (e) { easingPicker.addEntry(e.name); });
+GeoFly.ARCS.forEach(function (a) { arcPicker.addEntry(a.name); });
+GeoFly.DRIFTS.forEach(function (d) { driftPicker.addEntry(d.name); });
+function indexOfId(list, id, fallback) {
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return i;
+  return fallback;
+}
+(function () { // Smooth / Normal / Push in unless settings.json remembers other choices.
+  var s = {};
+  try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
+  easingPicker.setValue(indexOfId(GeoFly.EASINGS, s.flyEasing, 0));
+  arcPicker.setValue(indexOfId(GeoFly.ARCS, s.flyArc, 1));
+  driftPicker.setValue(indexOfId(GeoFly.DRIFTS, s.driftMove, 0));
+})();
+function pickedEasing() { return GeoFly.EASINGS[easingPicker.getValue()] || GeoFly.EASINGS[0]; }
+function pickedArc() { return GeoFly.ARCS[arcPicker.getValue()] || GeoFly.ARCS[1]; }
+function pickedDrift() { return GeoFly.DRIFTS[driftPicker.getValue()] || GeoFly.DRIFTS[0]; }
+easingPicker.onValueChanged = guard(function () { GeoNet.updateSettings({ flyEasing: pickedEasing().id }); });
+arcPicker.onValueChanged = guard(function () { GeoNet.updateSettings({ flyArc: pickedArc().id }); });
+driftPicker.onValueChanged = guard(function () { GeoNet.updateSettings({ driftMove: pickedDrift().id }); });
 
 // Search and Fly here share one width.
 var MAP_ACTION_WIDTH = 84;
@@ -185,7 +215,7 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
-  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
+  [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote, easingLabel, easingPicker, arcLabel, arcPicker, updateFlightBtn, driftLabel, driftPicker, driftBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
   [applyStyleBtn, saveStyleBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
@@ -312,36 +342,94 @@ jumpBtn.onClick = guard(function () {
   previewShowCurrent();
 });
 
-// Flies from the Start frame to the End frame. Everything is checked (and a longer composition
-// asked for) before anything changes; the flight leaves from the camera as it is at Start.
-flyBtn.onClick = guard(function () {
+// Fly here and Drift share their checks: Start / End, the composition's first and last frame, and
+// the Yes / No question before the composition is lengthened. Everything is checked (and a longer
+// composition asked for) before anything changes.
+function planMove(noun) {
   var map = currentMap(), from = Math.round(Number(flyStartField.getValue())), to = Math.round(Number(flyEndField.getValue()));
-  if (!(to >= from + 1)) throw new Error("Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+  if (!(to >= from + 1)) throw new Error("Set End at least 1 frame after Start (a " + noun + " needs 2 frames or more).");
   var comp = GeoScene.compFrameRange();
   if (from < comp.start) throw new Error("Start is before the composition's first frame (" + comp.start + ").");
-  var t = pickedTarget(GeoScene.readCamera(map.cameraId).projection), s = GeoScene.compSize(), extended = false;
-  if (to > comp.end) {
-    var dialog = questionDialog();
-    if (!dialog) throw new Error("End is after your composition's last frame (" + comp.end + "). Set End to " + comp.end + " or earlier, or lengthen the composition first.");
-    if (!dialog.showQuestion("Extend the timeline", "This flight ends at frame " + to + ", after your composition's last frame (" + comp.end +
-      "). Fly here will extend the composition, and the layers that reach its end, to frame " + to + ". Continue?")) {
-      say("Cancelled. Set End to " + comp.end + " or earlier to stay within your composition.");
-      return;
-    }
-    extended = !!GeoScene.extendComp(to);
+  return { map: map, from: from, to: to, comp: comp };
+}
+// A composition extended for a move gets this many seconds after the move, so playback doesn't hit
+// the end and snap back to the start.
+var EXTEND_PAD_SECONDS = 3;
+function extendPadFrames() {
+  var fps = 25;
+  try { var f = Number(api.get(api.getActiveComp(), "fps")); if (f > 0) fps = f; } catch (e) {}
+  return Math.round(fps * EXTEND_PAD_SECONDS);
+}
+// The new end frame when extended, false = no need, null = the user said No (already told).
+function extendForMove(plan, noun, button) {
+  if (plan.to <= plan.comp.end) return false;
+  var dialog = questionDialog();
+  if (!dialog) throw new Error("End is after your composition's last frame (" + plan.comp.end + "). Set End to " + plan.comp.end + " or earlier, or lengthen the composition first.");
+  var newEnd = plan.to + extendPadFrames();
+  if (!dialog.showQuestion("Extend the timeline", "This " + noun + " ends at frame " + plan.to + ", after your composition's last frame (" + plan.comp.end +
+    "). " + button + " will extend the composition, and the layers that reach its end, to frame " + newEnd + " (" + EXTEND_PAD_SECONDS + " seconds after the " + noun + " ends). Continue?")) {
+    say("Cancelled. Set End to " + plan.comp.end + " or earlier to stay within your composition.");
+    return null;
   }
-  var previous = api.getFrame(), range;
+  return GeoScene.extendComp(newEnd) ? newEnd : false;
+}
+function moveFieldsOn(plan) {
+  flyStartField.setValue(plan.to);
+  flyEndField.setValue(plan.to + (plan.to - plan.from));
+}
+function viewOf(c) { return { lat: c.lat, lon: c.lon, zoom: c.zoom }; }
+
+// Flies from the Start frame to the End frame; the flight leaves from the camera as it is at Start.
+flyBtn.onClick = guard(function () {
+  var plan = planMove("flight"), map = plan.map, from = plan.from, to = plan.to;
+  var t = pickedTarget(GeoScene.readCamera(map.cameraId).projection), s = GeoScene.compSize();
+  var extended = extendForMove(plan, "flight", "Fly here");
+  if (extended === null) return;
+  var easing = pickedEasing(), arc = pickedArc(), previous = api.getFrame(), range, begin;
   try {
     api.setFrame(from);
-    var pts = GeoFly.path(GeoScene.readCamera(map.cameraId), t.cam, to - from + 1, s.width);
+    begin = GeoScene.readCamera(map.cameraId);
+    var pts = GeoFly.path(begin, t.cam, to - from + 1, s.width, { easing: easing.id, arc: arc.id });
     range = GeoScene.flyCamera(map, pts, from);
   } finally { api.setFrame(previous); }
+  GeoScene.recordFlight(map, { kind: "flight", start: from, end: to, from: viewOf(begin), to: viewOf(t.cam), name: t.name, easing: easing.id, arc: arc.id });
   var msg = "Flight to " + t.name + ": frames " + range.start + "–" + range.end + ".";
-  if (extended) msg += " The composition was extended to frame " + to + " so the flight isn't cut off.";
+  if (extended) msg += " The composition was extended to frame " + extended + " (" + EXTEND_PAD_SECONDS + " seconds after the flight ends).";
   if (t.world) msg += " Flying to the world view — to fly somewhere else, search for a place and pick it first.";
   msg += " Press Build imagery (Imagery tab) for sharp imagery along the way.";
-  flyStartField.setValue(to);
-  flyEndField.setValue(to + (to - from));
+  moveFieldsOn(plan);
+  say(msg);
+  resetImageryPlan();
+  previewShowCurrent();
+});
+
+// Redoes the flight under the playhead with the current Easing and Zoom-out, keeping its frames
+// and destination. It leaves from where the flight began (read before its keys are rewritten).
+updateFlightBtn.onClick = guard(function () {
+  var map = currentMap(), cr = GeoScene.compFrameRange(), rec = GeoScene.flightAt(map, Math.max(cr.start, Math.min(cr.end, playhead())));
+  if (!rec) throw new Error("Put the playhead inside a flight made with Fly here first.");
+  if (rec.kind === "drift") throw new Error("That's a drift — choose a move and press Drift to redo it.");
+  var easing = pickedEasing(), arc = pickedArc(), begin = GeoScene.flightStart(map, rec);
+  var pts = GeoFly.path(begin, rec.to, rec.end - rec.start + 1, GeoScene.compSize().width, { easing: easing.id, arc: arc.id });
+  var range = GeoScene.flyCamera(map, pts, rec.start);
+  GeoScene.recordFlight(map, { kind: "flight", start: rec.start, end: rec.end, from: rec.from, to: rec.to, name: rec.name, easing: easing.id, arc: arc.id });
+  say("Flight to " + (rec.name || "the destination") + " (frames " + range.start + "–" + range.end + ") updated: " + easing.name + ", " + arc.name + " zoom-out.");
+  resetImageryPlan();
+  previewShowCurrent();
+});
+
+// A small move from the camera as it is at Start, over Start to End: push in, pull out or pan.
+driftBtn.onClick = guard(function () {
+  var plan = planMove("drift"), map = plan.map, from = plan.from, to = plan.to, s = GeoScene.compSize();
+  var extended = extendForMove(plan, "drift", "Drift");
+  if (extended === null) return;
+  var move = pickedDrift(), begin = viewOf(GeoScene.readCameraAt(map, from));
+  var end = GeoFly.driftEnd(begin, move.id, s.width, s.height);
+  var range = GeoScene.flyCamera(map, GeoFly.driftPath(begin, end, to - from + 1), from);
+  GeoScene.recordFlight(map, { kind: "drift", start: from, end: to, from: begin, to: end, move: move.id });
+  var msg = "Drift (" + move.name.toLowerCase() + ") from frame " + range.start + " to " + range.end + ".";
+  if (extended) msg += " The composition was extended to frame " + extended + " (" + EXTEND_PAD_SECONDS + " seconds after the drift ends).";
+  moveFieldsOn(plan);
   say(msg);
   resetImageryPlan();
   previewShowCurrent();
@@ -453,6 +541,8 @@ TAB_BUILDERS.push(function (tabs) {
     row(jumpBtn),
     row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
     flyNote,
+    row(easingLabel, easingPicker, arcLabel, arcPicker, updateFlightBtn),
+    row(driftLabel, driftPicker, driftBtn),
     createHereBtn,
     GeoStyle.heading("Style"),
     row(mapStylePicker, applyStyleBtn),
