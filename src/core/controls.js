@@ -291,7 +291,7 @@ var GeoControls = (function () {
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var dn = model.dayNight;
-    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.label]).forEach(add); }
+    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label]).forEach(add); }
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};

@@ -215,3 +215,50 @@ test("blurAmount: half a twilight step (3 degrees) on the screen, clamped, and z
   near(S.blurAmount(NaN, 1), S.blurAmount(2, 1));
   near(S.blurAmount(4, undefined), S.blurAmount(4, 1));
 });
+
+test("earthOutline: the globe's outline is a circle of the world scale round the centre, whatever the rotation", () => {
+  const P = require("../src/core/projection.js");
+  [[2, 0], [4, 37], [0, 90]].forEach(([zoom, rotation]) => {
+    const p = S.earthOutline({ lat: 20, lon: 40, zoom, rotation, projection: 2 }, cav);
+    const pts = p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+    assert.ok(pts.length >= 90);
+    assert.equal(p.cmds[0][0], "moveTo"); assert.equal(p.cmds[p.cmds.length - 1][0], "close");
+    pts.forEach((c) => assert.ok(Math.abs(Math.hypot(c[1], c[2]) - P.worldScale(zoom)) < 1e-6));
+  });
+  const big = S.earthOutline({ lat: 0, lon: 0, zoom: 40, rotation: 0, projection: 2 }, cav);
+  assert.ok(Math.abs(Math.hypot(big.cmds[0][1], big.cmds[0][2]) - P.worldScale(P.MAX_ZOOM)) < 1e-6, "zoom is clamped");
+});
+
+test("earthOutline: Equal Earth traces the oval from -180 to +180, pole to pole, closed", () => {
+  const P = require("../src/core/projection.js");
+  const cam = { lat: 0, lon: 0, zoom: 3, rotation: 0, projection: 1 }, proj = P.makeProjector(cam), o = [0, 0];
+  const p = S.earthOutline(cam, cav), pts = p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+  assert.equal(p.cmds.filter((c) => c[0] === "moveTo").length, 1);
+  assert.equal(p.cmds.filter((c) => c[0] === "close").length, 1);
+  assert.ok(pts.length >= 180);
+  proj(180, 0, o); const right = o[0]; proj(0, 90, o); const top = o[1]; proj(0, -90, o); const bottom = o[1];
+  const xs = pts.map((c) => c[1]), ys = pts.map((c) => c[2]);
+  assert.ok(Math.abs(Math.max.apply(null, xs) - right) < 1e-6 && Math.abs(Math.min.apply(null, xs) + right) < 1e-6, "spans -180 to +180");
+  assert.ok(Math.abs(Math.max.apply(null, ys) - top) < 1e-6 && Math.abs(Math.min.apply(null, ys) - bottom) < 1e-6, "pole to pole");
+  // every point sits on the oval: it projects back onto the -180 / +180 meridian or a pole line
+  pts.forEach((c) => {
+    const onMeridian = [-180, 180].some((lon) => { let hit = false; for (let lat = -90; lat <= 90; lat += 1) { proj(lon, lat, o); if (Math.hypot(o[0] - c[1], o[1] - c[2]) < 1e-6) hit = true; } return hit; });
+    const onPole = [-90, 90].some((lat) => { let hit = false; for (let lon = -180; lon <= 180; lon += 1) { proj(lon, lat, o); if (Math.hypot(o[0] - c[1], o[1] - c[2]) < 1e-6) hit = true; } return hit; });
+    assert.ok(onMeridian || onPole);
+  });
+  // a turned camera moves the whole outline
+  const off = S.earthOutline({ lat: 10, lon: 60, zoom: 3, rotation: 0, projection: 1 }, cav).cmds[0];
+  assert.ok(Math.abs(off[1] - pts[0][1]) > 1);
+});
+
+test("earthOutline: Web Mercator is the world rectangle, lon +-180 and lat +-85.05", () => {
+  const P = require("../src/core/projection.js");
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 }, proj = P.makeProjector(cam), o = [0, 0];
+  const p = S.earthOutline(cam, cav), pts = p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo");
+  assert.equal(pts.length, 4);
+  assert.equal(p.cmds[p.cmds.length - 1][0], "close");
+  [[-180, P.MAX_LAT], [180, P.MAX_LAT], [180, -P.MAX_LAT], [-180, -P.MAX_LAT]].forEach(([lon, lat], i) => {
+    proj(lon, lat, o);
+    assert.ok(Math.abs(pts[i][1] - o[0]) < 1e-9 && Math.abs(pts[i][2] - o[1]) < 1e-9, "corner " + i);
+  });
+});

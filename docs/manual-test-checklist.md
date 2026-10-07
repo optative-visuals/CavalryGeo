@@ -175,6 +175,10 @@ adding street layers.
       edge and the blur amount goes to 0; set it back to 1 → soft again. Delete the four "Night blur" layers and the
       "Night blur" helper, then press **Refresh controls** → they come back once (a second refresh adds
       nothing) and Twilight still drives them. Check the blur looks right at a very high zoom (amount is capped at 200).
+- [ ] 19o3. Day & night: on the globe, zoom in so the soft edge of the night reaches the rim → the shading stops
+      cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. A hidden
+      "Night mask" layer sits in the Day & night group, and the group's Masks list holds it once. The Time label is
+      not clipped. Delete the mask and press **Refresh controls** → it comes back once (a second refresh adds nothing).
 - [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
       baked."; Extract's layer list does not show them.
 

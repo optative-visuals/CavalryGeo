@@ -667,7 +667,7 @@ clearCacheBtn.onClick = guard(function () {
 });
 
 // ---- Extract and Bake (in the Layers section) ---------------------------------
-var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow", "highlight", "dayNight", "timeLabel"];
+var NOT_EXTRACTABLE = ["extract", "pin", "label", "route", "data", "scaleBar", "northArrow", "highlight", "dayNight", "dayNightMask", "timeLabel"];
 var sourceLayers = [], groups = [], groupsEnc = null, groupsLayer = null;
 var layerPicker = new ui.DropDown();
 var refreshLayersBtn = GeoStyle.button("Refresh");
@@ -841,7 +841,7 @@ bakeBtn.onClick = guard(function () {
     var meta = GeoScene.readLayerMeta(id);
     if (!meta) { other++; return; }
     if (meta.category === "highlight") { skippedHighlight++; return; }
-    if (meta.category === "dayNight" || meta.category === "timeLabel") { skippedDayNight++; return; }
+    if (meta.category === "dayNight" || meta.category === "dayNightMask" || meta.category === "timeLabel") { skippedDayNight++; return; }
     if (meta.category === "data") { skippedData++; return; }
     if (meta.category === "scaleBar" || meta.category === "northArrow") { skippedFurniture++; return; }
     GeoScene.bake(id);

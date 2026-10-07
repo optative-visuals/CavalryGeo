@@ -2360,7 +2360,7 @@ var GeoScene = (function () {
   // One overlay per map: a group "Day & night" in the map group holding four night layers (one per
   // twilight depression, since a Cavalry shape has a single opacity) and a helpers group with one
   // opacity helper per layer, plus a Fast Blur per layer (all four driven by one "Night blur" helper)
-  // that smooths the steps into a gradient. An optional "Time label" sits in the map group like map
+  // that smooths the steps into a gradient, and a hidden "Night mask" (the Earth's outline) in the group's masks. An optional "Time label" sits in the map group like map
   // furniture. The group's user data records every member (geoDayNight).
   var DAYNIGHT_KEY = "geoDayNight", TIME_LABEL_NAME = "Time label", NIGHT_DEPRESSIONS = [0, 6, 12, 18];
 
@@ -2383,7 +2383,7 @@ var GeoScene = (function () {
   // group's own member of that kind is used: the child night layer with that depression, the helper
   // with that step (a missing one reads as null). recorded / adopted count how each was found.
   function dayNightMembers(map, g, rec) {
-    var out = { layers: [], helpers: [], blurs: [], blurHelper: null, blurAdopted: false, recorded: 0, adopted: 0 }, kids = null, inner = null;
+    var out = { layers: [], helpers: [], blurs: [], blurHelper: null, mask: null, blurAdopted: false, recorded: 0, adopted: 0 }, kids = null, inner = null;
     function children() { if (!kids) { try { kids = api.getChildren(g) || []; } catch (e) { kids = []; } } return kids; }
     function grandchildren() {
       if (!inner) {
@@ -2434,6 +2434,13 @@ var GeoScene = (function () {
       if (bh) out.blurAdopted = true;
     }
     out.blurHelper = bh || null;
+    // The night mask: a recorded one counts while it is a child of the group, otherwise the child tagged dayNightMask.
+    var mk = rec.mask;
+    if (!(mk && layerThere(mk) && api.getParent(mk) === g)) {
+      mk = tagged(children(), A.MAP_EXPR_ATTR, function (m) { return m.category === "dayNightMask"; });
+      if (mk) out.blurAdopted = true;
+    }
+    out.mask = mk || null;
     return out;
   }
   // { groupId, layers: [4], helpers: [4], blurs: [4], blurHelper, label } or null. With more than one group (a duplicate), the
@@ -2452,10 +2459,10 @@ var GeoScene = (function () {
       Object.keys(rec).forEach(function (k) { fixed[k] = rec[k]; });
       fixed.layers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.layers[i] || (rec.layers || [])[i] || null; });
       fixed.helpers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.helpers[i] || (rec.helpers || [])[i] || null; });
-      if (m.blurAdopted) { fixed.blurs = m.blurs; fixed.blurHelper = m.blurHelper; }
+      if (m.blurAdopted) { fixed.blurs = m.blurs; fixed.blurHelper = m.blurHelper; fixed.mask = m.mask; }
       try { api.setUserData(g, DAYNIGHT_KEY, fixed); } catch (e) { /* read again next time */ }
     }
-    return { groupId: g, layers: m.layers, helpers: m.helpers, blurs: m.blurs, blurHelper: m.blurHelper, label: ownTimeLabel(map, rec.label) };
+    return { groupId: g, layers: m.layers, helpers: m.helpers, blurs: m.blurs, blurHelper: m.blurHelper, mask: m.mask, label: ownTimeLabel(map, rec.label) };
   }
   // Time labels of this map in the map group that the overlay's record doesn't name (left behind when
   // their group was deleted).
@@ -2467,7 +2474,7 @@ var GeoScene = (function () {
     var out = {}, f = findDayNight(map);
     if (!f) return out;
     out[f.groupId] = true;
-    f.layers.concat(f.helpers, f.blurs, [f.blurHelper, f.label]).forEach(function (id) { if (id) out[id] = true; });
+    f.layers.concat(f.helpers, f.blurs, [f.blurHelper, f.mask, f.label]).forEach(function (id) { if (id) out[id] = true; });
     f.helpers.forEach(function (id) { var p = id ? api.getParent(id) : ""; if (p && p !== f.groupId) out[p] = true; });
     return out;
   }
@@ -2554,6 +2561,28 @@ var GeoScene = (function () {
   function blurOnLayer(blur, layer) {
     try { return (api.getOutConnections(blur, "id") || []).some(function (c) { return String(c).indexOf(layer + ".filters.") === 0; }); } catch (e) { return false; }
   }
+  // Whether this mask shape is already in the group's masks list (the group's own "masks" input reads back
+  // empty, like "filters"; the mask's outputs list "group.masks.N").
+  function maskOnGroup(mask, group) {
+    try { return (api.getOutConnections(mask, "id") || []).some(function (c) { return String(c).indexOf(group + ".masks.") === 0; }); } catch (e) { return false; }
+  }
+  // The hidden "Night mask" shape (the Earth's outline for the camera) connected into the masks of the
+  // group holding the night layers, so their blur is cut at the Earth's edge. Makes whichever is missing
+  // once; returns the mask's id. The time label sits outside the group, so the mask never clips it.
+  function ensureNightMask(map, g, mask, track) {
+    var E = GeoExpression, MA = A.MAP_ARRAY_ATTR;
+    if (!mask || !layerThere(mask)) {
+      mask = track(api.create(A.MAP_LAYER_TYPE, "Night mask"));
+      addInputs(mask, MA, E.NIGHT_MASK_INPUTS);
+      setOne(mask, A.MAP_EXPR_ATTR, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
+      connectCamera(map.cameraId, mask, MA);
+      api.parent(mask, g);
+      api.set(mask, identityTransform());
+    }
+    if (!maskOnGroup(mask, g)) api.connect(mask, "id", g, "masks");
+    api.set(mask, { hidden: true });
+    return mask;
+  }
   // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
   // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
   // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
@@ -2607,10 +2636,11 @@ var GeoScene = (function () {
     function track(id) { made.push(id); return id; }
     try {
       var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
+      var mask = ensureNightMask(map, f.groupId, f.mask, track);
       if (made.length) {
         var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
         Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-        fixed.blurs = res.blurs; fixed.blurHelper = res.blurHelper;
+        fixed.blurs = res.blurs; fixed.blurHelper = res.blurHelper; fixed.mask = mask;
         api.setUserData(f.groupId, DAYNIGHT_KEY, fixed);
       }
     } catch (e) {
@@ -2658,6 +2688,7 @@ var GeoScene = (function () {
         }
         var restored = made.filter(function (id) { return id !== holder; }).length;
         var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
+        var maskId = ensureNightMask(map, found.groupId, found.mask, track);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
         found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
@@ -2665,7 +2696,7 @@ var GeoScene = (function () {
         if (label !== found.label || restored || made.length > madeBefore) {
           var old = userData(found.groupId, DAYNIGHT_KEY) || {}, fixed = {};
           Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label; fixed.blurs = blur.blurs; fixed.blurHelper = blur.blurHelper;
+          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label; fixed.blurs = blur.blurs; fixed.blurHelper = blur.blurHelper; fixed.mask = maskId;
           api.setUserData(found.groupId, DAYNIGHT_KEY, fixed);
         }
         return { groupId: found.groupId, created: false, restored: restored, kept: keptNames() };
@@ -2681,10 +2712,11 @@ var GeoScene = (function () {
         made4.push(p[0]); helpers4.push(p[1]);
       });
       var blur4 = ensureNightBlur(map, g, made4, helpers4, [], null, track);
+      var mask4 = ensureNightMask(map, g, null, track);
       label = null;
       if (opts.label && strays.length) { label = strays.shift(); setDayNightTime(map, label, E.TIME_LABEL_INPUTS, { dayOfYear: day, utcTime: time }, kept); }
       else if (opts.label) label = createTimeLabel(map, day, time, track);
-      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, blurs: blur4.blurs, blurHelper: blur4.blurHelper, label: label });
+      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, blurs: blur4.blurs, blurHelper: blur4.blurHelper, mask: mask4, label: label });
       try { stackDayNight(map, g); } catch (e1) { /* cosmetic: it stays where it landed */ }
       // Without the label option, labels left behind by a deleted overlay go (so they're never doubled).
       if (!opts.label) strays.forEach(function (id) { try { deleteIfThere(id); } catch (e4) { /* left in place */ } });

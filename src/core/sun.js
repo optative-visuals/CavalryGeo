@@ -201,6 +201,33 @@ var GeoSun = (function () {
     return Math.min(200, 0.5 * 6 * Math.PI / 180 * GeoProjection.worldScale(z));
   }
 
+  // The Earth's outline on screen for the camera, as one closed path: the globe's disc, the Equal Earth oval
+  // (its two meridians at -180 / +180 and its two pole lines), or the Web Mercator world rectangle. The night
+  // layers are masked to it, so their blur doesn't spill past the edge.
+  function earthOutline(cam, cav) {
+    var path = new cav.Path(), proj = Math.round(num(cam.projection, 0)), k, N = 180, first = true;
+    function put(x, y) { if (first) { path.moveTo(x, y); first = false; } else path.lineTo(x, y); }
+    if (proj >= 2) {
+      var R = GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(cam.zoom, 2))));
+      for (k = 0; k < N; k++) put(R * Math.cos(2 * Math.PI * k / N), R * Math.sin(2 * Math.PI * k / N));
+      path.close();
+      return path;
+    }
+    var project = GeoProjection.makeProjector(cam), out = [0, 0], M = 90;
+    function at(lon, lat) { project(lon, lat, out); put(out[0], out[1]); }
+    if (proj === 1) {
+      for (k = 0; k <= M; k++) at(-180, -90 + 180 * k / M);   // -180 meridian, south to north
+      for (k = 1; k <= 10; k++) at(-180 + 36 * k, 90);          // north pole line
+      for (k = 1; k <= M; k++) at(180, 90 - 180 * k / M);     // +180 meridian, north to south
+      for (k = 1; k < 10; k++) at(180 - 36 * k, -90);           // south pole line
+    } else {
+      var lat = GeoProjection.MAX_LAT;
+      at(-180, lat); at(180, lat); at(180, -lat); at(-180, -lat);
+    }
+    path.close();
+    return path;
+  }
+
   function two(n) { return (n < 10 ? "0" : "") + n; }
   function timeText(doy, utc) {
     var d = Math.max(1, Math.min(365, Math.round(num(doy, 1)))), m = 0;
@@ -227,6 +254,6 @@ var GeoSun = (function () {
     return p;
   }
 
-  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, stepOpacity: stepOpacity, blurAmount: blurAmount, timeText: timeText, timeLabel: timeLabel };
+  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, earthOutline: earthOutline, stepOpacity: stepOpacity, blurAmount: blurAmount, timeText: timeText, timeLabel: timeLabel };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoSun;

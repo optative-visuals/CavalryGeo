@@ -190,6 +190,8 @@ function makeFakeApi() {
       if (d === "inputShapes") d = "inputShapes." + connections.filter(function (k) { return k[2] === c && /^inputShapes\.\d+$/.test(k[3]); }).length;
       // Like Cavalry: a layer's filters list appends each connection (filters.0, filters.1, ...); "filters" itself reads back as nothing.
       if (d === "filters") d = "filters." + connections.filter(function (k) { return k[2] === c && /^filters\.\d+$/.test(k[3]); }).length;
+      // Like Cavalry: a group's masks list appends each connection (masks.0, masks.1, ...); "masks" itself reads back as nothing.
+      if (d === "masks") d = "masks." + connections.filter(function (k) { return k[2] === c && /^masks\.\d+$/.test(k[3]); }).length;
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
@@ -2623,7 +2625,7 @@ test("Bent imagery: the build makes the source comp, the reference with the filt
   // In the source comp: View masked by View mask, level groups with tiles and level drivers.
   assert.ok(p.view && p.mask);
   assert.equal(api._layerComp[p.view], comp);
-  assert.ok(api._connections.some((c) => c[0] === p.mask && c[1] === "id" && c[2] === p.view && c[3] === "masks"));
+  assert.ok(api._connections.some((c) => c[0] === p.mask && c[1] === "id" && c[2] === p.view && c[3] === "masks.0"));
   const kids = inComp(api, comp, () => api.getChildren(p.view));
   const levels = kids.filter((id) => /^z \d+$/.test(api.getNiceName(id)));
   assert.deepEqual(levels.map((id) => api.getNiceName(id)).sort(), Array.from(new Set(plan.items.map((it) => "z " + it.z))).sort());
@@ -10102,7 +10104,7 @@ test("day & night: findDayNight lists the group, its layers, helpers and label; 
   assert.deepEqual(plain(f.layers), rec.layers); assert.deepEqual(plain(f.helpers), rec.helpers); assert.equal(f.label, rec.label);
   const parts = plain(G.dayNightParts(map));
   [r.groupId, rec.label, api.getParent(rec.helpers[0])].concat(rec.layers, rec.helpers).forEach((id) => assert.equal(parts[id], true, id));
-  assert.equal(Object.keys(parts).length, 1 + 1 + 1 + 4 + 4 + 4 + 1, "group, label, helpers group, layers, helpers, blurs, blur helper");
+  assert.equal(Object.keys(parts).length, 1 + 1 + 1 + 4 + 4 + 4 + 1 + 1, "group, label, helpers group, layers, helpers, blurs, blur helper, mask");
   assert.deepEqual(plain(G.dayNightParts({ groupId: "none", cameraId: "none" })), {});
 });
 
@@ -10904,4 +10906,69 @@ test("day & night blur: Refresh controls three times and Add again leave exactly
   assert.deepEqual(plain(f.blurs), now.blurs); assert.equal(f.blurHelper, now.blurHelper);
   context.GeoControlPanel.sync(map);
   assert.deepEqual(dnRec(api, g).blurs, now.blurs);
+});
+
+// ---- Day & night: the night mask (the Earth's outline, hidden, in the group's masks) ----
+const masksOf = (api, mask) => api.getOutConnections(mask, "id").filter((c) => /\.masks\.\d+$/.test(c));
+
+test("day & night mask: a new overlay gets one hidden Night mask in its group, connected into the group's masks", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  assert.ok(rec.mask);
+  assert.equal(api.getNiceName(rec.mask), "Night mask");
+  assert.equal(api.getLayerType(rec.mask), "javaScriptShape");
+  assert.equal(api.getParent(rec.mask), r.groupId);
+  assert.equal(api.get(rec.mask, "hidden"), true);
+  assert.deepEqual(plain(E.readTag(api.get(rec.mask, "generator.expression"), "GEO_META")), { camera: map.cameraId, category: "dayNightMask" });
+  assert.deepEqual(masksOf(api, rec.mask), [r.groupId + ".masks.0"]);
+  assert.equal(api.getInConnection(r.groupId, "masks"), "", "like Cavalry, the masks input itself reads back empty");
+  assert.notEqual(api.getParent(rec.label), r.groupId, "the time label is outside the masked group");
+  for (let i = 0; i < 5; i++) assert.equal(api.getInConnection(rec.mask, "generator.array." + i), map.cameraId + ".array." + i);
+  const f = G.findDayNight(map);
+  assert.equal(f.mask, rec.mask);
+  assert.equal(plain(G.dayNightParts(map))[rec.mask], true);
+});
+
+test("day & night mask: Add again and Refresh controls x3 keep one mask, connected once; a deleted mask comes back once", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  context.GeoControlPanel.sync(map);
+  const full = api.getCompLayers(false).length;
+  for (let i = 0; i < 3; i++) { context.GeoControlPanel.sync(map); G.addDayNight(map, { dayOfYear: 81, utcTime: 3 }); }
+  assert.equal(dnRec(api, g).mask, rec.mask);
+  assert.deepEqual(masksOf(api, rec.mask), [g + ".masks.0"]);
+  assert.equal(api.getCompLayers(false).length, full);
+  api.deleteLayer(rec.mask);
+  context.GeoControlPanel.sync(map);
+  const now = dnRec(api, g);
+  assert.ok(now.mask && now.mask !== rec.mask);
+  assert.deepEqual(masksOf(api, now.mask), [g + ".masks.0"]);
+  api.deleteLayer(now.mask);
+  G.addDayNight(map, { dayOfYear: 81, utcTime: 3 });
+  const again = dnRec(api, g);
+  assert.deepEqual(masksOf(api, again.mask), [g + ".masks.0"]);
+  G.addDayNight(map, { dayOfYear: 81, utcTime: 3 });
+  assert.deepEqual(masksOf(api, dnRec(api, g).mask), [g + ".masks.0"]);
+  assert.equal(api.getCompLayers(false).length, full);
+});
+
+test("day & night mask: an older overlay gets its mask on refresh, one the record forgot is adopted, deleting the overlay deletes it", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context), G = context.GeoScene;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const old = Object.assign({}, rec); delete old.mask;
+  api.setUserData(g, "geoDayNight", old);
+  assert.equal(G.findDayNight(map).mask, rec.mask, "adopted by its tag");
+  assert.equal(dnRec(api, g).mask, rec.mask, "and written back");
+  api.deleteLayer(rec.mask);
+  const old2 = Object.assign({}, dnRec(api, g)); delete old2.mask;
+  api.setUserData(g, "geoDayNight", old2);
+  context.GeoControlPanel.sync(map);
+  const now = dnRec(api, g);
+  assert.ok(now.mask);
+  assert.deepEqual(masksOf(api, now.mask), [g + ".masks.0"]);
+  api.deleteLayer(g);
+  assert.equal(api.layerExists(now.mask), false);
 });

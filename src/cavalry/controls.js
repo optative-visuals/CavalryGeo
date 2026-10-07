@@ -284,7 +284,7 @@ var GeoControlPanel = (function () {
     var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
     model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
       helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), blurs: dn.blurs.filter(Boolean),
-      blurHelper: dnMember(dn.blurHelper, S.nightBlur), label: dnMember(dn.label, S.timeLabel) } : null;
+      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel) } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });

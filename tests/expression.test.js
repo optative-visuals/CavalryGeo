@@ -553,3 +553,18 @@ test("the night blur expression is GeoSun.blurAmount, for both axes", () => {
   const odd = vm.runInNewContext(expr, { zoom: NaN, twilight: undefined });
   assert.ok(Math.abs(odd[0] - S.blurAmount(2, 1)) < 1e-9);
 });
+
+test("night mask expression: tag, camera inputs, and it draws GeoSun.earthOutline", () => {
+  const S = require("../src/core/sun.js"), vm = require("node:vm");
+  const { buildSunSource } = require("../tools/buildlib.js");
+  assert.deepEqual(E.NIGHT_MASK_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection"]);
+  const expr = E.nightMaskExpression(buildSunSource(), { camera: "c", category: "dayNightMask" });
+  assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "dayNightMask" });
+  function FakePath() { this.cmds = []; }
+  ["moveTo", "lineTo", "close"].forEach((m) => { FakePath.prototype[m] = function () { this.cmds.push([m].concat(Array.prototype.slice.call(arguments))); }; });
+  [0, 1, 2].forEach((projection) => {
+    const got = vm.runInNewContext(expr, { camLat: 12, camLon: 30, camZoom: 3, camRotation: 0, camProjection: projection, cavalry: { Path: FakePath } });
+    const want = S.earthOutline({ lat: 12, lon: 30, zoom: 3, rotation: 0, projection }, { Path: FakePath });
+    assert.deepEqual(JSON.parse(JSON.stringify(got.cmds)), JSON.parse(JSON.stringify(want.cmds)), "projection " + projection);
+  });
+});

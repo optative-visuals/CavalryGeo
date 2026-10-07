@@ -309,6 +309,11 @@ var GeoExpression = (function () {
       "var _a = _t >= 0.5 ? Math.min(200, 0.5 * 6 * Math.PI / 180 * (256 * Math.pow(2, _z) / (2 * Math.PI))) : 0;\n" +
       "[_a, _a];\n";
   }
+  // The Earth's outline for the night mask (GeoSun.earthOutline).
+  function nightMaskExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(CAMERA_FIVE) +
+      "GeoSun.earthOutline({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}, cavalry);\n";
+  }
   function timeLabelExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
       "GeoSun.timeLabel({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, dayOfYear: _i5, utcTime: _i6, compW: _i7, compH: _i8, corner: _i9, margin: _i10, size: _i11}, cavalry);\n";
@@ -316,7 +321,7 @@ var GeoExpression = (function () {
 
   return {
     NIGHT_INPUTS: NIGHT_INPUTS, NIGHT_OPACITY_INPUTS: NIGHT_OPACITY_INPUTS, TIME_LABEL_INPUTS: TIME_LABEL_INPUTS,
-    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, NIGHT_BLUR_INPUTS: NIGHT_BLUR_INPUTS, nightBlurExpression: nightBlurExpression, timeLabelExpression: timeLabelExpression,
+    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, NIGHT_BLUR_INPUTS: NIGHT_BLUR_INPUTS, NIGHT_MASK_INPUTS: CAMERA_FIVE, nightBlurExpression: nightBlurExpression, nightMaskExpression: nightMaskExpression, timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
