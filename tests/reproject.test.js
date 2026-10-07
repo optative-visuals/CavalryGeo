@@ -105,6 +105,32 @@ test("visibleRegion: a rotated zoomed-in view contains every frame corner", () =
   }
 });
 
+test("visibleRegion: brute force, every on-Earth pixel of the frame lies inside the region", () => {
+  const W = 1920, H = 1080, N = 61, places = [[0, 0], [35, 90], [-20, -170], [60, 178], [-70, 179.5], [10, -179.9], [80, -45]];
+  let failures = [];
+  for (const projection of [0, 1, 2]) {
+    for (const zoom of [1.2, 1.8, 2.5, 3.5, 6]) {
+      for (const rotation of [0, 30, -75]) {
+        for (const [lat, lon] of places) {
+          const cam = { lat, lon, zoom, rotation, projection }, r = RP.visibleRegion(cam, W, H);
+          for (let i = 0; i < N; i++) {
+            for (let j = 0; j < N; j++) {
+              const p = P.unproject(cam, -W / 2 + W * i / (N - 1), -H / 2 + H * j / (N - 1));
+              if (!p) continue;
+              const d = wrap(p.lon - cam.lon), la = clampLat(p.lat);
+              if (!r || d < r.dlon0 - 1e-9 || d > r.dlon1 + 1e-9 || la < r.lat0 - 1e-9 || la > r.lat1 + 1e-9) {
+                failures.push(JSON.stringify(cam) + " " + d + "," + la + " " + JSON.stringify(r));
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(failures.slice(0, 5), []);
+});
+
 test("visibleRegion: null when nothing of the Earth is in frame", () => {
   const orig = P.unproject;
   P.unproject = () => null;

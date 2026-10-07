@@ -7,7 +7,7 @@ if (typeof GeoProjection === "undefined" && typeof require !== "undefined") { va
 var GeoReproject = (function () {
   var D2R = Math.PI / 180;
   var MAX_VIEW_PX = 4096;
-  var GRID = 17, LIMB = 64, MARGIN = 0.02;
+  var GRID = 17, EDGE = 129, LIMB = 64, MARGIN = 0.02, WRAP_NEAR = 150;
 
   function maxLat() { return GeoProjection.MAX_LAT; }
   function clampLat(lat) { var m = maxLat(); return Math.max(-m, Math.min(m, lat)); }
@@ -23,16 +23,18 @@ var GeoReproject = (function () {
     var proj = projOf(cam), R = scaleOf(cam), hw = width / 2, hh = height / 2, M = maxLat();
     var dlon0 = Infinity, dlon1 = -Infinity, lat0 = Infinity, lat1 = -Infinity, hit = false;
     var rot = (cam.rotation || 0) * D2R, cr = Math.cos(rot), sr = Math.sin(rot);
-    var project = null, out = [0, 0], ox = 0, oy = 0, top = 0;
+    var project = null, out = [0, 0], oy = 0, top = 0;
     if (proj === 1) {
       // Equal Earth: map-space (unrotated) position of lon 0 / lat 0 and of the pole line.
       project = GeoProjection.makeProjector(cam);
-      project(0, 0, out); ox = out[0] * cr + out[1] * sr; oy = -out[0] * sr + out[1] * cr;
+      project(0, 0, out); oy = -out[0] * sr + out[1] * cr;
       project(0, 90, out); top = Math.abs(-out[0] * sr + out[1] * cr - oy);
     }
-    var offSide = 0, offPole = 0;
+    var offOutline = false, offPole = 0, nearEast = false, nearWest = false;
 
     function add(d, lat) {
+      if (d > WRAP_NEAR) nearEast = true;
+      if (d < -WRAP_NEAR) nearWest = true;
       if (d < dlon0) dlon0 = d;
       if (d > dlon1) dlon1 = d;
       if (lat < lat0) lat0 = lat;
@@ -42,14 +44,20 @@ var GeoReproject = (function () {
       var p = GeoProjection.unproject(cam, X, Y);
       if (p) { hit = true; add(wrap(p.lon - cam.lon), clampLat(p.lat)); return; }
       if (proj !== 1) return;
-      // Off the Equal Earth outline: past the pole line, or past the 180° meridian on one side.
-      var ux = X * cr + Y * sr - ox, uy = -X * sr + Y * cr - oy;
+      // Off the Equal Earth outline: the frame shows the map's edge (every longitude), and
+      // past a pole line also that pole's latitude.
+      offOutline = true;
+      var uy = -X * sr + Y * cr - oy;
       if (Math.abs(uy) >= top) offPole |= uy > 0 ? 2 : 1;
-      else offSide |= ux > 0 ? 2 : 1;
     }
 
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) sample(-hw + width * i / (GRID - 1), -hh + height * j / (GRID - 1));
+    }
+    // The extremes over the frame lie on its boundary: sample the four edges densely.
+    for (var e = 0; e < EDGE; e++) {
+      var fx = -hw + width * e / (EDGE - 1), fy = -hh + height * e / (EDGE - 1);
+      sample(fx, -hh); sample(fx, hh); sample(-hw, fy); sample(hw, fy);
     }
     if (proj === 2) {
       var r = R * (1 - 1e-9);
@@ -71,9 +79,10 @@ var GeoReproject = (function () {
     } else if (proj === 1) {
       if (lat1 > M - 1 || offPole & 2) lat1 = M;
       if (lat0 < -(M - 1) || offPole & 1) lat0 = -M;
-      if (offSide & 2) add(wrap(180 - 1e-9 - cam.lon), lat0);
-      if (offSide & 1) add(wrap(-180 + 1e-9 - cam.lon), lat0);
+      if (offOutline) { dlon0 = -180; dlon1 = 180; }
     }
+    // Places on both sides of the wrap: the region goes all the way round.
+    if (nearEast && nearWest) { dlon0 = -180; dlon1 = 180; }
 
     var dm = (dlon1 - dlon0) * MARGIN, lm = (lat1 - lat0) * MARGIN;
     return {
