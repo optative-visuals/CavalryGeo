@@ -2952,12 +2952,12 @@ test("Flat imagery: without the Cavalry Geo Reproject type a flat build throws t
   assert.equal(context.GeoScene.findImagery(map).length, 0);
 });
 
-test("Flat imagery: night lights plan flat (no bent flag) and need no plugin, so their pre-comped setup is unchanged", () => {
+test("Flat imagery: night lights plan bent on a flat map too, so they repeat, and need the Reproject plugin like day imagery", () => {
   const { context, api, map } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  assert.equal(context.GeoScene.planNightLights(map).bent, true, "night lights are bent on a flat map");
+  assert.equal(context.GeoScene.planNightLights(map).night, true, "and still flagged night");
   api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
-  const plan = context.GeoScene.planImagery(map, context.GeoSources.night(), {}, true);
-  assert.equal(plan.bent, undefined, "night lights stay flat on a flat map");
-  assert.equal(context.GeoScene.planNightLights(map).bent, undefined);
+  assert.throws(() => context.GeoScene.planNightLights(map), (e) => e.message === PLUGIN_NEEDED);
 });
 
 test("Flat imagery: old flat imagery is left alone by Refresh controls, which reports the note and ends its status with it", () => {
@@ -13142,8 +13142,8 @@ test("the panel never calls api.processEvents (running the user's clicks inside 
 const nightMattes = (api, id) => api._connections.filter((c) => c[2] === id && /^trackMattes\.\d+$/.test(c[3])).map((c) => c[0]);
 const nightFootage = (api, groupId) => api.getChildren(groupId).filter((id) => /^z -?\d+$/.test(String(api.getNiceName(id))))
   .reduce((a, lg) => a.concat(api.getChildren(lg)), []);
-// The tiles of a Night lights group: a flat build pre-comps them under View in its source comp (the group
-// holds one "Imagery source" reference); a bent build's tiles are read the same way.
+// The tiles of a Night lights group: they sit under View in its source comp (the group holds one "Imagery source"
+// reference). Older flat builds pre-comped them the same way, without the filter.
 const nightTiles = (api, groupId) => {
   const ref = api.getChildren(groupId).find((id) => api.getNiceName(id) === "Imagery source");
   if (!ref) return nightFootage(api, groupId);
@@ -13193,38 +13193,39 @@ test("night lights: a flat build makes a Night lights group at the top of Day & 
   assert.equal(api.getParent(r.groupId), dn);
   assert.equal(api.getChildren(dn)[0], r.groupId, "top child of Day & night");
   assert.equal(r.night, true);
-  // One composition reference, matted by the four night layers, with no reproject filter.
+  // One composition reference, matted by the four night layers, with the Reproject filter.
   const kids = api.getChildren(r.groupId);
   const refs = kids.filter((id) => api.getNiceName(id) === "Imagery source");
   assert.equal(refs.length, 1, "one Imagery source reference");
   assert.deepEqual(nightMattes(api, refs[0]), rec.layers);
-  assert.equal(api._connections.filter((c) => c[2] === refs[0] && /^filters\.\d+$/.test(c[3])).length, 0, "no filter on the reference");
+  assert.equal(api._connections.filter((c) => c[2] === refs[0] && /^filters\.\d+$/.test(c[3])).length, 1, "one Reproject filter on the reference");
   assert.equal(api.getCompFromReference(refs[0]), G.findNightLights(map)[0].meta.sourceComp);
   // The four night layers are matted on the reference only; no footage in the map comp has a matte.
   assert.deepEqual(plain(G.findImagery(map).map((i) => i.groupId)), [d.groupId], "day imagery only");
   assert.ok(api.layerExists(d.groupId), "day imagery untouched");
-  // The source comp: the map comp's size, frame range and frame rate, and View -> level groups -> tiles.
+  // The source comp: the map comp's frame range and frame rate, and View (with its mask) -> level groups -> tiles.
   const night = G.findNightLights(map);
   assert.deepEqual(plain(night.map((i) => i.groupId)), [r.groupId]);
   assert.equal(night[0].meta.night, true);
   assert.equal(night[0].meta.category, "imagery");
-  assert.ok(!night[0].meta.bent, "flat, not bent");
+  assert.equal(night[0].meta.bent, true, "bent, like day imagery");
   const comp = night[0].meta.sourceComp;
   assert.equal(api.getNiceName(comp), "Imagery source: NASA Black Marble · World");
-  assert.deepEqual(plain(api.get(comp, "resolution")), plain(api.get("comp#1", "resolution")), "the map comp's resolution");
+  assert.deepEqual(compIds(api).sort(), [G.findImagery(map)[0].meta.sourceComp, comp].sort(), "the day source comp and the night one");
   assert.deepEqual(plain(api.get(comp, "frameRange")), { x: 2, y: 50 });
   assert.equal(api.get(comp, "fps"), 24);
-  const top = inComp(api, comp, () => api.getCompLayers(false));
-  const view = top.find((id) => api.getNiceName(id) === "View");
-  assert.ok(view, "a View group in the source comp");
-  assert.equal(top.filter((id) => api.getNiceName(id) === "View mask").length, 0, "no View mask");
-  const tiles = inComp(api, comp, () => nightFootage(api, view));
+  const p = bentParts(api, night[0]);
+  assert.equal(p.ref, refs[0]);
+  assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.ok(p.view, "a View group in the source comp");
+  assert.ok(p.mask, "a View mask in the source comp");
+  const tiles = inComp(api, comp, () => nightFootage(api, p.view));
   assert.equal(tiles.length, r.tiles);
   assert.ok(tiles.length > 0);
   tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles are not matted"));
-  // The rotation driver is tagged in the map comp (in Night lights) and turns View.
+  // The position driver is tagged in the map comp (in Night lights) and drives View.
   assert.equal(api.getParent(night[0].driverId), r.groupId);
-  assert.ok(api._connections.some((c) => c[0] === night[0].driverId && c[2] === view && c[3] === "rotation.z"), "rotation driver -> View rotation.z");
+  assert.ok(api._connections.some((c) => c[0] === night[0].driverId && c[2] === p.view && c[3] === "position"), "position driver -> View position");
 });
 
 test("night lights: a flat night build's source comp is filed in the map's imagery asset group (version 1)", () => {
@@ -13454,6 +13455,64 @@ test("night lights: Controls sync and the route order never look inside the Nigh
   assert.ok(asked.length > 0);
   assert.deepEqual(asked.filter((id) => inside.has(id)), []);
   assert.equal(promotedNames(api, r.componentId).filter((name) => /Night lights/.test(name)).length, 0, "no night lights row among the imagery");
+});
+
+// An older flat night build (pre-comped, from before the Reproject filter): a source comp the size of the map comp
+// with View (one level group) in it, one reference with no filter matted by the Night rectangle, and a driver tagged
+// as imagery with night and sourceComp but no bent flag. Made by hand, since new builds no longer make it.
+function oldPrecompNight(context, api, map) {
+  const G = context.GeoScene, E = context.GeoExpression;
+  const dn = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const mapComp = api.getActiveComp();
+  const comp = api.createComp("Imagery source: NASA Black Marble · World");
+  api.set(comp, { resolution: api.get(mapComp, "resolution") });
+  api.setActiveComp(comp);
+  const view = api.create("group", "View");
+  api.parent(api.create("group", "z 3"), view);
+  api.setActiveComp(mapComp);
+  const outer = api.create("group", "Night lights");
+  api.parent(outer, dn);
+  const ref = api.createCompReference(comp);
+  api.rename(ref, "Imagery source");
+  api.parent(ref, outer);
+  api.connect(dnRec(api, dn).night, "id", ref, "trackMattes");
+  const meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: "old-night", night: true, sourceComp: comp };
+  const driver = api.create("javaScript", "Imagery driver: rotation");
+  api.set(driver, { expression: E.writeTag("GEO_META", meta) });
+  api.parent(driver, outer);
+  return { comp, outer, ref, view, dn };
+}
+
+test("night lights: an older flat (pre-comped) night group is found, kept while wanted, and taken down by its teardown (version 1)", () => {
+  const { context, api, map } = nightFixtureV2(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const old = oldPrecompNight(context, api, map);
+  const found = G.findNightLights(map);
+  assert.deepEqual(plain(found.map((i) => i.groupId)), [old.outer], "found as night lights");
+  assert.equal(found[0].meta.sourceComp, old.comp);
+  assert.ok(!found[0].meta.bent, "no bent flag: an older flat build");
+  assert.equal(G.nightLightsStatus(map).wanted, true, "satellite day imagery with Day & night");
+  assert.equal(G.prepareNightLights(map).needsBuild, false, "the older night lights are kept; none is due");
+  assert.equal(api.layerExists(old.outer), true, "not rebuilt or removed");
+  G.removeNightLights(map);
+  assert.equal(api.layerExists(old.outer), false, "the group is taken down");
+  assert.equal(api.layerExists(old.ref), false, "its reference is taken down");
+  assert.ok(!compIds(api).includes(old.comp), "its source comp is deleted");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("night lights: an older flat (pre-comped) night group with no satellite day imagery is removed by Refresh controls (version 1)", () => {
+  const { context, api, map } = nightFixtureV2(4);
+  const G = context.GeoScene;
+  const old = oldPrecompNight(context, api, map);
+  assert.equal(G.nightLightsStatus(map).orphaned, true, "orphaned without satellite imagery");
+  context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(old.outer), false, "the group is removed");
+  assert.ok(!compIds(api).includes(old.comp), "its source comp is deleted");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.equal(api.getActiveComp(), "comp#1");
 });
 
 // ---- Night lights, version 2: one matte, the Night rectangle ----

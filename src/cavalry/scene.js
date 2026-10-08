@@ -895,17 +895,14 @@ var GeoScene = (function () {
     return plan.mode === "images" ? GeoSources.imageUrl(src, r) : GeoSources.tileUrl(src, opts, r.z, r.x0, r.y0);
   }
 
-  // night: the plan is for night lights. Day imagery is always bent, flat maps included, so it repeats past
-  // the date line through Reproject. Night lights stay flat on a flat map (pre-comped, see "Night lights").
-  function planImagery(map, src, opts, night) {
+  // Every plan is bent, flat maps included: day imagery and night lights (see planNightLights) repeat past the
+  // date line through Reproject, and need the plugin.
+  function planImagery(map, src, opts) {
     GeoSources.tileUrl(src, opts, 0, 0, 0); // validates key, style or link before any work
     // Large images need background downloads: one at a time, an EOX image would freeze
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
     var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
-    // Day imagery is bent on any map (see "Bent imagery" below); a night plan is bent only when a globe or Equal Earth frame is in view.
-    var projected = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
-    var bent = !night || projected;
-    if (bent && !reprojectAvailable()) throw new Error(REPROJECT_MISSING);
+    if (!reprojectAvailable()) throw new Error(REPROJECT_MISSING);
     // Each sample's region is worked out once, however many times the level drops.
     var regions = [];
     function regionOf(cam, width, height) {
@@ -915,13 +912,11 @@ var GeoScene = (function () {
       return regions[k];
     }
     function tilesUpTo(maxZoom) {
-      return bent ? GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf)
-        : GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, maxZoom);
+      return GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf);
     }
     var set = tilesUpTo(src.maxZoom);
     function itemsFor(ts) {
-      if (bent) return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
-      return images ? GeoBlocks.blocksForTiles(ts.tiles) : ts.tiles.map(GeoBlocks.tileRect);
+      return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
     }
     // An image covers the bounding box of the tiles it needs, so the image limit counts the
     // tiles' worth of pixels really downloaded (GeoBlocks.totalTiles), not the tiles needed.
@@ -941,8 +936,7 @@ var GeoScene = (function () {
       throw new Error(items.length > GeoBlocks.MAX_IMAGES ? "Too many images (" + items.length + ")" + end
         : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(items) + ")" + end);
     }
-    var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts) };
-    if (bent) plan.bent = true;
+    var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts), bent: true };
     if (images) plan.imageTiles = GeoBlocks.totalTiles(items);
     var left = {};
     GeoFetch.leftovers().forEach(function (p) { left[String(p).replace(/\\/g, "/")] = true; });
@@ -968,8 +962,7 @@ var GeoScene = (function () {
         plan.imageTiles = GeoBlocks.totalTiles(plan.items);
       }
     }
-    if (bent) bentMissing(plan);
-    else plan.cached = plan.items.length - plan.missing.length;
+    bentMissing(plan);
     if (set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
   }
@@ -1183,15 +1176,13 @@ var GeoScene = (function () {
   // A new, empty source comp sized for the whole View box (see below), with the map comp's frame
   // range and frame rate, and a see-through background. The map comp is active again when this returns or throws; onMade
   // gets the id as soon as the comp exists, so a failure further on can still delete it.
-  // exact: the source comp is the map comp's size (flat night lights, which have no filter).
-  function createSourceComp(name, mapComp, onMade, exact) {
+  function createSourceComp(name, mapComp, onMade) {
     var size = A.readResolution(api.get(mapComp, A.COMP_RESOLUTION_ATTR)), range = compFrameRange(), fps = null, comp, o = {};
     try { fps = Number(api.get(mapComp, A.COMP_FPS_ATTR)); } catch (e) { fps = null; }
     try { comp = api.createComp(name); onMade(comp); } finally { api.setActiveComp(mapComp); }
     // A reference's filter only sees the comp inside its resolution rectangle (centred on the
     // origin), so the comp must cover the masked View box: at most MAX_VIEW_PX + 4 either way.
-    if (exact) o[A.COMP_RESOLUTION_ATTR] = { x: size.width, y: size.height };
-    else o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
+    o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
     o[A.COMP_BACKGROUND_ATTR] = { r: 0, g: 0, b: 0, a: 0 };
     api.set(comp, o);
     setOne(comp, A.COMP_END_ATTR, range.end); // the end first, so a late start never lands past the old end
@@ -1211,14 +1202,14 @@ var GeoScene = (function () {
     });
   }
 
-  // Whether imagery meta has a source comp: bent imagery, and flat night lights (pre-comped, see
-  // "Night lights" below).
+  // Whether imagery meta has a source comp: bent imagery, and the flat night lights that older versions
+  // pre-comped (see "Night lights" below), which are still found and taken down.
   function usesSourceComp(meta) { return !!meta && (!!meta.bent || !!meta.sourceComp); }
 
   // Imagery taken apart a layer per entry ({ id } in the map comp, { id, comp } in a source
-  // comp, { comp } = delete that source comp). Flat: teardownOrder. Source comp (bent, or flat
-  // night): in the source comp (active while each is deleted) its tiles, level groups, View (with
-  // the level drivers) and View mask; then the filter and the group in the map comp; then the
+  // comp, { comp } = delete that source comp). Flat: teardownOrder. Source comp (bent, or an older
+  // pre-comped night build): in the source comp (active while each is deleted) its tiles, level groups,
+  // View (with the level drivers) and View mask; then the filter and the group in the map comp; then the
   // source comp itself.
   function teardownEntries(im, mapComp) {
     var mapPart = teardownOrder(im.groupId).map(function (id) { return { id: id }; });
@@ -1268,9 +1259,9 @@ var GeoScene = (function () {
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
-    // precomp: flat night lights, built in a source comp like bent imagery but with no filter and no
-    // view drivers (see "Night lights"). sourced: the build has a source comp (bent or precomp).
-    var bent = !!plan.bent, precomp = night && !bent, sourced = bent || precomp, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
+    // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
+    // (the older flat form, which planImagery no longer makes).
+    var bent = !!plan.bent, sourced = bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
     var sourceComp = null, view = null, mask = null, filter = null, assetGroup = false;
     // The map's imagery asset group, found or made on first use (false until then; null when unavailable).
     function fileAway(ids) {
@@ -1301,10 +1292,10 @@ var GeoScene = (function () {
     try { userSelection = api.getSelection(); } catch (e) { /* nothing selected */ }
 
     function withSourceComp(fn) { return withComp(sourceComp, mapComp, fn); }
-    // The source comp's name: "Imagery source: <label> · <map>" (bent and flat night alike).
+    // The source comp's name: "Imagery source: <label> · <map>" (day and night alike).
     function sourceCompName() { return "Imagery source: " + GeoSources.label(src, opts) + " · " + api.getNiceName(map.groupId); }
 
-    // Night lights: the reference to the source comp (bent or pre-comped flat) is matted by the four night
+    // Night lights: the reference to the source comp (bent) is matted by the four night
     // layers, so it shows only where they are dark. Nothing happens for day imagery (mattes is empty).
     // Read each time: a Controls sync during the build may upgrade the overlay (its Night rectangle replaces the four layers).
     function currentMattes() { return night ? nightMattes(findDayNight(map)) : []; }
@@ -1341,27 +1332,7 @@ var GeoScene = (function () {
       var meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: plan.cacheKey, sourceMeta: GeoSources.meta(src, opts) };
       if (night) meta.night = true;
       if (bent) { startBent(meta); return; }
-      if (precomp) { startPrecomp(meta); return; }
       imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), outer, "rotation.z");
-    }
-
-    // Flat night lights (pre-comped): the source comp (the map comp's size, no filter), View in it, the
-    // reference in the outer group (matted, identity), then the rotation driver, which carries the GEO_META
-    // tag and turns View (not outer) so the reference in the map comp stays at identity.
-    function startPrecomp(meta) {
-      createSourceComp(sourceCompName(), mapComp, function (c) { sourceComp = c; }, true);
-      meta.sourceComp = sourceComp;
-      fileAway([sourceComp]);
-      withSourceComp(function () {
-        view = api.create("group", VIEW_NAME);
-        api.set(view, identityTransform());
-      });
-      var ref = api.createCompReference(sourceComp);
-      api.rename(ref, REFERENCE_NAME);
-      api.parent(ref, outer);
-      api.set(ref, identityTransform());
-      matte(ref);
-      imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), view, "rotation.z");
     }
 
     // Bent: the source comp with View and its mask, the reference with the filter (camera
@@ -1424,7 +1395,7 @@ var GeoScene = (function () {
       // 257/256 still showed faint seams in Cavalry), on top of the 512px-source half scale.
       api.set(id, { "position.x": p[0], "position.y": p[1], "rotation.z": 0,
         "scale.x": base * (px[0] + 4) / px[0], "scale.y": base * (px[1] + 4) / px[1] });
-      if (!sourced) matte(id); // a source-comp build (bent, flat night) mattes its reference only, not the tiles inside the source comp
+      if (!sourced) matte(id); // a source-comp build (bent) mattes its reference only, not the tiles inside the source comp
       built++;
     }
 
@@ -1438,8 +1409,7 @@ var GeoScene = (function () {
         ["position", "scale", "opacity"].forEach(function (attr) {
           var name = "Imagery driver: z " + b.L + " " + attr, expr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, lv);
           // Bent: in the source comp under View, reading the camera's lat / lon / zoom only.
-          // Flat night (pre-comped): in the source comp under View, with all five camera inputs.
-          if (sourced) withSourceComp(function () { imageryDriver(map, view, name, expr, b.group, attr, bent ? 3 : undefined); });
+          if (sourced) withSourceComp(function () { imageryDriver(map, view, name, expr, b.group, attr, 3); });
           else imageryDriver(map, outer, name, expr, b.group, attr);
         });
       });
@@ -1533,10 +1503,11 @@ var GeoScene = (function () {
 
   // ---- Night lights (NASA Black Marble in the Day & night group) ----------------------
   // A night build is the imagery build with plan.night: its group "Night lights" is the top child of
-  // the Day & night group. Flat night lights are pre-comped like bent imagery: the tiles sit in a source
-  // comp "Imagery source: NASA Black Marble · <map>" (sized to the map comp, no filter, no view drivers
-  // beyond the rotation), and the group holds one reference to it, matted by the four night layers
-  // (bent: the same reference, with the bent filter). Day imagery never lists or tears down night
+  // the Day & night group. Night lights are built like bent imagery, flat maps included: the tiles sit in a
+  // source comp "Imagery source: NASA Black Marble · <map>", and the group holds one reference to it with the
+  // Reproject filter, matted by the night layers (or the Night rectangle). Older flat night lights were
+  // pre-comped (a source comp the size of the map, no filter, no View mask); they are still found, kept and
+  // taken down like the rest, but no new build makes them. Day imagery never lists or tears down night
   // lights, and a night build never touches day.
 
   // Wanted: the Day & night overlay is complete and the map has satellite day imagery (see
@@ -1553,11 +1524,11 @@ var GeoScene = (function () {
   // A version 1 overlay while the plugin is missing: it is left as it is, so its night lights are neither built nor removed.
   function leftAsItIs(f) { return !!f && f.version === 1 && !nightAvailable(); }
 
-  // The plan for night lights: NASA's night layer over the same view. planImagery already stops at the
-  // layer's maximum zoom (8); zoomCapped says the camera went past it.
+  // The plan for night lights: NASA's night layer over the same view, bent like day imagery. planImagery already
+  // stops at the layer's maximum zoom (8); zoomCapped says the camera went past it.
   function planNightLights(map) {
     var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
-    var plan = planImagery(map, GeoSources.night(), {}, true);
+    var plan = planImagery(map, GeoSources.night(), {});
     plan.night = true;
     if (zoomed) plan.zoomCapped = true;
     return plan;
