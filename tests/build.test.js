@@ -13255,6 +13255,32 @@ test("night lights in the panel: Add day & night after a night layer was deleted
   tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles not matted"));
 });
 
+test("night lights in the panel v2: Add day & night after the Night rectangle was deleted remakes it and re-mattes the night tiles once", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene, eox = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  G.buildImagery(map, eox, {}, G.planImagery(map, eox, {}));
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  context.addDayNightBtn.onClick();
+  runTimers(api);
+  const dn = G.findDayNight(map).groupId, before = dnRec(api, dn);
+  assert.equal(G.findNightLights(map).length, 1, "night lights built");
+  api.deleteLayer(before.night);
+  context.addDayNightBtn.onClick();
+  runSeen(context, api);
+  const after = dnRec(api, dn), night = G.findNightLights(map);
+  assert.ok(after.night && after.night !== before.night, "a new Night rectangle");
+  assert.equal(night.length, 1, "one Night lights group");
+  assert.equal(api.get(after.night, "hidden"), false, "the new rectangle is shown");
+  const ref = api.getChildren(night[0].groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  assert.deepEqual(nightMattes(api, ref), [after.night], "the reference matted only by the new rectangle");
+  const tiles = nightTiles(api, night[0].groupId);
+  assert.ok(tiles.length > 0);
+  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles not matted"));
+});
+
 test("night lights in the panel: Add day & night while another map's night build runs says Refresh controls adds them (version 1)", () => {
   const { context, api } = buildSandbox();
   satellitePanelMap(context, api);

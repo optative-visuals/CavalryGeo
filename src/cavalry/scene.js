@@ -2575,6 +2575,7 @@ var GeoScene = (function () {
   // furniture. The group's user data records every member (geoDayNight).
   var DAYNIGHT_KEY = "geoDayNight", TIME_LABEL_NAME = "Time label", NIGHT_DEPRESSIONS = [0, 6, 12, 18];
   // Version 2: one plain rectangle "Night" (its fill is the Night colour; its user data tags it) with the Cavalry Geo Night filter on it.
+  // NIGHT_RECT_KEY is not DAYNIGHT_KEY on purpose: the rectangle must not be taken for a day & night group by dayNightGroups.
   var NIGHT_TYPE = "cavalryGeo::night", NIGHT_NAME = "Night", NIGHT_FILTER_NAME = "Cavalry Geo Night", NIGHT_RECT_KEY = "geoNight";
   var DAYNIGHT_MISSING = "Day & night needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Add day & night again.";
 
@@ -3085,7 +3086,7 @@ var GeoScene = (function () {
     }
   }
 
-  // ---- Map styles: apply a style to a map  // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
+  // ---- Map styles: apply a style to a map, or read a map's colours back ------------------
   var LINE_SOURCES = ["states", "coastlines", "rivers", "roads", "railways"];
   var CREDIT_NAMES = [ATTRIBUTION_NAME, IMAGERY_CREDIT_NAME];
 
