@@ -682,9 +682,10 @@ const copyCtx = (over) => Object.assign({ cavalry: { Path: FakePath }, n0: 0, n1
 test("map layer expression repeats on flat maps: one copy east of the date line", () => {
   const expr = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1 });
   assert.ok(expr.includes("frame: {w: _i7, h: _i8}"));
-  const ops = vm.runInNewContext(expr, copyCtx()).ops;
-  assert.equal(ops.filter((o) => o[0] === "M").length, 1);
-  assert.ok(ops[0][1] > 0, "the copy at +1 world-width, not the one 353 degrees west");
+  const ms = vm.runInNewContext(expr, copyCtx()).ops.filter((o) => o[0] === "M");
+  assert.equal(ms.length, 2);
+  assert.ok(ms[0][1] < -4000, "the original, 353 degrees west, is always drawn");
+  assert.ok(ms[1][1] > 0, "plus the copy at +1 world-width, on the frame");
 });
 
 test("single things and old layers get no frame: the shape is drawn once at its own longitude", () => {
@@ -701,7 +702,7 @@ test("regions and bubbles expressions pass the comp frame into the data helpers"
   const regions = E.regionsExpression(buildDataRuntimeSource(), data, meta);
   assert.ok(regions.includes("frame: {w: _i16, h: _i17}"));
   const mesh = vm.runInNewContext(regions, copyCtx({ n7: 2010, cavalry: { Path: FakePath, Mesh: class { constructor() { this.paths = []; } addPath(p) { this.paths.push([p]); } }, Material: class {} } }));
-  assert.equal(mesh.paths[1][0].ops.filter((o) => o[0] === "M").length, 1);
+  assert.equal(mesh.paths[1][0].ops.filter((o) => o[0] === "M").length, 2); // the original (off the frame) and its copy on the frame
   const bubbles = E.bubblesExpression(buildDataRuntimeSource(), { pts: [[170, 0]], series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } }, meta);
   assert.ok(bubbles.includes("frame: {w: _i9, h: _i10}"));
   const dots = vm.runInNewContext(bubbles, copyCtx({ n1: 0, n2: 0, n7: 2010, n8: 40, n9: 1920, n10: 1080, cavalry: { Path: FakePath } })).ops;

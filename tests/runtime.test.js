@@ -235,12 +235,14 @@ function boxOfOps(ops) {
 }
 const meetsFrame = (b, f = FRAME) => b.maxX >= -f.w / 2 && b.minX <= f.w / 2 && b.maxY >= -f.h / 2 && b.minY <= f.h / 2;
 
-test("date line: a small shape at lon -178 seen from lon 175 is drawn once, one world-width east", () => {
+test("date line: a small shape at lon -178 seen from lon 175 is drawn at its own place (off the frame) and once, one world-width east", () => {
   const c = cam({ lon: 175, zoom: 4 });
   const framed = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, { frame: FRAME }, FakePath).ops;
   const east = R.buildPath(polyEnc(sq(181.5, 182.5, 0, 1)), c, 100, {}, FakePath).ops;
-  assert.equal(movesOf(framed).length, 1, "the shift-0 copy (353 degrees west) is off the frame");
-  sameOps(framed, east);
+  const k0 = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, {}, FakePath).ops;
+  assert.equal(movesOf(framed).length, 2, "the original (353 degrees west, off the frame) is always drawn, plus the copy on the frame");
+  sameOps(framed.slice(0, k0.length), k0);
+  sameOps(framed.slice(k0.length), east);
 });
 
 test("date line: a shape around Japan seen from lon 179 at zoom 2 is drawn twice, one world-width apart", () => {
@@ -270,10 +272,11 @@ test("date line: with rotation 90 the copies are one world-width apart along scr
   const framed = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, { frame: FRAME }, FakePath).ops;
   const east = R.buildPath(polyEnc(sq(181.5, 182.5, 0, 1)), c, 100, {}, FakePath).ops;
   const k0 = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, {}, FakePath).ops;
-  assert.equal(movesOf(framed).length, 1);
-  sameOps(framed, east);
-  nearTo(movesOf(framed)[0][1] - movesOf(k0)[0][1], 0);
-  nearTo(movesOf(framed)[0][2] - movesOf(k0)[0][2], worldW(4));
+  assert.equal(movesOf(framed).length, 2);
+  sameOps(framed.slice(0, k0.length), k0);
+  sameOps(framed.slice(k0.length), east);
+  nearTo(movesOf(framed)[1][1] - movesOf(k0)[0][1], 0);
+  nearTo(movesOf(framed)[1][2] - movesOf(k0)[0][2], worldW(4));
 });
 
 test("date line: a point is copied the same way (8 dots at lon 170 seen from lon 0 at zoom 0)", () => {
@@ -282,6 +285,15 @@ test("date line: a point is copied the same way (8 dots at lon 170 seen from lon
   const dots = ops.filter((o) => o[0] === "E");
   assert.equal(dots.length, 8);
   dots.forEach((o, i) => nearTo(o[1], 170 / 360 * 256 + 256 * (i - 4)));
+});
+
+test("date line: the original is always drawn, even when it is off the frame (points at lon 0 and 120 at zoom 4 seen from lon 0)", () => {
+  const enc = C.encodeLayer({ kind: "point", features: [{ name: "a", rank: 1, rings: [[[0, 0]]] }, { name: "b", rank: 2, rings: [[[120, 0]]] }] });
+  const dots = R.buildPath(enc, cam({ zoom: 4 }), 100, { pointRadius: 2, frame: FRAME }, FakePath).ops.filter((o) => o[0] === "E");
+  assert.equal(dots.length, 2);
+  const xs = dots.map((o) => o[1]).sort((a, b) => a - b);
+  nearTo(xs[0], 0);
+  nearTo(xs[1], 120 / 360 * worldW(4));
 });
 
 test("date line: without a frame (old layers), on globe and on Equal Earth the output is unchanged", () => {

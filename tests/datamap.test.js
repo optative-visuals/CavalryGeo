@@ -113,6 +113,13 @@ test("bubbles: a bubble at lon 170 is drawn on each copy that reaches the frame,
   near(plain[0][1], 170 / 360 * pitch);
 });
 
+test("bubbles: a bubble off the frame is still drawn once, at its own position", () => {
+  const data = { pts: [[120, 0]], series: [[[2020, 10]]], range: { min: 10, max: 10, maxAbs: 10 } };
+  const ops = G.bubbles(data, { ...world0, zoom: 4 }, { year: 2020, maxRadius: 10, ellipseScale: 1, frame: FRAME }, FakePath).ops;
+  assert.equal(ops.length, 1);
+  near(ops[0][1], 120 / 360 * pitch * 16);
+});
+
 test("value labels: each copy that reaches the frame gets its own text", () => {
   const data = { pts: [[170, 0]], series: [[[2020, 10]]], range: { min: 10, max: 10, maxAbs: 10 }, fmt: { prefix: "", suffix: "" } };
   const ops = G.valueLabels(data, world0, { year: 2020, textSize: 16, format: 0, decimals: 0, frame: FRAME }, cav).ops;

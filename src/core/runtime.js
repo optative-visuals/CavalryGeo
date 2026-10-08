@@ -161,7 +161,8 @@ var GeoRuntime = (function () {
   }
 
   // The whole-world shifts k (ascending) whose copy of bbox ({minX, minY, maxX, maxY}, screen space) meets
-  // the frame, a w x h rectangle centred on the camera. [0] when not flat or without a frame.
+  // the frame, a w x h rectangle centred on the camera. Always includes 0, the original, even when it is off the
+  // frame (so the original is drawn as before); [0] when not flat or without a frame.
   function worldCopies(cam, bbox, frame) {
     if (!frame || !isFlat(cam) || !(frame.w > 0) || !(frame.h > 0)) return [0];
     var W = worldWidth(cam), r = rotationOf(cam), lo = -Infinity, hi = Infinity;
@@ -177,6 +178,7 @@ var GeoRuntime = (function () {
     if (!isFinite(lo) || !isFinite(hi)) return [0];
     var ks = [];
     for (var k = Math.ceil(lo); k <= Math.floor(hi); k++) ks.push(k);
+    if (ks.indexOf(0) < 0) { ks.push(0); ks.sort(function (a, b) { return a - b; }); }
     return ks;
   }
 
