@@ -904,11 +904,15 @@ var GeoScene = (function () {
     return plan;
   }
 
-  function findImagery(map) {
+  // The day imagery of this map (night lights are listed by findNightLights, never here).
+  function findImagery(map) { return findImageryWhere(map, false); }
+  // The night lights of this map: the same entries, flagged meta.night.
+  function findNightLights(map) { return findImageryWhere(map, true); }
+  function findImageryWhere(map, night) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
       var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
-      if (meta && meta.category === "imagery" && meta.camera === map.cameraId && (typeof api.layerExists !== "function" || api.layerExists(meta.group))) {
+      if (meta && meta.category === "imagery" && !!meta.night === night && meta.camera === map.cameraId && (typeof api.layerExists !== "function" || api.layerExists(meta.group))) {
         out.push({ driverId: id, groupId: meta.group, meta: meta });
       }
     });
@@ -1026,6 +1030,13 @@ var GeoScene = (function () {
   }
 
   function identityTransform() { return { "position.x": 0, "position.y": 0, "rotation.z": 0, "scale.x": 1, "scale.y": 1 }; }
+  // Night lights (see planNightLights): the group's name, and the message when Day & night is missing.
+  var NIGHT_GROUP_NAME = "Night lights", NIGHT_NEEDS_DAY_NIGHT = "Night lights need a Day & night overlay — press Add day & night first.";
+  // Makes the layer the top child of its group. Guarded: an older Cavalry leaves it where it landed.
+  function raiseToTop(id) {
+    if (typeof api.select !== "function" || typeof api.bringToFront !== "function") return;
+    try { api.select([id]); api.bringToFront(); } catch (e) { /* stays where it landed */ }
+  }
   function layerThere(id) { return typeof api.layerExists !== "function" || api.layerExists(id); }
   function deleteIfThere(id) { if (layerThere(id)) api.deleteLayer(id); }
   function setHidden(id, hidden) { if (api.hasAttribute(id, "hidden")) api.set(id, { hidden: hidden }); }
@@ -1159,7 +1170,12 @@ var GeoScene = (function () {
   // source-comp units with the source comp active and leaves the map comp active, even
   // when it throws; a failed bent build deletes its source comp too.
   function beginImageryBuild(map, src, opts, plan) {
-    var previous = findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
+    // Night lights go into the Day & night group, which must hold its four night layers. Checked before
+    // anything is made, so a refused build leaves nothing behind.
+    var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
+    if (night && (!dayNight || dayNight.layers.filter(Boolean).length < 4)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
+    var mattes = night ? dayNight.layers.filter(Boolean) : [];
+    var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
     var bent = !!plan.bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
     var sourceComp = null, view = null, mask = null, filter = null, assetGroup = false;
@@ -1193,6 +1209,10 @@ var GeoScene = (function () {
 
     function withSourceComp(fn) { return withComp(sourceComp, mapComp, fn); }
 
+    // Night lights: each night tile (or the bent reference) is matted by the four night layers, so it
+    // shows only where they are dark. Nothing happens for day imagery (mattes is empty).
+    function matte(id) { mattes.forEach(function (m) { api.connect(m, "id", id, "trackMattes"); }); }
+
     // Measured in Cavalry: any step that loads an asset is followed by a ~3.6 s rescan of
     // all assets, however many it loaded, so every tile's asset is loaded in the first step.
     function loadAssets() {
@@ -1208,16 +1228,18 @@ var GeoScene = (function () {
 
     function startOuter() {
       loadAssets();
-      outer = api.create("group", "Imagery: " + GeoSources.label(src, opts));
-      api.parent(outer, map.groupId); // parented immediately so a mid-build throw never leaves it loose at the comp root
+      outer = api.create("group", night ? NIGHT_GROUP_NAME : "Imagery: " + GeoSources.label(src, opts));
+      api.parent(outer, night ? dayNight.groupId : map.groupId); // parented immediately so a mid-build throw never leaves it loose at the comp root
       // It may have been created inside a selected, transformed group: api.parent kept
       // that world transform, so reset it to identity before the rotation driver connects.
       api.set(outer, identityTransform());
+      if (night) raiseToTop(outer);
       setHidden(outer, true);
       // The rotation driver carries the GEO_META tag, so it is made first: if the panel
       // is closed mid-build (stopping its timer), the half-built group is still found,
       // and removed, by the next build.
       var meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: plan.cacheKey, sourceMeta: GeoSources.meta(src, opts) };
+      if (night) meta.night = true;
       if (bent) { startBent(meta); return; }
       imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), outer, "rotation.z");
     }
@@ -1241,6 +1263,7 @@ var GeoScene = (function () {
       api.rename(ref, REFERENCE_NAME);
       api.parent(ref, outer);
       api.set(ref, identityTransform());
+      matte(ref);
       filter = api.create(REPROJECT_TYPE, "Cavalry Geo Reproject");
       api.set(filter, { allowViewportClipping: false, autoPadding: false, samplingQuality: 1 });
       api.connect(filter, "id", ref, "filters");
@@ -1282,6 +1305,7 @@ var GeoScene = (function () {
       // 257/256 still showed faint seams in Cavalry), on top of the 512px-source half scale.
       api.set(id, { "position.x": p[0], "position.y": p[1], "rotation.z": 0,
         "scale.x": base * (px[0] + 4) / px[0], "scale.y": base * (px[1] + 4) / px[1] });
+      if (!bent) matte(id); // a bent build mattes its reference only, not the tiles inside the source comp
       built++;
     }
 
@@ -1301,9 +1325,10 @@ var GeoScene = (function () {
       });
       if (bent) for (var k = 1; k < VIEW_DRIVERS.length; k++) viewDriver(k);
       setHidden(outer, false);
-      sendImageryToBack(map);
+      if (!night) sendImageryToBack(map); // night lights stay on top of their Day & night group
       try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
       result = { groupId: outer, tiles: built, levels: builtLevels.length, unreadable: unreadable };
+      if (night) result.night = true;
       // Only now, with the new imagery complete, is the old imagery for this cache key
       // queued for deletion (never the group just built, in case an id was reused).
       // It is hidden first so a half-deleted copy never shows.
@@ -1381,6 +1406,52 @@ var GeoScene = (function () {
     var job = beginImageryBuild(map, src, opts, plan), r;
     do { r = job.step(Infinity); } while (!r.done);
     return r.result;
+  }
+
+  // ---- Night lights (NASA Black Marble in the Day & night group) ----------------------
+  // A night build is the imagery build with plan.night: its group "Night lights" is the top child of
+  // the Day & night group, and each tile (flat) or the reference (bent) is matted by the four night
+  // layers. Day imagery never lists or tears down night lights, and a night build never touches day.
+
+  // Wanted: the Day & night overlay is complete and the map has satellite day imagery (see
+  // GeoSources.isSatellite). orphaned: night lights that are no longer wanted.
+  function nightLightsStatus(map) {
+    var f = findDayNight(map), dayNight = !!f && f.layers.filter(Boolean).length === 4;
+    var satellite = findImagery(map).some(function (i) { return GeoSources.isSatellite(i.meta.sourceMeta); });
+    var night = findNightLights(map), wanted = dayNight && satellite;
+    return { dayNight: dayNight, satellite: satellite, night: night, wanted: wanted, orphaned: night.length > 0 && !wanted };
+  }
+
+  // The plan for night lights: NASA's night layer over the same view. planImagery already stops at the
+  // layer's maximum zoom (8); zoomCapped says the camera went past it.
+  function planNightLights(map) {
+    var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
+    var plan = planImagery(map, GeoSources.night(), {});
+    plan.night = true;
+    if (zoomed) plan.zoomCapped = true;
+    return plan;
+  }
+
+  // Takes every night light of this map down, a layer at a time, and sets the Day & night lights
+  // inputs to 0 where nothing drives them. Returns the number of night light entries removed.
+  function removeNightLights(map) {
+    var mapComp = api.getActiveComp(), found = findNightLights(map);
+    found.forEach(function (im) { teardownEntries(im, mapComp).forEach(function (e) { removeEntry(e, mapComp); }); });
+    var f = findDayNight(map), at = A.CAMERA_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.NIGHT_OPACITY_INPUTS, "lights");
+    if (f) f.helpers.forEach(function (h) {
+      if (!h || !layerThere(h) || !api.hasAttribute(h, at)) return;
+      var driven = "?";
+      try { driven = String(api.getInConnection(h, at) || ""); } catch (e) { /* unknown: leave it alone */ }
+      if (driven === "") setOne(h, at, 0);
+    });
+    return found.length;
+  }
+
+  // The Controls refresh: removes night lights that are no longer wanted, and says whether a night build
+  // is due (wanted, and none yet).
+  function prepareNightLights(map) {
+    var status = nightLightsStatus(map), removed = status.orphaned ? removeNightLights(map) : 0;
+    return { removed: removed, needsBuild: status.wanted && status.night.length === 0 };
   }
 
   // ---- Fly-to -------------------------------------------------------------------
@@ -3124,7 +3195,7 @@ var GeoScene = (function () {
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable,
-    findImagery: findImagery, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
+    findImagery: findImagery, findNightLights: findNightLights, nightLightsStatus: nightLightsStatus, planNightLights: planNightLights, removeNightLights: removeNightLights, prepareNightLights: prepareNightLights, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,

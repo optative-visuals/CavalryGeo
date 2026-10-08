@@ -195,6 +195,8 @@ function makeFakeApi() {
       if (d === "filters") d = "filters." + connections.filter(function (k) { return k[2] === c && /^filters\.\d+$/.test(k[3]); }).length;
       // Like Cavalry: a group's masks list appends each connection (masks.0, masks.1, ...); "masks" itself reads back as nothing.
       if (d === "masks") d = "masks." + connections.filter(function (k) { return k[2] === c && /^masks\.\d+$/.test(k[3]); }).length;
+      // Like Cavalry: a layer's track mattes list appends each connection (trackMattes.0, trackMattes.1, ...).
+      if (d === "trackMattes") d = "trackMattes." + connections.filter(function (k) { return k[2] === c && /^trackMattes\.\d+$/.test(k[3]); }).length;
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
@@ -12129,4 +12131,141 @@ test("busy lock: clicks Cavalry held back during a long action are dropped quiet
 test("the panel never calls api.processEvents (running the user's clicks inside an action hung Cavalry)", () => {
   const src = buildPanel();
   assert.equal(/api\.processEvents\s*\(/.test(src), false);
+});
+
+// ---- Night lights: NASA Black Marble matted by the Day & night layers ----
+const nightMattes = (api, id) => api._connections.filter((c) => c[2] === id && /^trackMattes\.\d+$/.test(c[3])).map((c) => c[0]);
+const nightFootage = (api, groupId) => api.getChildren(groupId).filter((id) => /^z -?\d+$/.test(String(api.getNiceName(id))))
+  .reduce((a, lg) => a.concat(api.getChildren(lg)), []);
+function nightFixture(zoom) {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, zoom || 4);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const g = context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  return { context, api, map, dn: g, rec: dnRec(api, g) };
+}
+
+test("nightLightsStatus: wanted only with satellite day imagery and Day & night", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const vector = imageryMap(context, api, 4);
+  G.addDayNight(vector, { dayOfYear: 80, utcTime: 12 });
+  assert.equal(G.nightLightsStatus(vector).wanted, false, "vector-only map");
+  assert.equal(G.nightLightsStatus(vector).dayNight, true);
+  const eox = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.buildImagery(vector, eox, {}, G.planImagery(vector, eox, {}));
+  const s = G.nightLightsStatus(vector);
+  assert.equal(s.satellite, true);
+  assert.equal(s.wanted, true, "EOX with Day & night");
+  assert.equal(s.orphaned, false);
+  const mt = context.GeoSources.byId("maptiler"), mtOpts = { key: "K", style: "streets-v2" };
+  const streets = imageryMap(context, api, 4);
+  G.addDayNight(streets, { dayOfYear: 80, utcTime: 12 });
+  G.buildImagery(streets, mt, mtOpts, G.planImagery(streets, mt, mtOpts));
+  assert.equal(G.nightLightsStatus(streets).wanted, false, "MapTiler streets");
+  const noDn = imageryMap(context, api, 4);
+  G.buildImagery(noDn, eox, {}, G.planImagery(noDn, eox, {}));
+  assert.equal(G.nightLightsStatus(noDn).wanted, false, "EOX without Day & night");
+  assert.equal(G.nightLightsStatus(noDn).dayNight, false);
+});
+
+test("night lights: a flat build makes a Night lights group at the top of Day & night, each tile matted by the four night layers", () => {
+  const { context, api, map, dn, rec } = nightFixture(4);
+  const G = context.GeoScene;
+  const day = tileSource(context);
+  const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const r = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(api.getNiceName(r.groupId), "Night lights");
+  assert.equal(api.getParent(r.groupId), dn);
+  assert.equal(api.getChildren(dn)[0], r.groupId, "top child of Day & night");
+  assert.equal(r.night, true);
+  const tiles = nightFootage(api, r.groupId);
+  assert.equal(tiles.length, r.tiles);
+  assert.ok(tiles.length > 0);
+  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), rec.layers));
+  assert.deepEqual(plain(G.findImagery(map).map((i) => i.groupId)), [d.groupId], "day imagery only");
+  assert.ok(api.layerExists(d.groupId), "day imagery untouched");
+  const night = G.findNightLights(map);
+  assert.deepEqual(plain(night.map((i) => i.groupId)), [r.groupId]);
+  assert.equal(night[0].meta.night, true);
+  assert.equal(night[0].meta.category, "imagery");
+});
+
+test("night lights: a bent build makes one matted reference in Night lights, with its own source comp", () => {
+  const { context, api } = buildSandbox();
+  const map = context.GeoScene.createMap("World", { lat: 0, lon: 170, zoom: 3, rotation: 0, projection: 2 });
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const rec = dnRec(api, context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const plan = context.GeoScene.planNightLights(map);
+  assert.equal(plan.bent, true);
+  const r = context.GeoScene.buildImagery(map, context.GeoSources.night(), {}, plan);
+  const im = context.GeoScene.findNightLights(map)[0];
+  assert.equal(im.groupId, r.groupId);
+  assert.equal(api.getNiceName(im.meta.sourceComp), "Imagery source: NASA Black Marble · World");
+  const p = bentParts(api, im);
+  assert.ok(p.ref, "reference in Night lights");
+  assert.equal(api.getParent(p.ref), r.groupId);
+  assert.ok(p.filter, "reproject filter");
+  assert.deepEqual(nightMattes(api, p.ref), rec.layers);
+  inComp(api, im.meta.sourceComp, () => nightFootage(api, p.view)).forEach((t) => assert.deepEqual(nightMattes(api, t), [], "source tiles not matted"));
+});
+
+test("night lights: a rebuild replaces the Night lights group, and a day rebuild leaves the night lights alone", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const first = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const again = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(api.layerExists(first.groupId), false, "old Night lights removed");
+  assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "one Night lights group");
+  const dayAgain = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "night lights kept by a day rebuild");
+  assert.ok(api.layerExists(again.groupId));
+  assert.deepEqual(plain(G.findImagery(map).map((i) => i.groupId)), [dayAgain.groupId]);
+});
+
+test("night lights: a night build without Day & night throws the message and leaves nothing behind", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = imageryMap(context, api, 4);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const kidsBefore = api.getChildren(map.groupId).slice();
+  const plan = G.planNightLights(map);
+  assert.throws(() => G.buildImagery(map, context.GeoSources.night(), {}, plan),
+    (e) => e.message === "Night lights need a Day & night overlay — press Add day & night first.");
+  assert.deepEqual(api.getChildren(map.groupId), kidsBefore);
+  assert.equal(G.findNightLights(map).length, 0);
+});
+
+test("prepareNightLights: removes orphaned night lights once the day imagery is gone, and zeroes the lights input", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  rec.helpers.forEach((h) => api.set(h, { "array.3": 50 }));
+  api.deleteLayer(d.groupId);
+  assert.deepEqual(plain(G.prepareNightLights(map)), { removed: 1, needsBuild: false });
+  assert.equal(api.layerExists(n.groupId), false);
+  assert.equal(G.findNightLights(map).length, 0);
+  rec.helpers.forEach((h) => assert.equal(api.get(h, "array.3"), 0));
+});
+
+test("prepareNightLights: a satellite map with Day & night and no night lights needs a build; a vector map does not", () => {
+  const { context, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  assert.deepEqual(plain(G.prepareNightLights(map)), { removed: 0, needsBuild: false }, "vector map");
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  assert.deepEqual(plain(G.prepareNightLights(map)), { removed: 0, needsBuild: true });
+});
+
+test("planNightLights caps the zoom at 8 and sets zoomCapped only for a camera past it", () => {
+  const high = buildSandbox();
+  const capped = high.context.GeoScene.planNightLights(imageryMap(high.context, high.api, 10));
+  assert.ok(capped.hi <= 8);
+  assert.equal(capped.zoomCapped, true);
+  assert.equal(capped.night, true);
+  const low = buildSandbox();
+  const plan = low.context.GeoScene.planNightLights(imageryMap(low.context, low.api, 4));
+  assert.ok(!plan.zoomCapped);
 });
