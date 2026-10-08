@@ -5512,6 +5512,26 @@ test("the window, each tab's page and its panels get lighter layer by layer", ()
   assert.deepEqual(context.sectionPages.widget._items[0]._radius, [6, 6, 6, 6], "Cavalry's own 6 px corners");
 });
 
+test("Map tab: without ui.Container the panel has no insets, so the preview takes the tab bar's whole width", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  installNe(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  context.sectionTabs.widget.geometry = () => ({ x: 0, y: 0, width: 500, height: 24 });
+  ui.onResize();
+  assert.equal(plain(context.preview._draw._size)[0], 500);
+});
+
+test("preview.setWidth never goes below the Draw's 120 px minimum", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.preview.setWidth(60);
+  assert.equal(plain(context.preview._draw._size)[0], 120);
+  assert.equal(context.preview._draw._minWidth, 120);
+  context.preview.setWidth(10);
+  assert.equal(plain(context.preview._draw._size)[0], 120, "still not laid out: unchanged");
+});
+
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   context.sectionTabs.widget._width = 500;

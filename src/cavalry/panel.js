@@ -2088,7 +2088,8 @@ function buildUi() {
   function fitPreview() {
     try {
       var g = sectionTabs.widget.geometry();
-      var inset = GeoStyle.PANEL_INSET + 2 * GeoStyle.PAGE_INSET; // the panel's insets plus the coloured page's
+      // The panel's insets plus the coloured page's: they exist only when panels are Containers.
+      var inset = GeoStyle.hasContainer() ? GeoStyle.PANEL_INSET + 2 * GeoStyle.PAGE_INSET : 0;
       if (g && g.width > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - inset); });
     } catch (e) { /* older Cavalry */ }
   }
