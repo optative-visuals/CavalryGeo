@@ -344,3 +344,16 @@ test("overscan (flat maps): night along the outline reaches M - 1 px past it, aw
     });
   })));
 });
+
+test("globe night with the antisolar point facing the camera reaches past the rim", () => {
+  const sub = S.subsolar(80, 12);
+  const cam = { lat: -sub.lat, lon: sub.lon + 180, zoom: 2, rotation: 0, projection: 2 };
+  const p = S.nightPath(cam, 80, 12, 0, cav);
+  const r = Math.max.apply(null, p.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").map((c) => Math.hypot(c[1], c[2])));
+  const rim = Math.max.apply(null, S.nightPath(cam, 80, 12, 0, cav).cmds.filter((c) => c[0] === "moveTo").map((c) => Math.hypot(c[1], c[2])));
+  assert.ok(r > 0);
+  // compare with a camera a little off the antisolar point: the rim radius there is the drawn limb
+  const off = S.nightPath({ lat: cam.lat, lon: cam.lon + 30, zoom: 2, rotation: 0, projection: 2 }, 80, 12, 0, cav);
+  const roff = Math.max.apply(null, off.cmds.filter((c) => c[0] === "moveTo" || c[0] === "lineTo").map((c) => Math.hypot(c[1], c[2])));
+  assert.ok(Math.abs(r - roff) < 1e-6 * r || r >= roff - 1e-6, "radius " + r + " vs " + roff);
+});

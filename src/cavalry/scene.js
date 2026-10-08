@@ -2590,7 +2590,7 @@ var GeoScene = (function () {
     var E = GeoExpression;
     function fresh(id, expr) {
       if (!id || !layerThere(id)) return;
-      var now = ""; try { now = String(readExpr(id, A.MAP_EXPR_ATTR) || ""); } catch (e) { now = ""; }
+      var now = String(readExpr(id, A.MAP_EXPR_ATTR) || "");
       if (now !== expr) setOne(id, A.MAP_EXPR_ATTR, expr);
     }
     layers.forEach(function (id, i) { fresh(id, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: NIGHT_DEPRESSIONS[i] })); });

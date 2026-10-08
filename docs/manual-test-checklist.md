@@ -89,6 +89,38 @@ adding street layers.
 - [ ] 12. Disconnect the network (optional) and add an uncached street layer → an error
       in the status line, nothing added.
 
+## Layers → Day & night
+
+- [ ] 19m. Layers → Day & night: the day, month and UTC time boxes show today's date and the current time
+      (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
+      layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
+      in <map> Time controls.", and the night side is shaded.
+- [ ] 19n. Change the date and time, press **Add day & night** again → "Day & night updated to ...", no second
+      group, and the shadow and Time label move.
+- [ ] 19o. In Time controls, key **Day of year** and **UTC time** → the shadow sweeps across the map and the label
+      follows. Try flat, Equal Earth and globe views, and a date near a solstice (the pole stays covered).
+      Flat: with the camera over the Pacific (lon 170), land just past the date line (Alaska, Hawaii) is shaded
+      when it is night there. Equal Earth: the shadow stays inside the oval and hugs its curved left and right
+      edges, with nothing drawn outside it. Globe: the shadow's edge follows the rim of the globe; turn the camera
+      to the sunlit side and no night shows; point it at the spot where it is midnight and nearly the whole
+      disc is shaded, darkest in the middle. Set UTC time to 24 → the label reads 00:00 of the same date.
+- [ ] 19o2. Day & night: the edge of the night is a soft gradient rather than four visible bands, at zoom 2
+      and at zoom 4 (the blur keeps its width on screen as you zoom), and the Fast Blur amount on the
+      "Night blur" layers is the same number for x and y. In Time controls set **Twilight** to 0 → a single hard
+      edge and the blur amount goes to 0; set it back to 1 → soft again. Delete the four "Night blur" layers and the
+      "Night blur" helper, then press **Refresh controls** → they come back once (a second refresh adds
+      nothing) and Twilight still drives them. Check the blur looks right at a very high zoom (amount is capped at 200).
+- [ ] 19o3. Day & night: on the globe, zoom in so the soft edge of the night reaches the rim → the shading stops
+      cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. A hidden
+      "Night mask" layer sits in the Day & night group, and the group's Masks list holds it once. The Time label is
+      not clipped. Delete the mask and press **Refresh controls** → it comes back once (a second refresh adds nothing).
+- [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
+      baked."; Extract's layer list does not show them.
+- [ ] 19o4. Day & night (twilight on): no light ring just inside the globe's rim, the Equal Earth oval or the flat
+      map edge on the night side.
+- [ ] 19o5. Refresh controls on an overlay made before this version brings its drawing up to date -> the night
+      reaches the rim with no ring.
+
 ## Extract (Layers)
 
 - [ ] 13. World map with Countries → Extract: pick the Countries layer, find "France",
@@ -153,34 +185,6 @@ adding street layers.
 - [ ] 19l. Select the Callout 1 group and press Ctrl+D, then **Refresh controls** → the copy is a "Callout 2: ..."
       group with its own "Callout 2 · ..." rows in Overlay controls; dragging the copy's label moves only the copy,
       and the copy's line and dot still follow its place when the camera moves.
-
-## Layers → Day & night
-
-- [ ] 19m. Layers → Day & night: the day, month and UTC time boxes show today's date and the current time
-      (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
-      layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
-      in <map> Time controls.", and the night side is shaded.
-- [ ] 19n. Change the date and time, press **Add day & night** again → "Day & night updated to ...", no second
-      group, and the shadow and Time label move.
-- [ ] 19o. In Time controls, key **Day of year** and **UTC time** → the shadow sweeps across the map and the label
-      follows. Try flat, Equal Earth and globe views, and a date near a solstice (the pole stays covered).
-      Flat: with the camera over the Pacific (lon 170), land just past the date line (Alaska, Hawaii) is shaded
-      when it is night there. Equal Earth: the shadow stays inside the oval and hugs its curved left and right
-      edges, with nothing drawn outside it. Globe: the shadow's edge follows the rim of the globe; turn the camera
-      to the sunlit side and no night shows; point it at the spot where it is midnight and nearly the whole
-      disc is shaded, darkest in the middle. Set UTC time to 24 → the label reads 00:00 of the same date.
-- [ ] 19o2. Day & night: the edge of the night is a soft gradient rather than four visible bands, at zoom 2
-      and at zoom 4 (the blur keeps its width on screen as you zoom), and the Fast Blur amount on the
-      "Night blur" layers is the same number for x and y. In Time controls set **Twilight** to 0 → a single hard
-      edge and the blur amount goes to 0; set it back to 1 → soft again. Delete the four "Night blur" layers and the
-      "Night blur" helper, then press **Refresh controls** → they come back once (a second refresh adds
-      nothing) and Twilight still drives them. Check the blur looks right at a very high zoom (amount is capped at 200).
-- [ ] 19o3. Day & night: on the globe, zoom in so the soft edge of the night reaches the rim → the shading stops
-      cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. A hidden
-      "Night mask" layer sits in the Day & night group, and the group's Masks list holds it once. The Time label is
-      not clipped. Delete the mask and press **Refresh controls** → it comes back once (a second refresh adds nothing).
-- [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
-      baked."; Extract's layer list does not show them.
 
 ## Label → Routes
 

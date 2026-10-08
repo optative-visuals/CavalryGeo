@@ -151,7 +151,7 @@ var GeoSun = (function () {
       if (first) { path.moveTo(X, Y); first = false; } else path.lineTo(X, Y);
     }
     if (sxy < 1e-9) { // the antisolar point faces the camera (night in the middle) or the back
-      if (nz > 0) { for (k = 0; k < N; k++) put(rho * Math.cos(2 * Math.PI * k / N), rho * Math.sin(2 * Math.PI * k / N)); path.close(); }
+      if (nz > 0) { var rr = h === 0 ? over : rho; for (k = 0; k < N; k++) put(rr * Math.cos(2 * Math.PI * k / N), rr * Math.sin(2 * Math.PI * k / N)); path.close(); }
       return path;
     }
     // Terminator circle: h n + rho (cos t u + sin t v), u level with the screen (uz = 0).
