@@ -2684,6 +2684,22 @@ var GeoScene = (function () {
     layers.forEach(function (id, i) { fresh(id, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: NIGHT_DEPRESSIONS[i] })); });
     fresh(mask, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
   }
+  // Gives each opacity helper made before the lights input its lights slot (value 0; the slot is added only
+  // when missing, so night and twilight, which Controls may drive, keep their values and connections), and
+  // rewrites its script to the current one when the text differs. helpers[i] is the helper of night layer i.
+  function refreshNightHelpers(map, helpers) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, lights = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
+    helpers.forEach(function (h, i) {
+      if (!h || !layerThere(h)) return;
+      if (!api.hasAttribute(h, lights)) {
+        api.addDynamic(h, CA, "double");
+        try { api.renameAttribute(h, lights, "lights"); } catch (e) { /* display name only */ }
+        setOne(h, lights, 0);
+      }
+      var expr = E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i });
+      if (String(readExpr(h, A.CAMERA_EXPR_ATTR) || "") !== expr) setOne(h, A.CAMERA_EXPR_ATTR, expr);
+    });
+  }
   // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
   // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
   // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
@@ -2739,6 +2755,7 @@ var GeoScene = (function () {
       var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
       var mask = ensureNightMask(map, f.groupId, f.mask, track);
       refreshNightScripts(map, f.layers, mask);
+      refreshNightHelpers(map, f.helpers);
       if (made.length) {
         var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
         Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
@@ -2792,6 +2809,7 @@ var GeoScene = (function () {
         var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
         var maskId = ensureNightMask(map, found.groupId, found.mask, track);
         refreshNightScripts(map, layers, maskId);
+        refreshNightHelpers(map, helpers);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
         found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });

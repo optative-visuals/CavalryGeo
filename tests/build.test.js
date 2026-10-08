@@ -11154,6 +11154,75 @@ test("day & night blur: a Controls refresh gives an older overlay its blurs, onc
   assert.equal(api.getInConnection(later.blurHelper, dnBlurIn(context, "twilight")), V + "." + slots["dn:twilight"]);
 });
 
+// ---- Day & night: the lights input on the opacity helpers ----
+// An overlay as made before the lights input: each helper has three inputs, an older script and its own values.
+const dnOlderHelpers = (api, rec, map) => {
+  rec.helpers.forEach((h) => {
+    api._truncate(h, "array", 3);
+    api.set(h, { "array.0": 40, "array.1": 0.5, expression: "// older opacity script" });
+  });
+  api.connect(map.cameraId, "array.0", rec.helpers[0], "array.0", true);
+};
+const dnLightsText = (E, map, i) => E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i });
+
+test("day & night lights: a new overlay's opacity helpers have the lights input at 0 and the current script", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  rec.helpers.forEach((h, i) => {
+    assert.equal(api.getCustomAttributeName(h, "array.3"), "lights");
+    assert.equal(dnHelperVal(context, api, h, "lights"), 0);
+    assert.equal(api.get(h, "expression"), dnLightsText(E, map, i));
+  });
+});
+
+test("day & night lights: Refresh gives an older overlay's opacity helpers the lights input and the current script, keeping their values", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  dnOlderHelpers(api, rec, map);
+  G.prepareDayNight(map);
+  rec.helpers.forEach((h, i) => {
+    assert.equal(api.hasAttribute(h, "array.3"), true);
+    assert.equal(api.getCustomAttributeName(h, "array.3"), "lights");
+    assert.equal(api.get(h, "array.3"), 0);
+    assert.equal(api.get(h, "expression"), dnLightsText(E, map, i));
+    assert.equal(api.get(h, "array.0"), 40, "night value kept");
+    assert.equal(api.get(h, "array.1"), 0.5, "twilight value kept");
+  });
+  assert.equal(api.getInConnection(rec.helpers[0], "array.0"), map.cameraId + ".array.0", "connection kept");
+});
+
+test("day & night lights: Add day & night on an older overlay upgrades its helpers the same way", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  dnOlderHelpers(api, rec, map);
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  rec.helpers.forEach((h, i) => {
+    assert.equal(api.getCustomAttributeName(h, "array.3"), "lights");
+    assert.equal(api.get(h, "array.3"), 0);
+    assert.equal(api.get(h, "expression"), dnLightsText(E, map, i));
+    assert.equal(api.get(h, "array.0"), 40);
+  });
+});
+
+test("day & night lights: a second Refresh writes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  dnOlderHelpers(api, rec, map);
+  G.prepareDayNight(map);
+  const before = JSON.stringify(plain(api._connections));
+  let writes = 0;
+  const realSet = api.set, realAdd = api.addDynamic;
+  api.set = function () { writes++; return realSet.apply(this, arguments); };
+  api.addDynamic = function () { writes++; return realAdd.apply(this, arguments); };
+  try { G.prepareDayNight(map); } finally { api.set = realSet; api.addDynamic = realAdd; }
+  assert.equal(writes, 0);
+  assert.equal(JSON.stringify(plain(api._connections)), before);
+});
+
 test("day & night blur: deleting the overlay removes the blurs and the helper", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
