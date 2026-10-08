@@ -18,6 +18,9 @@ var GeoStyle = (function () {
   // Each layer above the window is lighter than the one below: window, then each tab's page, then its panels.
   var WINDOW_BACKGROUND = "#282828", PAGE_BACKGROUND = "#373737", PAGE_INSET = 8;
   var PANEL_BACKGROUND = "#484848", PANEL_BORDER = "#515151";
+  // Nested corners stay parallel: outer radius = inner radius + the padding between them. Cavalry's
+  // controls are about 4 px round and sit 8 px inside a panel; panels sit 8 px (PAGE_INSET) inside a page.
+  var CONTROL_RADIUS = 4, PANEL_RADIUS = CONTROL_RADIUS + 8, PAGE_RADIUS = PANEL_RADIUS + PAGE_INSET;
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {
@@ -69,7 +72,7 @@ var GeoStyle = (function () {
       out.setLayout(v);
       out.setBackgroundColor(PANEL_BACKGROUND);
       maybe(out, "setBorder", PANEL_BORDER, 1);
-      maybe(out, "setRadius", 6, 6, 6, 6);
+      maybe(out, "setRadius", PANEL_RADIUS, PANEL_RADIUS, PANEL_RADIUS, PANEL_RADIUS);
     }
     panels.push(out);
     return out;
@@ -179,7 +182,7 @@ var GeoStyle = (function () {
           inset.add(layout);
           box.setLayout(inset);
           box.setBackgroundColor(background);
-          maybe(box, "setRadius", 6, 6, 6, 6);
+          maybe(box, "setRadius", PAGE_RADIUS, PAGE_RADIUS, PAGE_RADIUS, PAGE_RADIUS);
         } else box.setLayout(layout);
         box.setHidden(boxes.length !== current);
         view.add(box);
