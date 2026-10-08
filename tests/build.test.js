@@ -12340,3 +12340,129 @@ test("night lights in Controls: a sync that removes orphaned night lights drops 
     assert.equal(api.get(h, LIGHTS), 0, "helper lights back at 0");
   });
 });
+
+// ---- Night lights in the panel (Task 6) ----
+// A world map with Day & night and satellite (EOX) day imagery already built; night lights not yet.
+function satellitePanelMap(context, api) {
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene, eox = tileSource(context);
+  const realCached = context.GeoNet.cachedTile;
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  G.buildImagery(map, eox, {}, G.planImagery(map, eox, {}));
+  context.GeoNet.cachedTile = () => null; // night tiles are not downloaded yet
+  return { map, realCached };
+}
+// Captures every tile URL the panel downloads (one-at-a-time downloads in these tests).
+function captureTileUrls(context, api) {
+  const urls = [];
+  context.GeoNet.downloadTile = (url, base) => { urls.push(url); api.writeToFile(base + ".jpg", "<tile>"); return { status: 200, path: base + ".jpg" }; };
+  return urls;
+}
+// Runs every active timer to the end, returning each status line seen.
+function runSeen(context, api) {
+  const seen = [];
+  let n = 0;
+  while (api._timers.some((t) => t.active) && n++ < 10000) {
+    api._timers.filter((t) => t.active).forEach((t) => t.callbacks.onTimeout());
+    seen.push(context.statusLabel.getText());
+  }
+  return seen;
+}
+
+test("night lights in the panel: Add day & night on a satellite map starts the NASA download", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  const urls = captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  runSeen(context, api);
+  assert.ok(urls.length > 0, "night tiles are downloaded");
+  assert.ok(urls.every((u) => u.includes("VIIRS_Black_Marble")), urls[0]);
+  runSeen(context, api);
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map \(NASA Black Marble 2016, public domain\)\./);
+  assert.equal(context.GeoScene.findNightLights(context.currentMap()).length, 1);
+});
+
+test("night lights in the panel: Add day & night on a vector map starts no download", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const urls = captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  assert.equal(urls.length, 0);
+  assert.equal(api._timers.some((t) => t.active), false);
+});
+
+test("night lights in the panel: a completed day build with Day & night chains into the night download", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.GeoNet.cachedTile = () => null;
+  context.GeoScene.addDayNight(context.currentMap(), { dayOfYear: 80, utcTime: 12 });
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  const seen = runSeen(context, api);
+  assert.ok(seen.some((s) => /^Downloading night lights/.test(s)), seen.join(" | "));
+  assert.ok(seen.some((s) => /^Imagery built: .* Adding night lights…$/.test(s)), seen.join(" | "));
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map \(NASA Black Marble 2016, public domain\)\./);
+  assert.equal(context.GeoScene.findNightLights(context.currentMap()).length, 1);
+});
+
+test("night lights in the panel: Cancel during the night download says no night lights were built", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  context.cancelImageryBtn.onClick();
+  assert.equal(api._timers.some((t) => t.active), false);
+  assert.equal(context.statusLabel.getText(), "Cancelled — no night lights were built.");
+  assert.equal(context.GeoScene.findNightLights(context.currentMap()).length, 0);
+});
+
+test("night lights in the panel: Cancel during the night build removes them and says no night lights were built", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  oneUnitPerTick(context);
+  context.addDayNightBtn.onClick();
+  const timer = api._timers.filter((t) => t.active)[0];
+  // Every download, then one build step, so the build is part-way.
+  for (let i = 0; i < 200 && context.statusLabel.getText().indexOf("Building night lights") < 0; i++) timer.callbacks.onTimeout();
+  assert.match(context.statusLabel.getText(), /^Building night lights/);
+  context.cancelImageryBtn.onClick();
+  runTimers(api);
+  assert.equal(context.statusLabel.getText(), "Cancelled — no night lights were built.");
+  assert.equal(context.GeoScene.findNightLights(context.currentMap()).length, 0);
+});
+
+test("night lights in the panel: a refused night download says so and offers Build imagery or Refresh controls", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  context.GeoNet.downloadTile = () => ({ status: 403 });
+  context.addDayNightBtn.onClick();
+  runSeen(context, api);
+  assert.match(context.statusLabel.getText(), /^Night lights didn't download: NASA refused the request \(HTTP 403\)/);
+  assert.match(context.statusLabel.getText(), / Build imagery or Refresh controls tries again\.$/);
+});
+
+test("night lights in the panel: Refresh controls on a map that needs night lights starts them", () => {
+  const { context, api } = buildSandbox();
+  const { map } = satellitePanelMap(context, api);
+  context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const urls = captureTileUrls(context, api);
+  context.refreshControlsBtn.onClick();
+  runSeen(context, api);
+  assert.ok(urls.length > 0 && urls.every((u) => u.includes("VIIRS_Black_Marble")));
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map \(NASA Black Marble 2016, public domain\)\./);
+});
+
+test("night lights in the panel: the imagery credit includes the NASA credit when night lights exist", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  context.GeoNet.cachedTile = () => null;
+  captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  runTimers(api);
+  context.imageryAttrBtn.onClick();
+  assert.match(context.statusLabel.getText(), /NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\)/);
+});

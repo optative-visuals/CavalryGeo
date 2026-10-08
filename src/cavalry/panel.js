@@ -1028,7 +1028,9 @@ refreshControlsBtn.onClick = guardAction(function () {
   var names = [map.name + " Map controls"];
   [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"], ["time", "Time"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
   var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-  say("Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".");
+  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".";
+  say(msg);
+  if (r.nightLightsNeeded) startNightLights(map, msg);
 });
 
 // Layers has three pages: Add (the layer categories), Overlays (day and night, furniture) and
@@ -1267,12 +1269,18 @@ addDayNightBtn.onClick = guardAction(function () {
   var day = GeoSun.dayOfYear(dayNightDayField.getValue(), dayNightMonthPicker.getValue() + 1), time = Number(dayNightTimeField.getValue());
   var r = GeoScene.addDayNight(map, { dayOfYear: day, utcTime: time, label: !!timeLabelCheck.getValue() });
   var when = dayNightWhen(day, time);
-  if (r.created) say("Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map));
+  var message;
+  if (r.created) message = "Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map);
   else {
     var note = r.restored ? " Its missing night layers were made again." : "";
     if (r.kept && r.kept.length) note += " It kept your animated " + r.kept.join(" and ") + ".";
-    say("Day & night updated to " + when + "." + note + syncControls(map));
+    message = "Day & night updated to " + when + "." + note + syncControls(map);
   }
+  say(message);
+  // Night lights need Day & night over satellite imagery: added when wanted and missing, removed when no longer wanted.
+  var st = GeoScene.nightLightsStatus(map);
+  if (st.wanted && !st.night.length) startNightLights(map, message);
+  else if (st.orphaned) GeoScene.removeNightLights(map);
 });
 
 // ---- Routes (Label section) -------------------------------------------------
@@ -1652,7 +1660,7 @@ var imagerySettings = GeoNet.loadSettings();
 // few layers it added, so steps of ~1 s of work keep pauses short without that fixed
 // cost dominating (80 ms steps built only ~0.6 tiles/s).
 var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1000;
-var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null };
+var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false };
 var sourcePicker = new ui.DropDown();
 GeoSources.list().forEach(function (s) { sourcePicker.addEntry(s.label); });
 var licenceLabel = GeoStyle.note("");
@@ -1724,6 +1732,7 @@ function stopImageryTimer() {
   imageryState.job = null;
   imageryState.tick = null;
   imageryState.batch = null;
+  imageryState.night = false;
 }
 function itemNoun(plan) { return plan.mode === "images" ? "images" : "tiles"; }
 function ImageryTimerCallbacks() {
@@ -1762,31 +1771,69 @@ stylePicker.onValueChanged = guard(function () {
 
 // Builds in timer steps so Cavalry stays responsive: the progress bar counts tiles,
 // then the old imagery for this source is removed, a few layers per step.
+// Night lights are the same build with plan.night: their status lines say "night lights", and they
+// follow a day build (see startNightLights). jobWord names the job in the cancel and cleanup lines.
+function jobWord(plan) { return plan.night ? "night lights" : "imagery"; }
+// The status line of a download step: night lights say so instead of tiles or images.
+function downloadLine(plan, count, total) {
+  return plan.night ? "Downloading night lights: " + count + " / " + total + "…" : "Downloading " + itemNoun(plan) + ": " + count + " / " + total + "…";
+}
+// A night download that fails says so, and that Build imagery or Refresh controls tries again.
+function failLine(plan, text) {
+  return plan.night ? "Night lights didn't download: " + text + " Build imagery or Refresh controls tries again." : text;
+}
+// Night lights start after Day & night (over satellite imagery) when none exist yet. A small public-domain
+// download, so no dialog and no plan signature. While another imagery job runs, they wait for Refresh controls.
+function startNightLights(map, lead) {
+  if (imageryState.timer) {
+    say(lead + " Night lights will be added when the current imagery job ends — press Refresh controls then.");
+    return;
+  }
+  var plan = GeoScene.planNightLights(map);
+  plan.sig = null;
+  startImageryDownload(map, GeoSources.night(), {}, plan);
+}
+
 function startImageryBuild(map, src, opts, plan, missing, failed) {
   var job = GeoScene.beginImageryBuild(map, src, opts, plan);
   imageryState.job = job; // from here on, Cancel cancels the build rather than a download
   imageryProgress.setValue(0);
-  say("Building imagery…");
+  say(plan.night ? "Building night lights…" : "Building imagery…");
   runImageryTimer(BUILD_TICK_MS, function () {
     var r = job.step(BUILD_BUDGET_MS);
     imageryProgress.setMaximum(Math.max(1, r.total));
     imageryProgress.setValue(r.built);
     if (!r.done) {
-      if (r.phase === "discard") say("Cancelling — removing the partly built imagery…");
-      else if (r.phase === "cleanup") say("Removing the old imagery…");
-      else say("Building imagery: " + r.built + " / " + r.total + " " + itemNoun(plan) + "…");
+      if (r.phase === "discard") say("Cancelling — removing the partly built " + jobWord(plan) + "…");
+      else if (r.phase === "cleanup") say("Removing the old " + jobWord(plan) + "…");
+      else say((plan.night ? "Building night lights: " : "Building imagery: ") + r.built + " / " + r.total + " " + itemNoun(plan) + "…");
       return;
     }
     stopImageryTimer();
     resetImageryPlan();
-    if (r.cancelled) { say("Cancelled — no imagery was built."); return; }
+    if (r.cancelled) { say(plan.night ? "Cancelled — no night lights were built." : "Cancelled — no imagery was built."); return; }
     var b = r.result;
+    if (plan.night) {
+      var nightNote = syncControls(map);
+      say("Night lights added to " + map.name + " (NASA Black Marble 2016, public domain)." +
+        (plan.zoomCapped ? " Night lights use zoom 8, NASA's most detailed, so close-ups are softer." : "") +
+        (failed ? " " + failed + " tile(s) didn't download. Build imagery or Refresh controls tries again." : "") + nightNote);
+      return;
+    }
+    // A street style (not satellite) makes night lights orphaned: they go. Satellite with Day & night and none yet: they follow.
+    var st = GeoScene.nightLightsStatus(map), gone = "";
+    if (st.orphaned) { GeoScene.removeNightLights(map); gone = " Night lights removed (they need satellite imagery)."; }
     var note = syncControls(map);
-    say("Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
+    var text = "Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
-      " Credit: " + GeoSources.attribution(src, opts) + note);
+      " Credit: " + GeoSources.attribution(src, opts) + note + gone;
+    if (st.wanted && !st.night.length) {
+      var lead = text + " Adding night lights…";
+      say(lead);
+      startNightLights(map, lead);
+    } else say(text);
   });
 }
 
@@ -1797,6 +1844,7 @@ function refusedMessage(src, code) {
 }
 
 function startImageryDownload(map, src, opts, plan) {
+  imageryState.night = !!plan.night;
   var total = plan.missing.length;
   imageryProgress.setMaximum(Math.max(1, total));
   imageryProgress.setValue(0);
@@ -1812,11 +1860,11 @@ function startImageryDownload(map, src, opts, plan) {
 }
 
 function startBackgroundDownload(map, src, opts, plan, jobs) {
-  var noun = itemNoun(plan), byPath = {}, missing = 0, failed = 0, seen = 0, unreached = 0;
+  var byPath = {}, missing = 0, failed = 0, seen = 0, unreached = 0;
   jobs.forEach(function (j) { byPath[j.path] = j; });
   var batch = GeoFetch.start(jobs.map(function (j) { return { url: j.url, path: j.path }; }));
   imageryState.batch = batch;
-  say("Downloading " + noun + ": 0 / " + jobs.length + "…");
+  say(downloadLine(plan, 0, jobs.length));
   runImageryTimer(POLL_MS, function () {
     var r = GeoFetch.poll(batch), refused = 0;
     // Every result of this poll is handled (bad files deleted) before a 401/403 stops the
@@ -1836,18 +1884,19 @@ function startBackgroundDownload(map, src, opts, plan, jobs) {
     if (refused) {
       GeoFetch.finish(batch); // reported files leave the in-flight list; the rest stay until curl reports them
       stopImageryTimer(); resetImageryPlan();
-      say(refusedMessage(src, refused));
+      say(failLine(plan, refusedMessage(src, refused)));
       return;
     }
     imageryProgress.setValue(r.count);
-    say("Downloading " + noun + ": " + r.count + " / " + jobs.length + "…");
+    say(downloadLine(plan, r.count, jobs.length));
     // No line at all after FIRST_LINE_MS, or nothing but 000 (no connection made): curl
     // isn't working here, so the rest of the session downloads one file at a time.
     if (r.silent || ((r.done || r.stalled) && seen > 0 && unreached === seen)) {
       GeoFetch.disable();
       GeoFetch.abandon(batch);
       stopImageryTimer(); resetImageryPlan();
-      say("Background downloads aren't working on this computer — press Build imagery to plan again with map tiles.");
+      say(plan.night ? "Night lights didn't download: background downloads aren't working on this computer. Build imagery or Refresh controls tries again."
+        : "Background downloads aren't working on this computer — press Build imagery to plan again with map tiles.");
       return;
     }
     if (r.done || r.stalled) {
@@ -1861,18 +1910,19 @@ function startBackgroundDownload(map, src, opts, plan, jobs) {
 
 // One download per timer tick, each blocking Cavalry briefly; reads the Content-Type.
 function startBlockingDownload(map, src, opts, plan, jobs) {
-  var noun = itemNoun(plan), queue = jobs.slice(), total = queue.length, done = 0, missing = 0, failed = 0;
+  var queue = jobs.slice(), total = queue.length, done = 0, missing = 0, failed = 0;
   runImageryTimer(DOWNLOAD_GAP_MS, function () {
     var j = queue.shift();
     var r = GeoNet.downloadTile(j.url, j.base);
     if (r.status === 401 || r.status === 403) {
       stopImageryTimer(); resetImageryPlan();
-      say(refusedMessage(src, r.status));
+      say(failLine(plan, refusedMessage(src, r.status)));
       return;
     }
     if (r.unsupported) {
       stopImageryTimer(); resetImageryPlan();
-      say("Cavalry can't load this image type (" + r.unsupported + ") — choose a PNG or JPG style or link.");
+      say(plan.night ? failLine(plan, "Cavalry can't load this image type (" + r.unsupported + ").")
+        : "Cavalry can't load this image type (" + r.unsupported + ") — choose a PNG or JPG style or link.");
       return;
     }
     if (r.status === 404 || r.status === 204) { GeoNet.markEmptyTile(j.base); missing++; }
@@ -1881,7 +1931,7 @@ function startBlockingDownload(map, src, opts, plan, jobs) {
     if (r.path) GeoFetch.release([r.path]);
     done++;
     imageryProgress.setValue(done);
-    say("Downloading " + noun + ": " + done + " / " + total + "…");
+    say(downloadLine(plan, done, total));
     if (!queue.length) startImageryBuild(map, src, opts, plan, missing, failed);
   });
 }
@@ -1939,10 +1989,11 @@ buildImageryBtn.onClick = guardAction(function () {
 
 cancelImageryBtn.onClick = guardAction(function () {
   disarmClearTiles();
+  var night = imageryState.night, what = night ? "night lights" : "imagery";
   // During the build the timer keeps running: the job deletes the partly built imagery
   // in steps (or, once the new imagery is complete, finishes removing the old one).
   if (imageryState.job) {
-    say(imageryState.job.cancel() ? "Cancelling — removing the partly built imagery…" : "The new imagery is already built — finishing removing the old imagery…");
+    say(imageryState.job.cancel() ? "Cancelling — removing the partly built " + what + "…" : "The new " + what + " is already built — finishing removing the old " + what + "…");
     return;
   }
   if (!imageryState.timer) throw new Error("Nothing is downloading or building.");
@@ -1950,21 +2001,24 @@ cancelImageryBtn.onClick = guardAction(function () {
   // GeoFetch.finish) so the next plan treats them as missing until a batch reports them.
   if (imageryState.batch) {
     stopImageryTimer(); resetImageryPlan();
-    say("Download cancelled. Files still downloading in the background are kept; nothing was built.");
+    say(night ? "Cancelled — no night lights were built." : "Download cancelled. Files still downloading in the background are kept; nothing was built.");
     followActiveComp(false);
     return;
   }
   stopImageryTimer();
   resetImageryPlan();
-  say("Download cancelled. Downloaded tiles are kept; nothing was built.");
+  say(night ? "Cancelled — no night lights were built." : "Download cancelled. Downloaded tiles are kept; nothing was built.");
   followActiveComp(false);
 }, false, true);
 
+
 imageryAttrBtn.onClick = guardAction(function () {
   disarmClearTiles();
-  var src = currentSource(), text = GeoSources.attribution(src, sourceOptions(src));
+  var src = currentSource(), map = currentMap(), text = GeoSources.attribution(src, sourceOptions(src));
+  // Night lights, when the map has any, are credited too.
+  if (GeoScene.findNightLights(map).length) text = [text, GeoSources.night().attribution].filter(Boolean).join(" · ");
   if (!text) throw new Error("Type a credit for the custom tiles first.");
-  GeoScene.createImageryCredit(currentMap(), text);
+  GeoScene.createImageryCredit(map, text);
   say("Added the imagery credit: " + text);
 });
 
