@@ -1676,6 +1676,7 @@ function ImageryTimerCallbacks() {
       stopImageryTimer(); resetImageryPlan();
       say("Error: " + (e && e.message ? e.message : e));
     }
+    if (!imageryState.timer) followActiveComp(false); // the job just ended: catch up with a comp switched to meanwhile
   };
 }
 // Points the imagery timer at a new tick function and interval, creating it if needed,
@@ -1894,11 +1895,13 @@ cancelImageryBtn.onClick = guard(function () {
   if (imageryState.batch) {
     stopImageryTimer(); resetImageryPlan();
     say("Download cancelled. Files still downloading in the background are kept; nothing was built.");
+    followActiveComp(false);
     return;
   }
   stopImageryTimer();
   resetImageryPlan();
   say("Download cancelled. Downloaded tiles are kept; nothing was built.");
+  followActiveComp(false);
 });
 
 imageryAttrBtn.onClick = guard(function () {
@@ -2085,6 +2088,45 @@ function showSection(name) {
   if (name === "Map" || target[0] === "Label") { try { refreshPreviews(); } catch (e) { /* cosmetic */ } }
 }
 
+// ---- Following the active composition ------------------------------------------------
+// The panel shows the maps of the composition you are working in, so an edit never lands on a map in
+// another comp. Cavalry calls onCompChanged when the active comp changes and onSceneChanged when a scene
+// is loaded or made new. Imagery builds switch comps themselves (bent imagery is built in its own
+// "Imagery source: ..." comp, every timer step), so those switches are ignored: while a download or
+// build runs, and whenever the active comp is such a source comp. followedComp is the comp the panel
+// last showed; once a job ends, a different active comp is caught up with.
+var followedComp = null;
+function activeCompId() {
+  try { return api.getActiveComp(); } catch (e) { return null; }
+}
+function isImagerySourceComp(id) {
+  try { return String(api.getNiceName(id)).indexOf("Imagery source: ") === 0; } catch (e) { return false; }
+}
+function followActiveComp(sceneChanged) {
+  try {
+    if (sceneChanged) followedComp = null; // a new scene may reuse the old comp's id
+    if (imageryState.timer || imageryState.job) return; // a build is switching comps: catch up when it ends
+    var now = activeCompId();
+    if (now === null || isImagerySourceComp(now)) return;
+    if (now === followedComp) return;
+    followedComp = now;
+    var picked = null;
+    try { if (!newMapSelected()) picked = currentMap().cameraId; } catch (e) { picked = null; }
+    refreshMaps(picked); // keeps the picked map when it is in this comp, else the first map or New map
+    if (newMapSelected()) clearSourceLayers(); else refreshSourceLayers();
+    resetImageryPlan();
+    var name = "";
+    try { name = String(api.getNiceName(now) || ""); } catch (e) { name = ""; }
+    say(name ? "Showing maps in " + name + "." : "Showing maps in this composition.");
+  } catch (e) {
+    console.log("[CavalryGeo] Following the composition failed: " + (e && e.message ? e.message : e));
+  }
+}
+function CompFollower() {
+  this.onCompChanged = function () { followActiveComp(false); };
+  this.onSceneChanged = function () { followActiveComp(true); };
+}
+
 function buildUi() {
   ui.setTitle("Cavalry Geo");
   if (typeof ui.setBackgroundColor === "function") ui.setBackgroundColor(GeoStyle.WINDOW_BACKGROUND);
@@ -2122,6 +2164,8 @@ function buildUi() {
   ui.onResize = fitPreview;
   fitPreview();
   guard(function () { refreshMaps(); })();
+  followedComp = activeCompId();
+  try { if (typeof ui.addCallbackObject === "function") ui.addCallbackObject(new CompFollower()); } catch (e) { /* an older Cavalry: the Refresh button still works */ }
   guard(function () { previewStyle(); previewFollowPicked(); previewShowMap(); })();
   try { GeoUpdateCheck.run(say); } catch (e) { /* the update check never gets in the way */ }
 }

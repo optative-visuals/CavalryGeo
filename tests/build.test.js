@@ -435,6 +435,8 @@ function makeFakeUi() {
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
+    // Like Cavalry: objects with onCompChanged / onSceneChanged (and more) are called back by the app.
+    addCallbackObject: function (o) { (this._callbackObjects = this._callbackObjects || []).push(o); },
     setBackgroundColor: function (c) { this._background = c; },
     _root: function () { return root; }
   };
@@ -11750,4 +11752,134 @@ test("Imagery pickers: a throwing source change is caught, and refilling the sty
   assert.doesNotThrow(() => context.sourcePicker.onValueChanged());
   assert.equal(context.statusLabel.getText(), "Error: boom");
   assert.doesNotThrow(() => { context.GeoSources.list = () => { throw new Error("bad"); }; sp.onValueChanged(); });
+});
+
+// ---- The panel follows the active composition -------------------------------------------
+const CAM0 = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+function follower(ui) { assert.equal(ui._callbackObjects.length, 1, "one callback object is registered"); return ui._callbackObjects[0]; }
+function pickerNames(context) { return plain(context.mapPicker._entries); }
+// A second composition holding one map called `name` (it stays the active comp, like after a comp switch).
+function otherComp(context, api, compName, mapName) {
+  const comp = api.createComp(compName);
+  if (mapName) context.GeoScene.createMap(mapName, CAM0);
+  return comp;
+}
+
+test("comp follow: the panel registers one callback object (once) when Cavalry has addCallbackObject", () => {
+  const { ui } = buildSandbox();
+  assert.equal(typeof follower(ui).onCompChanged, "function");
+  assert.equal(typeof follower(ui).onSceneChanged, "function");
+  const api = makeFakeApi(), ui2 = makeFakeUi();
+  delete ui2.addCallbackObject;
+  assert.doesNotThrow(() => vm.runInContext(buildPanel(), vm.createContext({ api: api, ui: ui2, cavalry: makeFakeCavalry(), console: console })), "an older Cavalry without it still opens");
+});
+
+test("comp follow: switching comp lists that comp's maps, and switching back lists the first comp's again", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Other", "Elsewhere");
+  assert.deepEqual(pickerNames(context), ["Map", "New map"], "nothing changes until Cavalry says so");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"]);
+  assert.equal(context.currentMap().name, "Elsewhere");
+  assert.equal(context.statusLabel.getText(), "Showing maps in Other.");
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  assert.equal(context.currentMap().name, "Map");
+});
+
+test("comp follow: a comp with no maps shows New map and an empty Extract list; the Extract layers follow the comp", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.createMapLayer(map, "Map: Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  context.refreshLayersBtn.onClick();
+  assert.equal(context.layerPicker._entries.length, 1);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Empty", null);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["New map"]);
+  assert.equal(context.newMapSelected(), true);
+  assert.equal(context.layerPicker._entries.length, 0, "no stale layers of another comp's map");
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.equal(context.layerPicker._entries.length, 1);
+});
+
+test("comp follow: the picked map stays picked when it is still in the comp (a scene refresh), else the first map", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  context.makeMap("Second", context.worldViewCamera(0));
+  assert.equal(context.currentMap().name, "Second");
+  follower(ui).onSceneChanged();
+  assert.equal(context.currentMap().name, "Second", "kept");
+  assert.equal(context.statusLabel.getText(), "Showing maps in " + api.getNiceName(api.getActiveComp()) + ".");
+  otherComp(context, api, "Other", "Elsewhere");
+  follower(ui).onCompChanged();
+  assert.equal(context.currentMap().name, "Elsewhere", "not in the new comp: its first map");
+});
+
+test("comp follow: the same comp again does nothing; onSceneChanged always refreshes", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  let n = 0;
+  const real = context.refreshMaps;
+  context.refreshMaps = function () { n++; return real.apply(this, arguments); };
+  follower(ui).onCompChanged();
+  assert.equal(n, 0, "same comp");
+  follower(ui).onSceneChanged();
+  assert.equal(n, 1, "a loaded scene may hold different maps in a comp with the same id");
+});
+
+test("comp follow: comp switches made by an imagery build are ignored, and the panel catches up once the job ends", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  const first = api.getActiveComp();
+  // A job is running: its timer and tick are set, as in a real download or build.
+  const fakeTimer = { stop() {} };
+  context.imageryState.timer = fakeTimer;
+  context.imageryState.job = { cancel() { return true; } };
+  context.statusLabel.setText("untouched");
+  otherComp(context, api, "Another comp", "Elsewhere");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"], "nothing refreshed during the job");
+  assert.equal(context.statusLabel.getText(), "untouched");
+  // The job ends on a timer tick while the user is in the other comp: one refresh then.
+  context.imageryState.tick = function () { context.stopImageryTimer(); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"]);
+  // A job that ends with the user back in the comp it started in refreshes nothing.
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  let n = 0;
+  const real = context.refreshMaps;
+  context.refreshMaps = function () { n++; return real.apply(this, arguments); };
+  context.imageryState.timer = fakeTimer; context.imageryState.job = {};
+  context.imageryState.tick = function () { context.stopImageryTimer(); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.equal(n, 0);
+});
+
+test("comp follow: an Imagery source comp is never shown, even with no job running", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Imagery source: EOX · Map", "Not a map you work in");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+});
+
+test("comp follow: a failure inside the callback never escapes", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  otherComp(context, api, "Other", "Elsewhere");
+  context.refreshMaps = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => follower(ui).onCompChanged());
+  assert.doesNotThrow(() => follower(ui).onSceneChanged());
 });

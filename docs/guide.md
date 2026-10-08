@@ -34,6 +34,7 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   called **Map 1**, **Map 2** and so on: the lowest number not already used by another map. Maps you already have are never renamed. The name and projection fields only show
   while **New map** is picked. New maps start with **Countries** and **Coastlines** (and the
   **Ocean** layer) already added; add more on **Layers**.
+- **Following your composition:** the panel shows the maps of the composition you are working in. Switch to another composition (or open another scene) and the Map list, previews and Extract list follow, so an edit never lands on a map in a different composition. While imagery is being built the panel stays where it is.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
   like any layer. The default colours match the preview.
 - **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
