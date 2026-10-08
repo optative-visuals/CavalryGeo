@@ -7,7 +7,7 @@ var GeoRuntime = (function () {
 
   function buildPath(enc, cam, detail, opts, PathCtor) {
     var path = new PathCtor();
-    var project = GeoProjection.makeProjector(cam);
+    var project = (opts && opts.nearest) ? nearestProjector(cam) : GeoProjection.makeProjector(cam);
     var d = Math.max(0, Math.min(100, Number(detail) || 0));
     var count = Math.ceil(d / 100 * enc.f.length);
     var kind = enc.kind;
@@ -120,11 +120,24 @@ var GeoRuntime = (function () {
     return out;
   }
 
+  // A projector that, on flat maps, folds each longitude onto the copy nearest the camera first.
+  function nearestProjector(cam) {
+    var project = GeoProjection.makeProjector(cam), flat = Math.round(cam.projection || 0) === 0;
+    return function (lon, lat, out) { return project(flat ? GeoProjection.nearestLon(lon, cam.lon) : lon, lat, out); };
+  }
+
+  // Single things (pins, place labels, callouts): on flat maps the copy nearest the camera; globe and Equal Earth as projectPoint.
+  function projectNearest(lon, lat, cam) {
+    var out = [0, 0];
+    nearestProjector(cam)(lon, lat, out);
+    return out;
+  }
+
   // False only when the point is on the far side of an orthographic globe.
   function pointVisible(lon, lat, cam) {
     return GeoProjection.makeProjector(cam)(lon, lat, [0, 0]);
   }
 
-  return { Q: Q, buildPath: buildPath, projectPoint: projectPoint, pointVisible: pointVisible };
+  return { Q: Q, buildPath: buildPath, projectPoint: projectPoint, projectNearest: projectNearest, pointVisible: pointVisible };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoRuntime;

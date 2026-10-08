@@ -9517,9 +9517,31 @@ const coRec = (api, g) => plain(api.getUserDataKey(g, "geoCallout"));
 const near = (a, b) => Math.abs(a - b) < 1e-6;
 // Where a new callout's label starts: the place's screen point + (160, 100), clamped inside the comp (1920 x 1080, 40 px margin).
 function labelStart(context, map, lon, lat) {
-  const p = plain(context.GeoRuntime.projectPoint(lon, lat, context.GeoScene.readCamera(map.cameraId)));
+  const p = plain(context.GeoRuntime.projectNearest(lon, lat, context.GeoScene.readCamera(map.cameraId)));
   return [Math.max(-960 + 40, Math.min(960 - 240, p[0] + 160)), Math.max(-540 + 40, Math.min(540 - 40, p[1] + 100))];
 }
+
+test("nearest copy: pins, labels and callout places use projectNearest; route stop drivers keep projectPoint", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = calloutMap(context);
+  const pin = G.addPin(map, "Here", 179.5, 0);
+  const text = G.createLabel(map, "There", 179.5, 0);
+  G.createCallout(map, { lon: 179.5, lat: 0 }, "Callout");
+  G.createRoute(map, [{ name: "A", lon: 179.5, lat: 0 }, { name: "B", lon: -170, lat: 10 }], { lift: 30, pins: false, labels: false });
+  const layers = api.getCompLayers(false);
+  const categoryOf = (id) => { const m = context.GeoExpression.readTag(String(api.get(id, "expression") || api.get(id, "generator.expression") || ""), "GEO_META"); return m && m.category; };
+  const seen = {};
+  layers.forEach((id) => {
+    const expr = String(api.get(id, "expression") || api.get(id, "generator.expression") || "");
+    const cat = categoryOf(id);
+    if (!cat) return;
+    seen[cat] = true;
+    if (["pin", "label", "labelDriver", "calloutPlace"].indexOf(cat) >= 0) assert.ok(expr.includes("GeoRuntime.projectNearest(") || expr.includes("nearest: true"), cat + " should use the nearest copy");
+    if (cat === "stopDriver") { assert.ok(expr.includes("GeoRuntime.projectPoint(") && !expr.includes("GeoRuntime.projectNearest("), "route stops are not part of this task"); }
+  });
+  ["pin", "labelDriver", "calloutPlace", "stopDriver"].forEach((c) => assert.ok(seen[c], "a " + c + " layer was made"));
+  assert.ok(pin && text);
+});
 
 test("callouts: createCallout makes a numbered group with every member named and parented", () => {
   const { context, api } = buildSandbox();
@@ -9585,7 +9607,7 @@ test("callouts: the size utility reads the label; the place and fade drivers fol
   assert.equal(api.get(rec.place, "array.5"), 2.35); assert.equal(api.get(rec.place, "array.6"), 48.85);
   assert.equal(api.getInConnection(rec.fade, "array.5"), rec.place + ".array.5", "the fade reads lon / lat from the place driver");
   assert.equal(api.getInConnection(rec.fade, "array.6"), rec.place + ".array.6");
-  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN));
+  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN, { nearest: true }));
   assert.equal(api.get(rec.fade, "expression"), E.labelVisibilityExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutFade" }));
   assert.equal(api.getInConnection(rec.dot, "position"), rec.place + ".id");
   [rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "opacity"), rec.fade + ".id"));

@@ -165,3 +165,48 @@ test("route, flat: with rotation 90°, the lifted midpoint equals the rotation-0
   assert.ok(Math.abs(mid90[1] - rx) < 1e-6);
   assert.ok(Math.abs(mid90[2] - ry) < 1e-6);
 });
+
+test("projectNearest on flat maps: a pin across the date line lands on the copy nearest the camera", () => {
+  [179.9, 180, -180, -179.9].forEach((camLon) => {
+    const near = R.projectNearest(179.5, 0, cam({ lon: camLon }));
+    const direct = R.projectPoint(P.nearestLon(179.5, camLon), 0, cam({ lon: camLon }));
+    assert.deepEqual(near, direct);
+    assert.ok(Math.abs(near[0]) <= 128 + 1e-6, `camera ${camLon}: x ${near[0]} is a whole world away`);
+  });
+});
+
+test("projectNearest: a pin moves continuously as the camera pans across the date line", () => {
+  let prev = null, worst = 0;
+  for (let c = 178; c <= 182.0001; c += 0.01) {
+    const camLon = ((c + 540) % 360) - 180; // -180 .. 180
+    const x = R.projectNearest(179.5, 0, cam({ lon: camLon, zoom: 0 }))[0];
+    if (prev !== null) worst = Math.max(worst, Math.abs(x - prev));
+    prev = x;
+  }
+  assert.ok(worst < 1, `largest step ${worst} px is a screen jump`);
+});
+
+test("projectNearest on a rotated flat camera matches the projector of the folded longitude", () => {
+  const c = cam({ lon: 179.9, lat: 10, zoom: 2, rotation: 30 });
+  const expect = [0, 0];
+  P.makeProjector(c)(P.nearestLon(-179.5, c.lon), 20, expect);
+  const got = R.projectNearest(-179.5, 20, c);
+  assert.ok(Math.abs(got[0] - expect[0]) < 1e-9 && Math.abs(got[1] - expect[1]) < 1e-9);
+});
+
+test("projectNearest on globe and Equal Earth equals projectPoint", () => {
+  [1, 2].forEach((projection) => {
+    [[179.5, 10], [-170, -30], [10, 0]].forEach(([lon, lat]) => {
+      const c = cam({ lon: 179.9, lat: 5, zoom: 1, projection });
+      assert.deepEqual(R.projectNearest(lon, lat, c), R.projectPoint(lon, lat, c));
+    });
+  });
+});
+
+test("buildPath with nearest: a single point across the date line is drawn on the nearest copy", () => {
+  const enc = C.encodeLayer({ kind: "point", features: [{ name: "p", rank: 1, rings: [[[179.5, 0]]] }] });
+  const ops = R.buildPath(enc, cam({ lon: -179.9 }), 100, { pointRadius: 0, nearest: true }, FakePath).ops;
+  assert.ok(Math.abs(ops[0][1]) <= 128 + 1e-6, `x ${ops[0][1]} is a whole world away`);
+  const plainOps = R.buildPath(enc, cam({ lon: -179.9 }), 100, { pointRadius: 0 }, FakePath).ops;
+  assert.ok(Math.abs(plainOps[0][1]) > 128, "without nearest the point is still drawn on the far copy");
+});

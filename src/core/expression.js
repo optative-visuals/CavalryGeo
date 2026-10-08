@@ -85,7 +85,8 @@ var GeoExpression = (function () {
 
   function mapLayerExpression(runtimeSrc, enc, meta, opts) {
     var ellipseScale = Number(opts && opts.ellipseScale != null ? opts.ellipseScale : 1);
-    return layerExpression(MAP_INPUTS, runtimeSrc, enc, meta, "{pointRadius: _i6, ellipseScale: " + ellipseScale + "}");
+    var nearest = opts && opts.nearest === true ? ", nearest: true" : "";
+    return layerExpression(MAP_INPUTS, runtimeSrc, enc, meta, "{pointRadius: _i6, ellipseScale: " + ellipseScale + nearest + "}");
   }
 
   function routeLayerExpression(runtimeSrc, enc, meta, opts) {
@@ -130,11 +131,13 @@ var GeoExpression = (function () {
     return writeTag("GEO_CAMERA", meta) + "\n" + (body || "0;") + "\n";
   }
 
-  function labelDriverExpression(runtimeSrc, meta, returnForm) {
+  // opts.nearest: a single thing (pin, place label, callout) projects onto the copy nearest the camera.
+  function labelDriverExpression(runtimeSrc, meta, returnForm, opts) {
     var ret = RETURN_FORMS[returnForm];
     if (!ret) throw new Error("Unknown driver return form: " + returnForm);
+    var fn = opts && opts.nearest === true ? "projectNearest" : "projectPoint";
     return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(LABEL_INPUTS) +
-      "var _p = GeoRuntime.projectPoint(_i5, _i6, " + CAM + ");\n" + ret + "\n";
+      "var _p = GeoRuntime." + fn + "(_i5, _i6, " + CAM + ");\n" + ret + "\n";
   }
 
   // Drives a label's opacity: 100 on screen, 0 when its place is behind the globe.

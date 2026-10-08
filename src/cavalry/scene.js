@@ -125,10 +125,11 @@ var GeoScene = (function () {
     }
   }
 
-  function createMapLayer(map, name, enc, meta, style, inputValues, parentId) {
+  // nearest: single things (pins, text labels) draw on the copy of the world nearest the camera.
+  function createMapLayer(map, name, enc, meta, style, inputValues, parentId, nearest) {
     var id = api.create(A.MAP_LAYER_TYPE, name);
     addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.MAP_INPUTS, inputValues);
-    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE }));
+    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: nearest === true }));
     connectCamera(map.cameraId, id, A.MAP_ARRAY_ATTR);
     applyStyle(id, style);
     api.parent(id, parentId || map.groupId);
@@ -155,7 +156,7 @@ var GeoScene = (function () {
 
   function addPin(map, name, lon, lat, parentId) {
     var enc = GeoCodec.encodeLayer({ kind: "point", features: [{ name: name, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId);
+    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, true);
   }
 
   function createRouteLeg(map, parentId, name, enc, lift) {
@@ -729,7 +730,7 @@ var GeoScene = (function () {
       applyStyle(textId, layerStyle(map, "label"));
       var driverId = api.create(A.CAMERA_LAYER_TYPE, text + " position");
       addInputs(driverId, A.CAMERA_ARRAY_ATTR, GeoExpression.LABEL_INPUTS, { labelLon: lon, labelLat: lat });
-      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN));
+      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN, { nearest: true }));
       connectCamera(map.cameraId, driverId, A.CAMERA_ARRAY_ATTR);
       api.connect(driverId, A.DRIVER_OUTPUT_ATTR, textId, "position", true);
       // A second helper sets the text's opacity: 0 when its place is behind the globe.
@@ -747,7 +748,7 @@ var GeoScene = (function () {
       return textId;
     }
     var enc = GeoCodec.encodeLayer({ kind: "text", features: [{ name: text, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent);
+    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, true);
   }
 
   // Newly created layers land on top of the group, which can bury an existing pin,
@@ -2511,7 +2512,7 @@ var GeoScene = (function () {
       var dot = track(api.primitive("ellipse", label0 + " dot"));
       setOne(dot, "generator.radius", [CALLOUT_DOT, CALLOUT_DOT]);
       applyStyle(dot, { fill: look.colors.accent });
-      var placeId = utility("place", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("calloutPlace"), A.DRIVER_RETURN));
+      var placeId = utility("place", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("calloutPlace"), A.DRIVER_RETURN, { nearest: true }));
       connectCamera(map.cameraId, placeId, CA);
       api.connect(placeId, A.DRIVER_OUTPUT_ATTR, dot, "position", true);
       var fade = utility("fade", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("calloutFade")));
@@ -2549,7 +2550,7 @@ var GeoScene = (function () {
       api.parent(box, g);
       ["position", "rotation.z", "scale.x", "scale.y"].forEach(function (attr) { api.connect(label, attr, box, attr, true); });
       api.parent(label, g);
-      var s = compSize(), p = GeoRuntime.projectPoint(lon, lat, readCamera(map.cameraId));
+      var s = compSize(), p = GeoRuntime.projectNearest(lon, lat, readCamera(map.cameraId));
       api.set(label, {
         "rotation.z": 0, "scale.x": 1, "scale.y": 1,
         position: [Math.max(-s.width / 2 + CALLOUT_MARGIN, Math.min(s.width / 2 - CALLOUT_LABEL_W, p[0] + CALLOUT_OFFSET[0])),

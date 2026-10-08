@@ -628,3 +628,27 @@ test("traveller show helper: also hides before the leg's clip start and after it
   assert.equal(run(show, Object.assign({}, base, { drawFull: 40 })), 100);
   assert.equal(run(show, Object.assign({}, base, { later1: 5 })), 0);
 });
+
+test("label driver expression: default output is unchanged and projects the place as given", () => {
+  const plain = E.labelDriverExpression(buildRuntimeSource(), meta, "array");
+  assert.equal(E.labelDriverExpression(buildRuntimeSource(), meta, "array", {}), plain);
+  assert.equal(E.labelDriverExpression(buildRuntimeSource(), meta, "array", { nearest: false }), plain);
+  assert.ok(plain.includes("GeoRuntime.projectPoint(_i5, _i6, "));
+  assert.ok(!plain.includes("GeoRuntime.projectNearest("));
+});
+
+test("label driver expression with nearest: true calls projectNearest and folds the place onto the camera's copy", () => {
+  const expr = E.labelDriverExpression(buildRuntimeSource(), meta, "array", { nearest: true });
+  assert.ok(expr.includes("GeoRuntime.projectNearest(_i5, _i6, "));
+  assert.ok(!expr.includes("GeoRuntime.projectPoint("));
+  const ctx = { cavalry: {}, n0: 0, n1: -179.9, n2: 0, n3: 0, n4: 0, n5: 179.5, n6: 0 };
+  const out = Array.from(vm.runInNewContext(expr, ctx));
+  assert.ok(Math.abs(out[0]) <= 128 + 1e-6, `x ${out[0]} is a whole world away`);
+});
+
+test("map layer expression: nearest is passed to buildPath only when asked for", () => {
+  const plain = E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 1 });
+  assert.ok(!plain.includes("nearest: true"));
+  const near = E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 1, nearest: true });
+  assert.ok(near.includes("nearest: true"));
+});
