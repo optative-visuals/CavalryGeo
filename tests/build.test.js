@@ -4155,7 +4155,7 @@ test("main actions are deep green and housekeeping buttons quiet; every panel bu
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
     "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn", "addDayNightBtn", "extractBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
-  const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
+  const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
   primary.forEach((n) => assert.equal(context[n]._background, "#1F8F4E", n));
   quiet.concat(plainBtns).forEach((n) => {
