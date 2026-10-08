@@ -2690,6 +2690,14 @@ var GeoScene = (function () {
     api.parent(id, g);
     return id;
   }
+  // Stacks a Night rectangle and its filter in their group as a fresh build has them: the rectangle at the bottom and the
+  // filter directly above it. A part parented into an existing group lands on top, above the night lights, so this puts
+  // the night lights back above both. Best-effort, like sendToBack: a failure leaves the layers where they landed.
+  function stackNight(g, rect, filt) {
+    if (!rect || !filt || api.getParent(rect) !== g || api.getParent(filt) !== g) return;
+    if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
+    try { sendToBack(rect); placeAbove(filt, rect); } catch (e) { /* cosmetic: they stay where they landed */ }
+  }
   // The filter is on the rectangle, kept in the group, fed the map camera, and given the day, the time and the
   // defaults of the Night opacity, Twilight and Night lights rows.
   function makeNightFilter(map, g, rect, day, time, track) {
@@ -2868,6 +2876,7 @@ var GeoScene = (function () {
       var colour = (colourFrom && readColour(colourFrom.id, colourFrom.attr, null)) || GeoStyles.nightColour(styleOf(map));
       var rect = makeNightRect(map, g, colour, track), filt = makeNightFilter(map, g, rect, day, time, track);
       api.set(filt, { nightOpacity: helperValue("night", 55), twilight: helperValue("twilight", 1), lights: helperValue("lights", 0) });
+      stackNight(g, rect, filt);
       // Night lights: the references the old layers matte get the rectangle instead, which is shown again.
       var refs = [];
       f.layers.forEach(function (L) {
@@ -2962,6 +2971,7 @@ var GeoScene = (function () {
         if (!night) { night = makeNightRect(map, found.groupId, colour, track); restored++; }
         if (!filter) { filter = makeNightFilter(map, found.groupId, night, day, time, track); restored++; }
         else if (!filterOnLayer(filter, night)) api.connect(filter, "id", night, "filters");
+        if (restored) stackNight(found.groupId, night, filter);
         setDayNightValues(map, filter, function (name) { return name; }, given, kept);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);

@@ -11441,6 +11441,7 @@ test("upgrade: the night lights keep their matte as the Night rectangle alone, s
   assert.equal(api.get(after.night, "hidden"), false, "the rectangle is shown again");
   assert.equal(api.getParent(r.groupId), dn, "the night lights group stays in Day & night");
   assert.equal(G.findNightLights(map).length, 1);
+  assert.deepEqual(api.getChildren(dn), [r.groupId, after.filter, after.night], "the night lights on top, then the filter, then the Night rectangle (as a fresh build)");
 });
 
 test("upgrade: Add day & night on an older overlay upgrades it, then sets the time on the Night rectangle and filter (version 1 to 2)", () => {
@@ -13374,6 +13375,18 @@ test("night lights in the panel: a night build that throws syncs the controls on
   assert.equal(syncs, 1, "one sync after the failure");
 });
 
+test("day & night order: a fresh build stacks the filter above the Night rectangle, and the night lights above both", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), G = context.GeoScene;
+  const dn = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, dn);
+  assert.deepEqual(api.getChildren(dn), [rec.filter, rec.night], "a fresh overlay: the filter, then the Night rectangle");
+  const eox = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.buildImagery(map, eox, {}, G.planImagery(map, eox, {}));
+  const r = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.deepEqual(api.getChildren(dn), [r.groupId, rec.filter, rec.night], "with night lights: the lights on top");
+});
+
 test("night lights in the panel: Add day & night on an older overlay upgrades it and mattes every night tile with the Night rectangle (version 1 to 2)", () => {
   const { context, api } = buildSandbox();
   const { map } = satellitePanelMap(context, api);
@@ -13412,6 +13425,7 @@ test("night lights in the panel v2: Add day & night after the Night rectangle wa
   assert.ok(after.night && after.night !== before.night, "a new Night rectangle");
   assert.equal(night.length, 1, "one Night lights group");
   assert.equal(api.get(after.night, "hidden"), false, "the new rectangle is shown");
+  assert.deepEqual(api.getChildren(dn), [night[0].groupId, after.filter, after.night], "after the Night rectangle was deleted and remade: the night lights stay on top, then the filter, then the rectangle");
   const ref = api.getChildren(night[0].groupId).find((id) => api.getNiceName(id) === "Imagery source");
   assert.deepEqual(nightMattes(api, ref), [after.night], "the reference matted only by the new rectangle");
   const tiles = nightTiles(api, night[0].groupId);
