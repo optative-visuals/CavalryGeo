@@ -5467,6 +5467,17 @@ test("Map tab: the preview follows the tab bar's width when the panel is resized
   assert.deepEqual(plain(context.preview._draw._size), [284, 160]);
 });
 
+test("Routes: the stops list and its Remove / Clear buttons sit in the Stops panel, the preview on its own", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  const panels = [];
+  walkUi(context.sectionPages.widget, (n) => { if (context.GeoStyle.isPanel(n)) panels.push(n); });
+  const stopsPanel = panels.find((p) => holds(p, context.routeSearchField));
+  [context.stopsList, context.removeStopBtn, context.clearStopsBtn].forEach((w) => assert.ok(holds(stopsPanel, w)));
+  const previewPanel = panels.find((p) => holds(p, context.routesPreview.layout));
+  assert.notEqual(previewPanel, stopsPanel);
+  assert.equal(holds(previewPanel, context.stopsList), false);
+});
+
 test("the window, each tab's page and its panels get lighter layer by layer", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   assert.equal(ui._background, "#282828");

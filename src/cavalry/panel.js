@@ -1363,13 +1363,13 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.panel([
       GeoStyle.heading("Stops"),
       row(routeSearchField, routeSearchBtn),
-      row(routeResultPicker, addStopBtn)
+      row(routeResultPicker, addStopBtn),
+      stopsList,
+      row(removeStopBtn, clearStopsBtn)
     ]),
     GeoStyle.panel([
       GeoStyle.heading("Preview (click to add a stop, drag to move)"),
-      routesPreview.layout,
-      stopsList,
-      row(removeStopBtn, clearStopsBtn)
+      routesPreview.layout
     ]),
     GeoStyle.panel([
       GeoStyle.heading("Style"),
