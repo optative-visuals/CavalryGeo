@@ -319,16 +319,19 @@ test("route draw helper: Travel % draws the legs one after another", () => {
 });
 
 test("callout geometry: edge, bend and the two draw-on lines", () => {
-  const GEOM = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
-  assert.deepEqual(E.CALLOUT_GEOM_INPUTS, GEOM);
-  assert.deepEqual(E.CALLOUT_DRAW_INPUTS, GEOM.concat([["draw", 100], ["index", 0]]));
+  const GEOM0 = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
+  // the anchor is appended to both lists, so every older index keeps its meaning (draw 8, index 9 in the draw list)
+  assert.deepEqual(E.CALLOUT_GEOM_INPUTS, GEOM0.concat([["anchor", 1]]));
+  assert.deepEqual(E.CALLOUT_DRAW_INPUTS, GEOM0.concat([["draw", 100], ["index", 0], ["anchor", 1]]));
+  assert.equal(E.inputIndex(E.CALLOUT_GEOM_INPUTS, "anchor"), 8);
+  assert.equal(E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor"), 10);
   const meta = { camera: "c", category: "callout" };
   const exprs = { edge: E.calloutEdgeExpression(meta), bend: E.calloutBendExpression(meta), draw: E.calloutDrawExpression(meta) };
   for (const k of Object.keys(exprs)) assert.deepEqual(E.readTag(exprs[k], "GEO_META"), meta);
   const names = (inputs) => inputs.map((x) => x[0]);
   const evalExpr = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"]))
     .apply(null, names(inputs).map((n) => vals[n]));
-  const base = { placeX: 400, placeY: -110, boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, draw: 100, index: 0 };
+  const base = { placeX: 400, placeY: -110, boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, draw: 100, index: 0, anchor: 0 };
   const edge = (o) => evalExpr(exprs.edge, E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
   const bend = (o) => evalExpr(exprs.bend, E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
   const draw = (o) => evalExpr(exprs.draw, E.CALLOUT_DRAW_INPUTS, Object.assign({}, base, o));
@@ -368,6 +371,109 @@ test("callout geometry: edge, bend and the two draw-on lines", () => {
   const flat = { placeX: 200, placeY: 50, style: 0 };
   close(draw(Object.assign({ draw: 30, index: 0 }, flat)), 30);
   close(draw(Object.assign({ draw: 30, index: 1 }, flat)), 30);
+});
+
+test("callout anchor: Side is today's geometry bit for bit, whatever the place, box and elbow", () => {
+  const meta = { camera: "c", category: "callout" };
+  const names = (inputs) => inputs.map((x) => x[0]);
+  const run = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"])).apply(null, names(inputs).map((n) => vals[n]));
+  // the geometry as it was before the anchor existed
+  const old = (v) => {
+    const cs = v.placeX < v.boxX ? -1 : 1, ce = [v.boxX + cs * v.boxW / 2, v.boxY];
+    const cb = v.style >= 0.5 ? [ce[0] + cs * Math.min(v.elbow, Math.max(0, cs * (v.placeX - ce[0]))), ce[1]] : ce;
+    return { ce, cb };
+  };
+  const xs = [-700, -300, -15, 0, 99.5, 100, 150, 200, 230, 241, 400, 900], ys = [-400, -110, 0, 50, 300];
+  let n = 0;
+  for (const placeX of xs) for (const placeY of ys) for (const style of [0, 1]) for (const elbow of [0, 10, 40]) for (const boxX of [100, -50]) {
+    const v = { placeX, placeY, boxX, boxY: 50, boxW: 200, boxH: 60, style, elbow, anchor: 0, draw: 100, index: 0 }, want = old(v);
+    assert.deepStrictEqual(run(E.calloutEdgeExpression(meta), E.CALLOUT_GEOM_INPUTS, v), want.ce);
+    assert.deepStrictEqual(run(E.calloutBendExpression(meta), E.CALLOUT_GEOM_INPUTS, v), want.cb);
+    n++;
+  }
+  assert.ok(n > 500);
+  // a negative anchor, or one that rounds to 0, is Side too
+  const v = { placeX: 400, placeY: -110, boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, anchor: -3 };
+  assert.deepStrictEqual(run(E.calloutBendExpression(meta), E.CALLOUT_GEOM_INPUTS, v), [240, 50]);
+  assert.deepStrictEqual(run(E.calloutBendExpression(meta), E.CALLOUT_GEOM_INPUTS, Object.assign({}, v, { anchor: 0.4 })), [240, 50]);
+});
+
+test("callout anchor: Auto takes the nearest of the box's 8 points; 2-9 are fixed", () => {
+  const meta = { camera: "c", category: "callout" };
+  const names = (inputs) => inputs.map((x) => x[0]);
+  const run = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"])).apply(null, names(inputs).map((n) => vals[n]));
+  // box centre (100, 50), 200 x 60: x edges at 0 and 200, y edges at 20 (bottom) and 80 (top); y points up
+  const pts = { 2: [0, 80], 3: [100, 80], 4: [200, 80], 5: [200, 50], 6: [200, 20], 7: [100, 20], 8: [0, 20], 9: [0, 50] };
+  const base = { boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 0, elbow: 40, draw: 100, index: 0 };
+  const edge = (o) => run(E.calloutEdgeExpression(meta), E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
+  const bend = (o) => run(E.calloutBendExpression(meta), E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
+  const far = { 2: [-300, 400], 3: [100, 500], 4: [500, 400], 5: [500, 50], 6: [500, -300], 7: [100, -300], 8: [-300, -300], 9: [-300, 50] };
+  const opposite = { 2: 6, 3: 7, 4: 8, 5: 9, 6: 2, 7: 3, 8: 4, 9: 5 };
+  Object.keys(pts).forEach((k) => {
+    assert.deepStrictEqual(edge({ anchor: 1, placeX: far[k][0], placeY: far[k][1] }), pts[k], "auto picks point " + k);
+    // a fixed anchor ignores where the place is
+    assert.deepStrictEqual(edge({ anchor: Number(k), placeX: far[opposite[k]][0], placeY: far[opposite[k]][1] }), pts[k], "fixed " + k);
+    assert.deepStrictEqual(bend({ anchor: Number(k), style: 0, placeX: far[opposite[k]][0], placeY: far[opposite[k]][1] }), pts[k], "straight bend is the point " + k);
+  });
+  // Auto follows the place: moving it along the top changes the point
+  assert.deepStrictEqual(edge({ anchor: 1, placeX: 120, placeY: 400 }), [100, 80]);
+  assert.deepStrictEqual(edge({ anchor: 1, placeX: 20, placeY: 400 }), [0, 80]);
+  // anchor values past 9 stay on the last point
+  assert.deepStrictEqual(edge({ anchor: 12, placeX: 0, placeY: 0 }), pts[9]);
+});
+
+test("callout anchor: elbows bend outward, horizontally from sides and corners, vertically from top and bottom, never past the place", () => {
+  const meta = { camera: "c", category: "callout" };
+  const names = (inputs) => inputs.map((x) => x[0]);
+  const run = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"])).apply(null, names(inputs).map((n) => vals[n]));
+  const base = { boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, draw: 100, index: 0 };
+  const bend = (o) => run(E.calloutBendExpression(meta), E.CALLOUT_GEOM_INPUTS, Object.assign({}, base, o));
+  // top edge midpoint (100, 80): vertical, up
+  assert.deepStrictEqual(bend({ anchor: 3, placeX: 300, placeY: 400 }), [100, 120]);
+  assert.deepStrictEqual(bend({ anchor: 3, placeX: 300, placeY: 100 }), [100, 100], "stops on the place's y");
+  assert.deepStrictEqual(bend({ anchor: 3, placeX: 300, placeY: 80 }), [100, 80]);
+  assert.deepStrictEqual(bend({ anchor: 3, placeX: 300, placeY: 30 }), [100, 80], "a place below the top edge keeps the bend on the point");
+  // bottom edge midpoint (100, 20): vertical, down
+  assert.deepStrictEqual(bend({ anchor: 7, placeX: 300, placeY: -400 }), [100, -20]);
+  assert.deepStrictEqual(bend({ anchor: 7, placeX: -300, placeY: -5 }), [100, -5]);
+  assert.deepStrictEqual(bend({ anchor: 7, placeX: 300, placeY: 60 }), [100, 20]);
+  // corners and sides: horizontal, outward
+  assert.deepStrictEqual(bend({ anchor: 4, placeX: 600, placeY: 400 }), [240, 80]);
+  assert.deepStrictEqual(bend({ anchor: 4, placeX: 215, placeY: 400 }), [215, 80]);
+  assert.deepStrictEqual(bend({ anchor: 8, placeX: -600, placeY: -400 }), [-40, 20]);
+  assert.deepStrictEqual(bend({ anchor: 6, placeX: 600, placeY: -400 }), [240, 20]);
+  assert.deepStrictEqual(bend({ anchor: 2, placeX: -10, placeY: 400 }), [-10, 80]);
+  assert.deepStrictEqual(bend({ anchor: 5, placeX: 600, placeY: 0, elbow: 10 }), [210, 50]);
+  assert.deepStrictEqual(bend({ anchor: 9, placeX: -600, placeY: 0 }), [-40, 50]);
+  // Auto bends the way its chosen point faces
+  assert.deepStrictEqual(bend({ anchor: 1, placeX: 100, placeY: 400 }), [100, 120]);
+  assert.deepStrictEqual(bend({ anchor: 1, placeX: 600, placeY: 50 }), [240, 50]);
+  // Straight: the line goes from the point straight to the place
+  assert.deepStrictEqual(bend({ anchor: 3, style: 0, placeX: 300, placeY: 400 }), [100, 80]);
+});
+
+test("callout anchor: draw-on lengths follow the chosen point and stay consistent", () => {
+  const meta = { camera: "c", category: "callout" };
+  const names = (inputs) => inputs.map((x) => x[0]);
+  const run = (expr, inputs, vals) => Function.apply(null, names(inputs).concat(["return eval(" + JSON.stringify(expr) + ");"])).apply(null, names(inputs).map((n) => vals[n]));
+  const base = { placeX: 300, placeY: 400, boxX: 100, boxY: 50, boxW: 200, boxH: 60, style: 1, elbow: 40, index: 0, anchor: 3 };
+  const draw = (o) => run(E.calloutDrawExpression(meta), E.CALLOUT_DRAW_INPUTS, Object.assign({}, base, o));
+  // top midpoint (100, 80) -> bend (100, 120) -> place (300, 400): 40 px, then the rest
+  const len1 = 40, len2 = Math.hypot(300 - 100, 400 - 120), both = (d) => [draw({ draw: d, index: 0 }), draw({ draw: d, index: 1 })];
+  assert.deepStrictEqual(both(0), [0, 0]);
+  assert.deepStrictEqual(both(100), [100, 100]);
+  const split = both(len1 / (len1 + len2) * 100);
+  assert.ok(Math.abs(split[0] - 100) < 1e-9 && Math.abs(split[1]) < 1e-9);
+  const half = both((len1 + len2 / 2) / (len1 + len2) * 100);
+  assert.ok(Math.abs(half[0] - 100) < 1e-9 && Math.abs(half[1] - 50) < 1e-9);
+  // Side and a fixed Right give the same lengths for a place to the right; Auto matches the anchor it picks
+  const pair = (o) => [draw(Object.assign({ draw: 60, index: 0 }, o)), draw(Object.assign({ draw: 60, index: 1 }, o))];
+  assert.deepStrictEqual(pair({ placeX: 600, placeY: 50, anchor: 0 }), pair({ placeX: 600, placeY: 50, anchor: 5 }));
+  assert.deepStrictEqual(pair({ placeX: 600, placeY: 50, anchor: 1 }), pair({ placeX: 600, placeY: 50, anchor: 5 }));
+  assert.deepStrictEqual(pair({ placeX: 100, placeY: 400, anchor: 1 }), pair({ placeX: 100, placeY: 400, anchor: 3 }));
+  // Straight: line 1 has no length, so it is full once Draw % starts; line 2 follows Draw %
+  const straight = { style: 0, draw: 25 };
+  assert.deepStrictEqual([draw(Object.assign({ index: 0 }, straight)), draw(Object.assign({ index: 1 }, straight))], [100, 25]);
 });
 
 test("highlight shape: Pulse grows the outline by phase × 40, Glow by 6, Fill in and Outline not at all", () => {

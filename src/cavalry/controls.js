@@ -277,7 +277,7 @@ var GeoControlPanel = (function () {
     // Callouts: values go on the helper scripts' inputs, so those members carry their link state; a missing member is left out.
     model.callouts = GeoScene.findCallouts(map).map(function (c) {
       var member = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
-      return { id: c.groupId, number: c.number, text: c.text, label: c.label, box: c.box, dot: member(c.dot, S.calloutDot), bend: member(c.bend, S.calloutBend),
+      return { id: c.groupId, number: c.number, text: c.text, label: c.label, box: c.box, dot: member(c.dot, S.calloutDot), bend: member(c.bend, S.calloutBend), edge: member(c.edge, S.calloutEdge),
         lines: [c.line1, c.line2].filter(Boolean).map(function (id) { return member(id, S.calloutLine); }),
         draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
     });

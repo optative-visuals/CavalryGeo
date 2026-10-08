@@ -2217,11 +2217,31 @@ var GeoScene = (function () {
       return !!rec && typeof rec === "object" && rec.camera === map.cameraId;
     });
   }
+  // A callout made before the anchor: its edge, bend and draw helpers gain the Anchor input at 0 (Side, so the
+  // line stays exactly where it was) and the current script. Compares first, so a second refresh writes nothing.
+  function upgradeCalloutAnchors(m) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    var helpers = [[m.edge, E.CALLOUT_GEOM_INPUTS, E.calloutEdgeExpression], [m.bend, E.CALLOUT_GEOM_INPUTS, E.calloutBendExpression]];
+    (m.draws || []).forEach(function (id) { helpers.push([id, E.CALLOUT_DRAW_INPUTS, E.calloutDrawExpression]); });
+    helpers.forEach(function (h) {
+      if (!h[0] || !layerThere(h[0])) return;
+      try {
+        var at = CA + "." + E.inputIndex(h[1], "anchor");
+        if (!api.hasAttribute(h[0], at)) extendInputs(h[0], CA, h[1], { anchor: 0 });
+        if (!api.hasAttribute(h[0], at)) return;
+        var now = readExpr(h[0], A.CAMERA_EXPR_ATTR), meta = E.readTag(now, "GEO_META");
+        if (!meta) return;
+        var fresh = h[2](meta);
+        if (now !== fresh) setOne(h[0], A.CAMERA_EXPR_ATTR, fresh);
+      } catch (e) { /* the next Controls refresh tries this helper again */ }
+    });
+  }
   // Gives every callout a lasting number (a duplicated group copies its number and takes the next free one).
   // A copied group's record is pointed at its own members (nothing is written while it already is).
   function prepareCallouts(map) {
     var groups = calloutGroups(map);
     numberGroups(groups, CALLOUT_NUMBER_KEY, "Callout");
+    groups.forEach(function (g) { upgradeCalloutAnchors(calloutMembers(g, userData(g, CALLOUT_KEY) || {})); });
     if (typeof api.setUserData !== "function") return;
     groups.forEach(function (g) {
       var rec = userData(g, CALLOUT_KEY) || {}, m = calloutMembers(g, rec), fixed = {}, changed = false;

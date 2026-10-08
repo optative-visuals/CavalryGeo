@@ -380,12 +380,12 @@ test("highlight rows: a highlight whose shape is gone shows only the rows it can
 
 // ---- Callouts ----
 const calloutModel = (extra) => Object.assign({ id: "g1", number: 1, text: "Paris", label: "lb", box: "bx", dot: { id: "dt", state: {} },
-  bend: { id: "bd", state: {} }, lines: [{ id: "l1", state: {} }, { id: "l2", state: {} }], draws: [{ id: "d1", state: {} }, { id: "d2", state: {} }] }, extra || {});
+  edge: { id: "ed", state: {} }, bend: { id: "bd", state: {} }, lines: [{ id: "l1", state: {} }, { id: "l2", state: {} }], draws: [{ id: "d1", state: {} }, { id: "d2", state: {} }] }, extra || {});
 
-test("callout rows: nine rows in order, in the overlay group, with the callout's text as notes", () => {
+test("callout rows: ten rows in order, in the overlay group, with the callout's text as notes", () => {
   const model = { valuesId: "V", callouts: [calloutModel()] };
   const p = G.plan(model);
-  assert.deepEqual(p.rows.map((r) => r.label), ["Callout 1 · Draw %", "Callout 1 · Line style (0 straight · 1 elbow)", "Callout 1 · Line colour", "Callout 1 · Line width",
+  assert.deepEqual(p.rows.map((r) => r.label), ["Callout 1 · Draw %", "Callout 1 · Line style (0 straight · 1 elbow)", "Callout 1 · Anchor (0 side · 1 auto · 2-9 corners and edges)", "Callout 1 · Line colour", "Callout 1 · Line width",
     "Callout 1 · Dot size", "Callout 1 · Text colour", "Callout 1 · Text size", "Callout 1 · Box colour", "Callout 1 · Hide box"]);
   p.groups.forEach((g) => assert.equal(g, "overlay"));
   p.rows.forEach((r) => assert.equal(r.notes, "Paris"));
@@ -398,6 +398,12 @@ test("callout rows: nine rows in order, in the overlay group, with the callout's
   const style = row("Line style (0 straight · 1 elbow)");
   assert.deepEqual(style.link, [{ layer: "bd", attr: STYLE }, { layer: "d1", attr: STYLE }, { layer: "d2", attr: STYLE }]);
   assert.deepEqual(style.overrides, { hardMin: 0, hardMax: 1, step: 1 });
+  // The anchor is appended to each helper list, so it sits at index 8 on the edge / bend and 10 on the draws.
+  assert.equal(E.inputIndex(E.CALLOUT_GEOM_INPUTS, "anchor"), 8); assert.equal(E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor"), 10);
+  const anchor = row("Anchor (0 side · 1 auto · 2-9 corners and edges)");
+  assert.equal(anchor.kind, "value"); assert.equal(anchor.key, "callout:g1:anchor"); assert.equal(anchor.type, "double");
+  assert.deepEqual(anchor.link, [{ layer: "ed", attr: "array.8" }, { layer: "bd", attr: "array.8" }, { layer: "d1", attr: "array.10" }, { layer: "d2", attr: "array.10" }]);
+  assert.deepEqual(anchor.overrides, { hardMin: 0, hardMax: 9, step: 1 });
   assert.deepEqual(row("Line colour").link, [{ layer: "l1", attr: "stroke.strokeColor" }, { layer: "l2", attr: "stroke.strokeColor" }]);
   assert.equal(row("Line colour").type, "color");
   assert.deepEqual(row("Line width").link, [{ layer: "l1", attr: "stroke.width" }, { layer: "l2", attr: "stroke.width" }]);
@@ -405,12 +411,13 @@ test("callout rows: nine rows in order, in the overlay group, with the callout's
   [["Text colour", "lb", "material.materialColor"], ["Text size", "lb", "fontSize"], ["Box colour", "bx", "material.materialColor"], ["Hide box", "bx", "hidden"]].forEach(([label, layer, attr]) => {
     assert.equal(row(label).kind, "direct"); assert.equal(row(label).layer, layer); assert.equal(row(label).attr, attr);
   });
-  assert.deepEqual(G.STATE_ATTRS.calloutDraw, [DRAW, STYLE]);
-  assert.deepEqual(G.STATE_ATTRS.calloutBend, [STYLE]);
+  assert.deepEqual(G.STATE_ATTRS.calloutDraw, [DRAW, STYLE, "array.10"]);
+  assert.deepEqual(G.STATE_ATTRS.calloutBend, [STYLE, "array.8"]);
+  assert.deepEqual(G.STATE_ATTRS.calloutEdge, ["array.8"]);
   assert.deepEqual(G.STATE_ATTRS.calloutLine, ["stroke.strokeColor", "stroke.width"]);
   assert.deepEqual(G.STATE_ATTRS.calloutDot, ["generator.radius.x", "generator.radius.y"]);
   const ids = G.ids(model);
-  ["lb", "bx", "dt", "bd", "l1", "l2", "d1", "d2"].forEach((id) => assert.ok(ids[id], id));
+  ["lb", "bx", "dt", "ed", "bd", "l1", "l2", "d1", "d2"].forEach((id) => assert.ok(ids[id], id));
 });
 
 test("callout rows: a callout whose box is gone has no Box rows, and rows come after the routes' (callouts numbered apart)", () => {

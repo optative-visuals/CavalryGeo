@@ -219,12 +219,38 @@ var GeoExpression = (function () {
   var TRAVELLER_TIP_INPUTS = [["drawOn", 100]];
   // Callouts: label box edge, optional elbow bend, and a two-line draw-on (label -> bend -> place).
   // All three share one input list so the helpers can be wired identically.
-  var CALLOUT_GEOM_INPUTS = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
-  var CALLOUT_DRAW_INPUTS = CALLOUT_GEOM_INPUTS.concat([["draw", 100], ["index", 0]]);
-  // Expects the prelude's _i0.._i7 (place xy, box centre xy, box size, style, elbow); defines _cs (side), _ce (edge), _cb (bend: the elbow, but never past the place's x).
-  var CALLOUT_GEOM_SRC = "var _cs = _i0 < _i2 ? -1 : 1;\n" +
-    "var _ce = [_i2 + _cs * _i4 / 2, _i3];\n" +
-    "var _cb = _i6 >= 0.5 ? [_ce[0] + _cs * Math.min(_i7, Math.max(0, _cs * (_i0 - _ce[0]))), _ce[1]] : _ce;\n";
+  // The anchor (where the line meets the box) is appended to both lists so no older index moves: 0 Side
+  // (the edge midpoint facing the place), 1 Auto (the nearest of the box's 8 points), 2-9 top-left, top,
+  // top-right, right, bottom-right, bottom, bottom-left, left. An older callout gets it at 0 on refresh.
+  var CALLOUT_GEOM_BASE = [["placeX", 0], ["placeY", 0], ["boxX", 0], ["boxY", 0], ["boxW", 0], ["boxH", 0], ["style", 1], ["elbow", 40]];
+  var CALLOUT_GEOM_INPUTS = CALLOUT_GEOM_BASE.concat([["anchor", 1]]);
+  var CALLOUT_DRAW_INPUTS = CALLOUT_GEOM_BASE.concat([["draw", 100], ["index", 0], ["anchor", 1]]);
+  // Expects the prelude's _i0.._i7 (place xy, box centre xy, box size, style, elbow) and the anchor input,
+  // named by anchorVar (_i8 in the edge / bend helpers, _i10 in the draw helpers). Defines _cq (the chosen
+  // direction out of the box: [x, y] with y up), _ce (the point on the box), _cb (the bend: the elbow, but
+  // never past the place on its axis: horizontal from a side or corner, vertical from a top or bottom middle).
+  function calloutGeomSrc(anchorVar) {
+    return "var _cs = _i0 < _i2 ? -1 : 1;\n" +
+      "var _cn = Math.round(" + anchorVar + ");\n" +
+      "var _cT = [[-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0]];\n" +
+      "var _cq = [_cs, 0];\n" +
+      "if (_cn === 1) {\n" +
+      "  var _cj = 0, _cm = Infinity;\n" +
+      "  for (var _ck = 0; _ck < 8; _ck++) {\n" +
+      "    var _cx = _i2 + _cT[_ck][0] * _i4 / 2 - _i0, _cy = _i3 + _cT[_ck][1] * _i5 / 2 - _i1, _cz = _cx * _cx + _cy * _cy;\n" +
+      "    if (_cz < _cm) { _cm = _cz; _cj = _ck; }\n" +
+      "  }\n" +
+      "  _cq = _cT[_cj];\n" +
+      "} else if (_cn >= 2) { _cq = _cT[Math.min(9, _cn) - 2]; }\n" +
+      "var _ce = [_cq[0] === 0 ? _i2 : _i2 + _cq[0] * _i4 / 2, _cq[1] === 0 ? _i3 : _i3 + _cq[1] * _i5 / 2];\n" +
+      "var _cb = _ce;\n" +
+      "if (_i6 >= 0.5) {\n" +
+      "  _cb = _cq[0] !== 0 ? [_ce[0] + _cq[0] * Math.min(_i7, Math.max(0, _cq[0] * (_i0 - _ce[0]))), _ce[1]]\n" +
+      "    : [_ce[0], _ce[1] + _cq[1] * Math.min(_i7, Math.max(0, _cq[1] * (_i1 - _ce[1])))];\n" +
+      "}\n";
+  }
+  var CALLOUT_GEOM_SRC = calloutGeomSrc("_i" + inputIndex(CALLOUT_GEOM_INPUTS, "anchor"));
+  var CALLOUT_DRAW_GEOM_SRC = calloutGeomSrc("_i" + inputIndex(CALLOUT_DRAW_INPUTS, "anchor"));
   function calloutEdgeExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_GEOM_INPUTS) + CALLOUT_GEOM_SRC + "_ce;\n";
   }
@@ -233,7 +259,7 @@ var GeoExpression = (function () {
   }
   // Trim end (0-100) for line index: 0 = label to bend, 1 = bend to place; Draw % covers both lengths in order.
   function calloutDrawExpression(meta) {
-    return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_DRAW_INPUTS) + CALLOUT_GEOM_SRC +
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(CALLOUT_DRAW_INPUTS) + CALLOUT_DRAW_GEOM_SRC +
       "var _cl1 = Math.sqrt(Math.pow(_cb[0] - _ce[0], 2) + Math.pow(_cb[1] - _ce[1], 2));\n" +
       "var _cl2 = Math.sqrt(Math.pow(_i0 - _cb[0], 2) + Math.pow(_i1 - _cb[1], 2));\n" +
       "var _cd = Math.max(0, Math.min(100, _i8));\n" +

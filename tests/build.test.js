@@ -9648,6 +9648,71 @@ test("callouts: the user's selection is put back after a successful build too", 
   assert.deepEqual(plain(api.getSelection()), keep);
 });
 
+// ---- Callout anchor ----
+test("callouts: a new callout's edge, bend and draw helpers start on Auto (anchor 1), appended after the older inputs", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  [rec.edge, rec.bend].forEach((h) => { assert.equal(api.get(h, "array.8"), 1); assert.equal(api.hasAttribute(h, "array.9"), false); assert.equal(api.getCustomAttributeName(h, "array.8"), "anchor"); });
+  rec.draws.forEach((d, i) => {
+    assert.equal(api.get(d, "array.8"), 100, "draw stays at 8"); assert.equal(api.get(d, "array.9"), i, "index stays at 9");
+    assert.equal(api.get(d, "array.10"), 1); assert.equal(api.getCustomAttributeName(d, "array.10"), "anchor");
+  });
+  assert.equal(E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor"), 10);
+});
+
+test("callouts in Controls: the Anchor row sits after Line style and drives the anchor of the edge, bend and both draw helpers", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map), slots = slotsOf(api, r.valuesId);
+  const names = plain(promotedNames(api, r.components.overlay)), label = "Callout 1 · Anchor (0 side · 1 auto · 2-9 corners and edges)";
+  assert.equal(names.indexOf(label), names.indexOf("Callout 1 · Line style (0 straight · 1 elbow)") + 1);
+  const from = r.valuesId + "." + slots["callout:" + g + ":anchor"];
+  assert.ok(slots["callout:" + g + ":anchor"] !== undefined);
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), from, h));
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.10"), from, d));
+  assert.deepEqual(plain(api._overrides[r.valuesId][slots["callout:" + g + ":anchor"]]), { hardMin: 0, hardMax: 9, step: 1 });
+});
+
+// A callout as an earlier version made it: no anchor input, the old script.
+function makeOldCallout(api, context, rec) {
+  const meta = (c) => ({ camera: rec.camera, category: c });
+  [rec.edge, rec.bend].forEach((h) => { api.set(h, { "array.8": undefined }); });
+  rec.draws.forEach((d) => { api.set(d, { "array.10": undefined }); });
+  api.set(rec.edge, { expression: "/*GEO_META " + JSON.stringify(meta("calloutEdge")) + " GEO_META*/ old" });
+  api.set(rec.bend, { expression: "/*GEO_META " + JSON.stringify(meta("calloutBend")) + " GEO_META*/ old" });
+  rec.draws.forEach((d) => api.set(d, { expression: "/*GEO_META " + JSON.stringify(meta("calloutDraw")) + " GEO_META*/ old" }));
+}
+
+test("callouts: Refresh controls gives an older callout the anchor input at 0 (Side) and the new scripts; a second refresh changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  makeOldCallout(api, context, rec);
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.hasAttribute(h, "array.8"), false));
+  const r = context.GeoControlPanel.sync(map);
+  const meta = (c) => ({ camera: map.cameraId, category: c });
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.get(h, "array.8"), 0, "Side"));
+  rec.draws.forEach((d, i) => { assert.equal(api.get(d, "array.10"), 0); assert.equal(api.get(d, "array.8"), 100); assert.equal(api.get(d, "array.9"), i); });
+  assert.equal(api.get(rec.edge, "expression"), E.calloutEdgeExpression(meta("calloutEdge")));
+  assert.equal(api.get(rec.bend, "expression"), E.calloutBendExpression(meta("calloutBend")));
+  rec.draws.forEach((d) => assert.equal(api.get(d, "expression"), E.calloutDrawExpression(meta("calloutDraw"))));
+  // the Anchor row reaches the upgraded helpers (starting from Side)
+  const slots = slotsOf(api, r.valuesId), from = r.valuesId + "." + slots["callout:" + g + ":anchor"];
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), from));
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.10"), from));
+  // a second refresh writes nothing to the helpers
+  const writes = [], realSet = api.set, realAdd = api.addDynamic;
+  const helpers = [rec.edge, rec.bend].concat(rec.draws);
+  api.set = function (id) { if (helpers.indexOf(id) >= 0) writes.push(id); return realSet.apply(api, arguments); };
+  api.addDynamic = function (id) { writes.push(id); return realAdd.apply(api, arguments); };
+  const again = context.GeoControlPanel.sync(map);
+  api.set = realSet; api.addDynamic = realAdd;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(plain(slotsOf(api, again.valuesId)), plain(slots));
+});
+
 // ---- Callouts in Controls ----
 test("callouts in Controls: a callout's rows land in Overlay controls with its text as notes; Draw % drives both draw helpers", () => {
   const { context, api } = buildSandbox();
@@ -9655,7 +9720,7 @@ test("callouts in Controls: a callout's rows land in Overlay controls with its t
   const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
   const r = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, r.components.overlay));
-  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
+  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Anchor (0 side · 1 auto · 2-9 corners and edges)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
   assert.deepEqual(names.filter((n) => /^Callout 1 · /.test(n)), wanted);
   const list = api._promoted(r.components.overlay), at = names.indexOf("Callout 1 · Draw %");
   assert.equal(api.get(r.components.overlay, "promotedAttributes." + at + ".notes"), "Paris");
