@@ -510,8 +510,9 @@ var GeoControlPanel = (function () {
     found.night = imageryAll.filter(function (im) { return !!im.meta.night; });
     found.order = mapOrder(map, found.imagery, found.night);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
-    // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
-    attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
+    // An older overlay is upgraded when the plugin is installed; without it, it is left as it is and the note says so.
+    var dayNightNote = null;
+    attempt(function () { keepSelection(function () { var dn = GeoScene.prepareDayNight(map); dayNightNote = dn && dn.note ? dn.note : null; }); });
     // Night lights no longer wanted are removed (found.night is read again then); whether a night build is due is reported.
     var nightLightsNeeded = false;
     attempt(function () {
@@ -599,7 +600,7 @@ var GeoControlPanel = (function () {
     });
     var total = 0;
     GROUP_ORDER.forEach(function (g) { total += wanted[g].length; });
-    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded };
+    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded, dayNightNote: dayNightNote };
   }
 
   return { sync: sync };

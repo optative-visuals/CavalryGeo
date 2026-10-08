@@ -1028,7 +1028,7 @@ refreshControlsBtn.onClick = guardAction(function () {
   var names = [map.name + " Map controls"];
   [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"], ["time", "Time"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
   var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".";
+  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + "." + (r.dayNightNote ? " " + r.dayNightNote : "");
   say(msg);
   if (r.nightLightsNeeded) startNightLights(map, msg);
 });
@@ -1790,6 +1790,8 @@ function failLine(plan, text) {
 // Night lights start after Day & night (over satellite imagery) when none exist yet. A small public-domain
 // download, so no dialog and no plan signature. While another imagery job runs, they wait for Refresh controls.
 function startNightLights(map, lead) {
+  // An older overlay without the plugin is left as it is: no night lights are built for it.
+  if (GeoScene.nightLightsStatus(map).oldOverlay) { say(lead); return; }
   if (imageryState.timer) {
     // Only this map's job can bring its night lights: its night build already has them on their way, its day build chains them.
     // Another map's job doesn't, so Refresh controls adds them.

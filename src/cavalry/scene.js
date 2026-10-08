@@ -1465,13 +1465,15 @@ var GeoScene = (function () {
   // GeoSources.isSatellite). orphaned: night lights that are no longer wanted. all (optional): the map's
   // imagery from one findAllImagery scan, so the callers that have it don't scan the comp again.
   function nightLightsStatus(map, all) {
-    var f = findDayNight(map), dayNight = dayNightComplete(f);
+    var f = findDayNight(map), dayNight = dayNightComplete(f), oldOverlay = leftAsItIs(f);
     all = all || findAllImagery(map); // one comp scan, split by meta.night below
     var day = all.filter(function (i) { return !i.meta.night; });
     var satellite = day.some(function (i) { return GeoSources.isSatellite(i.meta.sourceMeta); });
-    var night = all.filter(function (i) { return !!i.meta.night; }), wanted = dayNight && satellite;
-    return { dayNight: dayNight, satellite: satellite, night: night, wanted: wanted, orphaned: night.length > 0 && !wanted };
+    var night = all.filter(function (i) { return !!i.meta.night; }), wanted = !oldOverlay && dayNight && satellite;
+    return { dayNight: dayNight, satellite: satellite, night: night, wanted: wanted, orphaned: !oldOverlay && night.length > 0 && !wanted, oldOverlay: oldOverlay };
   }
+  // A version 1 overlay while the plugin is missing: it is left as it is, so its night lights are neither built nor removed.
+  function leftAsItIs(f) { return !!f && f.version === 1 && !nightAvailable(); }
 
   // The plan for night lights: NASA's night layer over the same view. planImagery already stops at the
   // layer's maximum zoom (8); zoomCapped says the camera went past it.
@@ -3023,33 +3025,22 @@ var GeoScene = (function () {
     return { groupId: g, night: rect, filter: filt, label: f.label || null };
   }
 
-  // The Controls refresh: an overlay made before the blur gets its blurs and helper; one that has them
-  // is left as it is. What was made is deleted again if the work fails. With the Cavalry Geo Night type an
-  // older overlay is upgraded to version 2 instead ({ upgraded: true }).
+  // The Controls refresh. With the Cavalry Geo Night type an older overlay (version 1) is upgraded to version 2
+  // ({ upgraded: true }). Without it an older overlay is left exactly as it is (no blur, mask, script or helper
+  // top-ups) and the note says the plugin is needed to upgrade it. A version 2 overlay is only fitted; one whose
+  // filter is gone is not remade here (Add day & night does that), and the note says the plugin is needed.
+  // Returns { upgraded, note } where note is null or the text for the Refresh controls message.
+  var DAYNIGHT_OLD_NOTE = "This Day & night was made by an older version of Cavalry Geo, so it is left as it is. Install the Cavalry Geo plugin (drag the CavalryGeo_plugin folder from the download into the Cavalry window once), then press Refresh controls to upgrade it.";
   function prepareDayNight(map) {
-    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return { upgraded: false };
+    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return { upgraded: false, note: null };
     var f = findDayNight(map);
-    if (!f) return { upgraded: false };
-    if (f.version === 2) { fitNightRect(f.night); return { upgraded: false }; }
-    if (nightAvailable()) { upgradeDayNight(map, f, null, null); return { upgraded: true }; }
-    var made = [];
-    function track(id) { made.push(id); return id; }
-    try {
-      var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
-      var mask = ensureNightMask(map, f.groupId, f.mask, track);
-      refreshNightScripts(map, f.layers, mask);
-      refreshNightHelpers(map, f.helpers);
-      if (made.length) {
-        var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
-        Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-        fixed.blurs = res.blurs; fixed.blurHelper = res.blurHelper; fixed.mask = mask;
-        api.setUserData(f.groupId, DAYNIGHT_KEY, fixed);
-      }
-    } catch (e) {
-      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
-      throw e;
+    if (!f) return { upgraded: false, note: null };
+    if (f.version === 2) {
+      fitNightRect(f.night);
+      return { upgraded: false, note: !f.filter && !nightAvailable() ? DAYNIGHT_MISSING : null };
     }
-    return { upgraded: false };
+    if (nightAvailable()) { upgradeDayNight(map, f, null, null); return { upgraded: true, note: null }; }
+    return { upgraded: false, note: DAYNIGHT_OLD_NOTE };
   }
 
   // True when id was made by this call (track keeps the list).
