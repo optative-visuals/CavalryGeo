@@ -15,7 +15,8 @@ var GeoStyle = (function () {
   var BUTTON_HEIGHT = 24, TAB_HEIGHT = 24, ICON_SIZE = 16;
   var LABEL_WIDTH = 92;
   var PANEL_INSET = 20; // a panel's horizontal margins (2 x 9) plus its border (2 x 1)
-  var PANEL_BACKGROUND = "#2f2f2f", PANEL_BORDER = "#383838";
+  // A panel sits one step lighter than the script window behind it (#373737 in Cavalry), its border one more.
+  var PANEL_BACKGROUND = "#3f3f3f", PANEL_BORDER = "#484848";
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {

@@ -11151,8 +11151,8 @@ test("GeoStyle.panel is a shaded rounded box with the exact look, items in order
   assert.ok(S.isPanel(p));
   assert.ok(!S.isPanel(new ui.Container()), "an ordinary container is not a panel");
   assert.ok(!S.isPanel(a));
-  assert.equal(p._background, "#2f2f2f");
-  assert.deepEqual(plain(p._border), ["#383838", 1]);
+  assert.equal(p._background, "#3f3f3f");
+  assert.deepEqual(plain(p._border), ["#484848", 1]);
   assert.deepEqual(plain(p._radius), [6, 6, 6, 6]);
   const v = p._layout;
   assert.ok(v instanceof ui.VLayout);
