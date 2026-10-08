@@ -92,8 +92,8 @@ adding street layers.
 ## Layers → Overlays: Day & night
 
 - [ ] 19m. Layers → Overlays → Day & night: the day, month and UTC time boxes show today's date and the current time
-      (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
-      layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
+      (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with one "Night"
+      layer (a rectangle with the Cavalry Geo Night filter) appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
       in <map> Time controls.", and the night side is shaded.
 - [ ] 19n. Change the date and time, press **Add day & night** again → "Day & night updated to ...", no second
       group, and the shadow and Time label move.
@@ -104,26 +104,22 @@ adding street layers.
       edges, with nothing drawn outside it. Globe: the shadow's edge follows the rim of the globe; turn the camera
       to the sunlit side and no night shows; point it at the spot where it is midnight and nearly the whole
       disc is shaded, darkest in the middle. Set UTC time to 24 → the label reads 00:00 of the same date.
-- [ ] 19o2. Day & night: the edge of the night is a soft gradient rather than four visible bands, at zoom 2
-      and at zoom 4 (the blur keeps its width on screen as you zoom), and the Fast Blur amount on the
-      "Night blur" layers is the same number for x and y. In Time controls set **Twilight** to 0 → a single hard
-      edge and the blur amount goes to 0; set it back to 1 → soft again. Delete the four "Night blur" layers and the
-      "Night blur" helper, then press **Refresh controls** → they come back once (a second refresh adds
-      nothing) and Twilight still drives them. Check the blur looks right at a very high zoom (amount is capped at 200).
+- [ ] 19o2. Day & night: the edge of the night is a soft gradient with no visible bands, at zoom 2 and at zoom 4.
+      In Time controls set **Twilight** to 0 → a hard edge; set it back to 1 → soft again; 0.5 → a narrower band.
+      (The curve itself is checked in NF3.)
 - [ ] 19o3. Day & night: on the globe, zoom in so the soft edge of the night reaches the rim → the shading stops
-      cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. A hidden
-      "Night mask" layer sits in the Day & night group, and the group's Masks list holds it once. The Time label is
-      not clipped. Delete the mask and press **Refresh controls** → it comes back once (a second refresh adds nothing).
+      cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. The Time label is
+      not clipped, and the group holds no "Night mask" layer.
 - [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
       baked."; Extract's layer list does not show them.
 - [ ] 19o4. Day & night (twilight on): no light ring just inside the globe's rim, the Equal Earth oval or the flat
       map edge on the night side.
-- [ ] 19o5. Refresh controls on an overlay made before this version brings its drawing up to date -> the night
-      reaches the rim with no ring.
+- [ ] 19o5. Refresh controls on an overlay made by v0.9 (with the plugin installed) upgrades it to the Night layer
+      (see NF8); the night reaches the rim with no ring.
 
 - [ ] 19q. Day & night over satellite imagery (EOX, NASA, MapTiler satellite, Mapbox satellite): after Add day & night,
       Build imagery or Refresh controls (whichever is second), a "Night lights" group sits at the top of the Day & night
-      group and the lights show only on the night side. The Time label and the four night layers still work.
+      group and the lights show only on the night side. The Time label and the Night layer still work.
 - [ ] 19r. Night lights, flat: pan and zoom → the lights fade through the twilight with the terminator and do not show
       on the sunlit side. Zoom past 8 → the status line says NASA's data stops at zoom 8.
 - [ ] 19s. Night lights, globe and Equal Earth: without the Cavalry Geo Reproject plugin, Build stops and asks for it;
@@ -143,6 +139,47 @@ adding street layers.
       download" with the retry hint. Delete the Night lights group, press **Refresh controls** → the tiles download again.
 - [ ] 19y. Press **Cancel** during a night build → it stops like any imagery job; earlier imagery stays as it was.
 - [ ] 19z. The imagery credit (Imagery → Add attribution) on a map with night lights names NASA Black Marble 2016.
+
+## Day & night (Night filter)
+
+Needs the Cavalry Geo plugin installed (drag the CavalryGeo_plugin folder in once). The first live compile of the
+Night filter is checked here.
+
+- [ ] NF1. Without the plugin (its CavalryGeo_plugin folder not installed), Layers → Overlays → **Add day & night** → nothing is
+      built and the status line says "Day & night needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from
+      the download into the Cavalry window once, then press Add day & night again." Install the plugin, press
+      **Add day & night** again → the "Day & night" group builds with one "Night" layer.
+- [ ] NF2. The Night filter compiles: no shader error in the status line or the Cavalry window, and the Night layer
+      shades the night side on flat, Equal Earth and globe. Live check 2: the terminator sits in the same place as the
+      old 0° edge on all three projections, at several dates, rotations and zooms (compare with a v0.9 overlay at the
+      same date and view if one is handy).
+- [ ] NF3. Live check 2: the twilight curve feels right. With Twilight at 1 the edge darkens fast just past the terminator
+      and reaches full Night opacity about 18° below the horizon, with no visible bands. Twilight 0 → hard edge; 0.5 →
+      a narrower band. The slider moves in 0.01 steps. If the feel is wrong, change TAU in
+      plugin/CavalryGeo_plugin/night.sksl and in src/core/night.js (both together), rebuild, and repeat this item.
+- [ ] NF4. The shading stops cleanly at the Earth's edge: on the globe at the rim, on Equal Earth at the oval, and on the
+      flat map at its top and bottom (zoom in so the soft edge reaches them). No dark halo outside. On the flat map the
+      night continues past the date line (camera at lon 170).
+- [ ] NF5. Live check 3: a 1080p comp with Day & night plays at about 25 fps (it was about 9 with the four-layer overlay).
+      Note the fps with and without Day & night.
+- [ ] NF6. Night colour and Night opacity rows change the Night layer's fill and the darkness. A map style recolours the
+      Night layer's fill. Bake and Extract leave the overlay alone.
+- [ ] NF7. Satellite map with night lights: the "Night lights" group sits at the top of the Day & night group and its
+      matte is the one Night layer; the lights show only on the night side. Delete the Night layer, press **Refresh
+      controls** → the night lights are removed (no matte). Press **Add day & night** → the Night layer comes back and
+      the night lights rebuild from the cache.
+- [ ] NF8. Live check 4: a v0.9 project with Day & night and night lights, opened with the plugin installed, press
+      **Refresh controls** → the Day & night group holds one "Night" layer; the old four night layers, the blurs, the
+      "Night blur" helper and the "Night mask" are gone; the date, time, Night colour, Night opacity and Twilight look
+      the same (the new curve makes a small difference); the Time controls rows keep their values and keys; the night
+      lights are matted by the Night layer. A second Refresh controls changes nothing. Keys put directly on an old night
+      layer's own settings are not carried over (expected).
+- [ ] NF9. The same v0.9 project without the plugin → Refresh controls leaves the old overlay and its night lights exactly
+      as they were, and the status says "This Day & night was made by an older version of Cavalry Geo, so it is left as
+      it is. Install the Cavalry Geo plugin (drag the CavalryGeo_plugin folder from the download into the Cavalry window
+      once), then press Refresh controls to upgrade it." Its Time controls rows still drive it.
+- [ ] NF10. Delete the Day & night group → the Night layer and the Night lights go with it, and no leftover layers
+      remain. The time label sits outside the group and is not removed.
 
 ## Extract (Layers → Extract)
 
