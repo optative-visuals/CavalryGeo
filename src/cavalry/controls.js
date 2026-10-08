@@ -455,7 +455,9 @@ var GeoControlPanel = (function () {
     });
   }
 
-  function sync(map) {
+  // options.gatherImagery (the Refresh controls button only) also files older imagery assets into the map's
+  // Assets group; that scans every asset, so the many other actions that sync skip it.
+  function sync(map, options) {
     requireApis();
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
     // Routes are numbered and given their draw helpers first, from the lists and Scene Window
@@ -466,7 +468,7 @@ var GeoControlPanel = (function () {
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
     // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
-    attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
+    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {

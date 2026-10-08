@@ -288,11 +288,9 @@ var GeoNet = (function () {
   }
 
   // settings.json lives in Cavalry's app-data folder (CavalryGeo/settings.json), outside the Scripts
-  // folder, so replacing CavalryGeo_assets when updating never wipes it. An older Cavalry without
-  // api.getAppDataFolder keeps it inside the assets folder.
+  // folder, so replacing CavalryGeo_assets when updating never wipes it.
   function oldSettingsFile() { return assetsDir() + "/settings.json"; }
   function settingsDir() {
-    if (typeof api.getAppDataFolder !== "function") return assetsDir();
     return String(api.getAppDataFolder()).replace(/\\/g, "/") + "/CavalryGeo";
   }
   function settingsFile() { return settingsDir() + "/settings.json"; }

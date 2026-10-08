@@ -11535,11 +11535,11 @@ test("Imagery group: Refresh controls gathers older top-level assets and bent so
   flat.context.GeoScene.buildImagery(flat.map, flat.src, {}, flat.plan);
   assetIds(flat.api).forEach((id) => flat.api.unParent(id)); // as a map built before the group existed
   assert.equal(flat.api.getParent(assetIds(flat.api)[0]), "");
-  flat.context.GeoControlPanel.sync(flat.map);
+  flat.context.GeoControlPanel.sync(flat.map, { gatherImagery: true });
   const fg = assetGroupsNamed(flat.api, "Cavalry Geo imagery \u00b7 " + flat.api.getNiceName(flat.map.groupId));
   assert.equal(fg.length, 1);
   assetIds(flat.api).forEach((id) => assert.equal(flat.api.getParent(id), fg[0]));
-  flat.context.GeoControlPanel.sync(flat.map);
+  flat.context.GeoControlPanel.sync(flat.map, { gatherImagery: true });
   assert.equal(flat.api._assetGroupCalls.length, 1, "a second refresh makes no new group");
 
   const { context, api, map, src } = bentFixture();
@@ -11547,7 +11547,7 @@ test("Imagery group: Refresh controls gathers older top-level assets and bent so
   const im = context.GeoScene.findImagery(map)[0];
   api.unParent(im.meta.sourceComp);
   assetIds(api).forEach((id) => api.unParent(id));
-  context.GeoControlPanel.sync(map);
+  context.GeoControlPanel.sync(map, { gatherImagery: true });
   const g = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
   assert.equal(api.getParent(im.meta.sourceComp), g);
   assetIds(api).forEach((id) => assert.equal(api.getParent(id), g));
@@ -11575,7 +11575,7 @@ test("guard: an action that leaves a nested layer selected gets the old selectio
   const { context, api } = buildSandbox();
   const { group, child } = nestedLayer(api);
   api.select([group]);
-  context.guard(() => { api.select([child]); })();
+  context.guardAction(() => { api.select([child]); })();
   assert.deepEqual(api.getSelection(), [group]);
 });
 
@@ -11584,7 +11584,7 @@ test("guard: a top-level selection made on purpose stays", () => {
   const { group } = nestedLayer(api);
   const other = api.create("group", "Top");
   api.select([group]);
-  context.guard(() => { api.select([other]); })();
+  context.guardAction(() => { api.select([other]); })();
   assert.deepEqual(api.getSelection(), [other]);
 });
 
@@ -11595,7 +11595,7 @@ test("guard: a selection that did not change is left alone, and an error still r
   let selects = 0;
   const real = api.select.bind(api);
   api.select = (ids) => { selects++; return real(ids); };
-  context.guard(() => { throw new Error("boom"); })();
+  context.guardAction(() => { throw new Error("boom"); })();
   assert.equal(selects, 0);
   assert.deepEqual(api.getSelection(), [child]);
   assert.match(context.statusLabel.getText(), /^Error: boom$/);
@@ -11605,7 +11605,7 @@ test("guard: an error that left a nested layer selected still restores the selec
   const { context, api } = buildSandbox();
   const { group, child } = nestedLayer(api);
   api.select([group]);
-  context.guard(() => { api.select([child]); throw new Error("late"); })();
+  context.guardAction(() => { api.select([child]); throw new Error("late"); })();
   assert.deepEqual(api.getSelection(), [group]);
   assert.match(context.statusLabel.getText(), /late/);
 });
@@ -11614,7 +11614,7 @@ test("guard: an older Cavalry without getParent or select never breaks the actio
   const { context, api } = buildSandbox();
   delete api.getParent; delete api.select; delete api.setFrame;
   let ran = 0;
-  context.guard(() => { ran++; })();
+  context.guardAction(() => { ran++; })();
   assert.equal(ran, 1);
   assert.equal(context.statusLabel.getText(), "Ready.");
 });
@@ -11625,12 +11625,12 @@ test("guard: nudges a redraw with the current frame once per action, also after 
   const calls = [];
   const real = api.setFrame.bind(api);
   api.setFrame = (f) => { calls.push(f); return real(f); };
-  context.guard(() => {})();
+  context.guardAction(() => {})();
   assert.deepEqual(calls, [7]);
-  context.guard(() => { throw new Error("x"); })();
+  context.guardAction(() => { throw new Error("x"); })();
   assert.deepEqual(calls, [7, 7]);
   api.setFrame = () => { throw new Error("no redraw"); };
-  context.guard(() => {})(); // a failing nudge is ignored
+  context.guardAction(() => {})(); // a failing nudge is ignored
   assert.equal(context.statusLabel.getText().indexOf("no redraw"), -1);
 });
 
@@ -11882,4 +11882,84 @@ test("comp follow: a failure inside the callback never escapes", () => {
   context.refreshMaps = () => { throw new Error("boom"); };
   assert.doesNotThrow(() => follower(ui).onCompChanged());
   assert.doesNotThrow(() => follower(ui).onSceneChanged());
+});
+
+// ---- Fix round: sync cost, guard scope, callout selection, quiet catch-up ---------------------
+test("sync: a normal action's sync does not scan the Assets window; Refresh controls does", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  let scans = 0;
+  ["getAssetWindowLayers", "getAssetFilePath"].forEach((n) => { const real = api[n]; api[n] = function () { scans++; return real.apply(this, arguments); }; });
+  context.GeoControlPanel.sync(map);
+  context.addScaleBarBtn.onClick();
+  assert.equal(scans, 0, "no asset scan for ordinary actions");
+  let gathered = 0;
+  const real = context.GeoScene.prepareImagery;
+  context.GeoScene.prepareImagery = function () { gathered++; return real.apply(this, arguments); };
+  context.refreshControlsBtn.onClick();
+  assert.equal(gathered, 1, "the Refresh controls button gathers");
+});
+
+test("guard: pickers, text commits and plain guard() do not nudge the frame or touch the selection; a button does", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  let frames = 0;
+  const real = api.setFrame.bind(api);
+  api.setFrame = (f) => { frames++; return real(f); };
+  context.guard(() => { api.select([child]); })();
+  assert.equal(frames, 0);
+  assert.deepEqual(api.getSelection(), [child], "plain guard leaves the selection");
+  context.mapPicker.onValueChanged();
+  context.searchField.setText("");
+  context.searchField.onValueCommitted();
+  assert.equal(frames, 0);
+  context.refreshMapsBtn.onClick();
+  assert.equal(frames, 1, "a button click nudges");
+});
+
+test("callouts: the new callout's label stays selected after Callout here / at coordinates", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const outside = api.create("group", "Outside");
+  api.select([outside]);
+  context.latField.setValue(10); context.lonField.setValue(20);
+  context.calloutCoordBtn.onClick();
+  const g = context.GeoScene.findCallouts(context.currentMap())[0].groupId, rec = plain(api.getUserDataKey(g, "geoCallout"));
+  assert.deepEqual(plain(api.getSelection()), [rec.label]);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  api.select([outside]);
+  context.calloutHereBtn.onClick();
+  const labels = context.GeoScene.findCallouts(context.currentMap()).map((c) => plain(api.getUserDataKey(c.groupId, "geoCallout")).label);
+  assert.equal(labels.length, 2);
+  const sel = plain(api.getSelection());
+  assert.ok(sel.length === 1 && labels.indexOf(sel[0]) >= 0 && sel[0] !== rec.label, "the second callout's label");
+});
+
+test("guard: layers of the old selection that no longer exist are not selected again; none left selects nothing", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api), gone = api.create("group", "Gone");
+  api.select([group, gone]);
+  context.guardAction(() => { api.select([child]); api.deleteLayer(gone); })();
+  assert.deepEqual(plain(api.getSelection()), [group], "the one that is left");
+  const lone = api.create("group", "Lone");
+  api.select([lone]);
+  context.guardAction(() => { api.select([child]); api.deleteLayer(lone); })();
+  assert.deepEqual(plain(api.getSelection()), [], "nothing left: nothing selected");
+  assert.equal(context.statusLabel.getText(), "Ready.");
+});
+
+test("comp follow: the catch-up when a job ends is silent, so the build's result message stays", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.imageryState.timer = { stop() {} };
+  context.imageryState.job = {};
+  otherComp(context, api, "Other", "Elsewhere");
+  context.imageryState.tick = function () { context.stopImageryTimer(); context.say("Imagery built: 4 tiles."); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"], "caught up");
+  assert.equal(context.statusLabel.getText(), "Imagery built: 4 tiles.");
 });
