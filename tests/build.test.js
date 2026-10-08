@@ -10323,6 +10323,76 @@ const dnRec = (api, g) => plain(api.getUserDataKey(g, "geoDayNight"));
 const dnVal = (context, api, id, inputs, name) => api.get(id, "generator.array." + context.GeoExpression.inputIndex(inputs, name));
 const dnHelperVal = (context, api, id, name) => api.get(id, "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_OPACITY_INPUTS, name));
 
+// A version 1 overlay, as made before the Night layer: four night layers (with opacity helpers), a
+// helpers group with a Night blur helper and four Fast Blurs, the hidden Night mask in the group's
+// masks, and optionally a time label. Built straight through the fake API (the version 1 record
+// shape), so the version 1 paths stay tested while Add day & night makes version 2.
+function makeOldDayNight(api, ctx, map, opts = {}) {
+  const E = ctx.GeoExpression, src = ctx.GEO_SUN_SRC, cam = map.cameraId, dark = ctx.GeoStyles.builtIn("Dark");
+  const day = opts.dayOfYear == null ? 80 : opts.dayOfYear, time = opts.utcTime == null ? 12 : opts.utcTime;
+  const CA = "array", MA = "generator.array";
+  // Script inputs by name, the way the panel adds them: slot 0 exists on a new layer, others are added.
+  const inputs = (id, arr, list, values) => list.forEach((inp, k) => {
+    const attr = arr + "." + k;
+    if (!api.hasAttribute(id, attr)) api.addDynamic(id, arr, "double");
+    api.renameAttribute(id, attr, inp[0]);
+    api.set(id, { [attr]: values && values[inp[0]] !== undefined ? values[inp[0]] : inp[1] });
+  });
+  const camera = (id, arr, n) => { for (let k = 0; k < n; k++) api.connect(cam, CA + "." + k, id, arr + "." + k, true); };
+  const g = api.create("group", "Day & night");
+  api.parent(g, map.groupId);
+  const holder = api.create("group", "Day & night helpers");
+  api.parent(holder, g);
+  const depressions = [0, 6, 12, 18], layers = [], helpers = [], blurs = [];
+  depressions.forEach((a, i) => {
+    const L = api.create("javaScriptShape", "Night " + a + "°");
+    inputs(L, MA, E.NIGHT_INPUTS, { dayOfYear: day, utcTime: time, depression: a });
+    api.set(L, { "generator.expression": E.nightExpression(src, { camera: cam, category: "dayNight", depression: a }) });
+    camera(L, MA, 5);
+    api.setFill(L, true); api.set(L, { "material.materialColor": ctx.GeoStyles.nightColour(dark) });
+    api.parent(L, g);
+    const H = api.create("javaScript", "Night opacity " + a + "°");
+    inputs(H, CA, E.NIGHT_OPACITY_INPUTS, { step: i });
+    api.set(H, { expression: E.nightOpacityExpression({ camera: cam, category: "dayNightOpacity", step: i }) });
+    api.parent(H, holder);
+    api.connect(H, "id", L, "opacity", true);
+    layers.push(L); helpers.push(H);
+  });
+  const bh = api.create("javaScript", "Night blur");
+  inputs(bh, CA, E.NIGHT_BLUR_INPUTS, { zoom: api.get(cam, CA + ".2") });
+  api.set(bh, { expression: E.nightBlurExpression({ camera: cam, category: "dayNightBlur" }) });
+  api.parent(bh, holder);
+  api.connect(cam, CA + ".2", bh, CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "zoom"), true);
+  api.set(bh, { [CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight")]: 1 });
+  depressions.forEach((a, i) => {
+    const b = api.create("blurFilter", "Night blur " + a + "°");
+    api.set(b, { amount: { x: 0, y: 0 } });
+    api.parent(b, holder);
+    api.connect(b, "id", layers[i], "filters");
+    api.connect(bh, "id", b, "amount", true);
+    blurs.push(b);
+  });
+  const mask = api.create("javaScriptShape", "Night mask");
+  inputs(mask, MA, E.NIGHT_MASK_INPUTS);
+  api.set(mask, { "generator.expression": E.nightMaskExpression(src, { camera: cam, category: "dayNightMask" }) });
+  camera(mask, MA, 5);
+  api.parent(mask, g);
+  api.set(mask, { hidden: true });
+  api.connect(mask, "id", g, "masks");
+  let label = null;
+  if (opts.label) {
+    label = api.create("javaScriptShape", "Time label");
+    const size = api.get(api.getActiveComp(), "resolution");
+    inputs(label, MA, E.TIME_LABEL_INPUTS, { dayOfYear: day, utcTime: time, compW: size.x, compH: size.y });
+    api.set(label, { "generator.expression": E.timeLabelExpression(src, { camera: cam, category: "timeLabel" }) });
+    camera(label, MA, 5);
+    api.setFill(label, true); api.set(label, { "material.materialColor": dark.colors.text });
+    api.parent(label, map.groupId);
+  }
+  api.setUserData(g, "geoDayNight", { camera: cam, layers, helpers, blurs, blurHelper: bh, mask, label });
+  return { groupId: g };
+}
+
 test("day & night: add makes the group, four night layers, helpers, a record and no label by default", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression, dark = context.GeoStyles.builtIn("Dark");
@@ -10408,7 +10478,7 @@ test("day & night: with no base layer the group still sits above the Ocean and b
 test("day & night: a second add updates the time on every layer, makes nothing new and reports created false", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const first = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const first = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 });
   const before = api.getCompLayers(false).slice().sort();
   const second = G.addDayNight(map, { dayOfYear: 355, utcTime: 3.25 });
   assert.equal(second.created, false); assert.equal(second.groupId, first.groupId);
@@ -10443,7 +10513,7 @@ test("day & night: findDayNight lists the group, its layers, helpers and label; 
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
   assert.equal(G.findDayNight(map), null);
-  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
   const f = G.findDayNight(map);
   assert.equal(f.groupId, r.groupId);
   assert.deepEqual(plain(f.layers), rec.layers); assert.deepEqual(plain(f.helpers), rec.helpers); assert.equal(f.label, rec.label);
@@ -10456,7 +10526,7 @@ test("day & night: findDayNight lists the group, its layers, helpers and label; 
 test("day & night: findDayNight needs the record, this map's camera and members that belong to the group", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
   // a layer moved out of the group, and a label that is gone, are no longer the overlay's
   api.parent(rec.layers[1], map.groupId);
   api.deleteLayer(rec.label);
@@ -10472,7 +10542,7 @@ test("day & night: findDayNight needs the record, this map's camera and members 
 test("day & night: applying a map style recolours the four fills and the label", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, S = context.GeoStyles, light = S.builtIn("Light");
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
   G.applyMapStyle(map, light);
   rec.layers.forEach((id) => assert.equal(api.get(id, "material.materialColor"), S.nightColour(light)));
   assert.equal(api.get(rec.label, "material.materialColor"), light.colors.text);
@@ -10536,7 +10606,7 @@ test("day & night: the user's selection is put back after a successful add and u
 test("day & night: the overlay's group and layers are map parts", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
   assert.ok(G.isMapPart(map, r.groupId));
   assert.ok(G.isMapPart(map, rec.layers[0]));
 });
@@ -10588,7 +10658,7 @@ test("day & night in Controls: a Time controls component after Extract controls,
   const map = fullControlsMap(context), E = context.GeoExpression;
   const r0 = context.GeoControlPanel.sync(map);
   assert.equal(r0.components.time, null);
-  const dn = context.GeoScene.addDayNight(map, { dayOfYear: 172, utcTime: 14.5, label: true }), rec = dnRec(api, dn.groupId);
+  const dn = makeOldDayNight(api, context, map, { dayOfYear: 172, utcTime: 14.5, label: true }), rec = dnRec(api, dn.groupId);
   const r = context.GeoControlPanel.sync(map);
   assert.ok(r.components.time, "made");
   assert.equal(api.getNiceName(r.components.time), "Map Time controls");
@@ -10678,7 +10748,7 @@ test("Bake: only day & night parts gets a message of its own; mixed adds a skipp
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
   const map = context.currentMap(), G = context.GeoScene;
-  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), f = G.findDayNight(map);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }), f = G.findDayNight(map);
   api.select([f.layers[0], f.label]);
   context.bakeBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Day & night redraws from its time, so it can't be baked.");
@@ -10722,10 +10792,10 @@ test("day & night: the time label's comp size follows a resized composition (fit
 });
 
 // A duplicated Day & night group: the copy carries the original's record, but has its own layers.
-function duplicateDayNight(api, G, map) {
-  const a = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, recA = dnRec(api, a);
+function duplicateDayNight(api, ctx, map) {
+  const a = makeOldDayNight(api, ctx, map, { dayOfYear: 80, utcTime: 12 }).groupId, recA = dnRec(api, a);
   api.setUserData(a, "geoDayNight", Object.assign({}, recA, { camera: "hidden" }));
-  const b = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, recB = dnRec(api, b);
+  const b = makeOldDayNight(api, ctx, map, { dayOfYear: 80, utcTime: 12 }).groupId, recB = dnRec(api, b);
   api.setUserData(a, "geoDayNight", recA);
   api.setUserData(b, "geoDayNight", recA);
   api.select([b]); api.bringToFront(); // like Ctrl+D: the copy lands on top
@@ -10735,7 +10805,7 @@ function duplicateDayNight(api, G, map) {
 test("day & night (duplicate): the original wins over its copy; with the original gone the copy adopts its own layers", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const { a, b, recA, recB } = duplicateDayNight(api, G, map);
+  const { a, b, recA, recB } = duplicateDayNight(api, context, map);
   const kids = api.getChildren(map.groupId);
   assert.ok(kids.indexOf(b) < kids.indexOf(a), "the copy sits on top");
   const f = G.findDayNight(map);
@@ -10752,7 +10822,7 @@ test("day & night (duplicate): the original wins over its copy; with the origina
 test("day & night (duplicate): an empty copy with the original's record is never picked over the original", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const a = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const a = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId;
   const copy = api.create("group", "Day & night");
   api.parent(copy, map.groupId);
   api.setUserData(copy, "geoDayNight", dnRec(api, a));
@@ -10763,7 +10833,7 @@ test("day & night (duplicate): an empty copy with the original's record is never
 test("day & night: Add with every night layer deleted makes them again (and a lost helper), wired and recorded", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   rec.layers.forEach((id) => api.deleteLayer(id));
   api.deleteLayer(rec.helpers[2]);
   const r = G.addDayNight(map, { dayOfYear: 100, utcTime: 6 });
@@ -10788,7 +10858,7 @@ test("day & night: the panel says when it remade missing night layers", () => {
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
   const map = context.currentMap();
-  const rec = dnRec(api, context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   rec.layers.forEach((id) => api.deleteLayer(id));
   context.addDayNightBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Day & night updated to 7 Oct 14:30 UTC\. Its missing night layers were made again\./);
@@ -10822,7 +10892,7 @@ test("day & night: Add again leaves omitted values alone and skips an animated (
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
   const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
   G.addDayNight(map, {});
   rec.layers.forEach((id) => { assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "dayOfYear"), 80); assert.equal(dnVal(context, api, id, E.NIGHT_INPUTS, "utcTime"), 12); });
   assert.equal(dnVal(context, api, rec.label, E.TIME_LABEL_INPUTS, "utcTime"), 12);
@@ -10843,7 +10913,7 @@ test("day & night: Add again with the time on Controls values sets those values 
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
   const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
   const s = context.GeoControlPanel.sync(map), V = s.valuesId, slots = slotsOf(api, V);
   const dayIn = V + "." + slots["dn:day"], timeIn = V + "." + slots["dn:time"];
   const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 18 });
@@ -10870,7 +10940,7 @@ test("Bake: a night layer or time label that is no longer in the overlay is stil
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
   const map = context.currentMap(), G = context.GeoScene;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }).groupId);
   api.parent(rec.layers[1], map.groupId); // moved out of the group
   api.setUserData(G.findDayNight(map).groupId, "geoDayNight", Object.assign({}, rec, { label: null }));
   assert.equal(G.dayNightParts(map)[rec.layers[1]], undefined);
@@ -10886,7 +10956,7 @@ test("Bake: day & night with callout or highlight parts and nothing baked names 
   context.highlightBtn.onClick();
   const h = G.findHighlights(map)[0];
   const co = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
-  const night = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId).layers[0];
+  const night = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId).layers[0];
   api.select([co.label, night]);
   context.bakeBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Callouts and day & night can't be baked.");
@@ -11102,7 +11172,7 @@ const dnBlurIn = (context, name) => "array." + context.GeoExpression.inputIndex(
 test("day & night blur: a new overlay gets four Fast Blurs on the night layers, driven by one Night blur helper", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 14.5 }), rec = dnRec(api, r.groupId);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 172, utcTime: 14.5 }), rec = dnRec(api, r.groupId);
   assert.equal(rec.blurs.length, 4);
   assert.ok(rec.blurHelper);
   const holder = api.getParent(rec.helpers[0]);
@@ -11131,7 +11201,7 @@ test("day & night blur: a new overlay gets four Fast Blurs on the night layers, 
 test("day & night blur: the helper's output is GeoSun.blurAmount for both axes", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   const expr = api.get(rec.blurHelper, "expression"), vm = require("node:vm");
   [[2, 1], [4, 1], [4, 0], [8, 1]].forEach(([zoom, twilight]) => {
     const got = vm.runInNewContext(expr, { zoom, twilight });
@@ -11143,7 +11213,7 @@ test("day & night blur: the helper's output is GeoSun.blurAmount for both axes",
 test("day & night blur: Add again makes a deleted blur or helper once, wired like the rest, and says nothing more", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   const full = api.getCompLayers(false).length;
   api.deleteLayer(rec.blurs[1]); api.deleteLayer(rec.blurHelper);
   const r = G.addDayNight(map, { dayOfYear: 90, utcTime: 6 });
@@ -11171,7 +11241,7 @@ test("day & night blur: Add again makes a deleted blur or helper once, wired lik
 test("day & night blur: a Controls refresh gives an older overlay its blurs, once, and the Twilight row drives the blur helper", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   // As made before the blur: no blurs, no blur helper, no record of them.
   rec.blurs.forEach((b) => api.deleteLayer(b)); api.deleteLayer(rec.blurHelper);
   const old = Object.assign({}, rec); delete old.blurs; delete old.blurHelper;
@@ -11212,7 +11282,7 @@ const dnLightsText = (E, map, i) => E.nightOpacityExpression({ camera: map.camer
 test("day & night lights: a new overlay's opacity helpers have the lights input at 0 and the current script", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   rec.helpers.forEach((h, i) => {
     assert.equal(api.getCustomAttributeName(h, "array.3"), "lights");
     assert.equal(dnHelperVal(context, api, h, "lights"), 0);
@@ -11223,7 +11293,7 @@ test("day & night lights: a new overlay's opacity helpers have the lights input 
 test("day & night lights: Refresh gives an older overlay's opacity helpers the lights input and the current script, keeping their values", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   dnOlderHelpers(api, rec, map);
   G.prepareDayNight(map);
   rec.helpers.forEach((h, i) => {
@@ -11240,7 +11310,7 @@ test("day & night lights: Refresh gives an older overlay's opacity helpers the l
 test("day & night lights: Add day & night on an older overlay upgrades its helpers the same way", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   dnOlderHelpers(api, rec, map);
   G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
   rec.helpers.forEach((h, i) => {
@@ -11254,7 +11324,7 @@ test("day & night lights: Add day & night on an older overlay upgrades its helpe
 test("day & night lights: a second Refresh writes nothing", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   dnOlderHelpers(api, rec, map);
   G.prepareDayNight(map);
   const before = JSON.stringify(plain(api._connections));
@@ -11270,7 +11340,7 @@ test("day & night lights: a second Refresh writes nothing", () => {
 test("day & night blur: deleting the overlay removes the blurs and the helper", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   api.deleteLayer(g);
   rec.blurs.concat([rec.blurHelper]).forEach((id) => assert.equal(api.layerExists(id), false, id));
 });
@@ -11337,7 +11407,7 @@ test("clipped legs: a clip end whose draw helper is gone gets a new draw on it, 
 test("day & night blur: Refresh controls three times and Add again leave exactly one blur per night layer, also beside a user's own filter", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   const own = api.create("blurFilter", "Mine");
   api.connect(own, "id", rec.layers[2], "filters");
   for (let k = 0; k < 3; k++) context.GeoControlPanel.sync(map);
@@ -11366,7 +11436,7 @@ const masksOf = (api, mask) => api.getOutConnections(mask, "id").filter((c) => /
 test("day & night mask: a new overlay gets one hidden Night mask in its group, connected into the group's masks", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const r = G.addDayNight(map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
+  const r = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12, label: true }), rec = dnRec(api, r.groupId);
   assert.ok(rec.mask);
   assert.equal(api.getNiceName(rec.mask), "Night mask");
   assert.equal(api.getLayerType(rec.mask), "javaScriptShape");
@@ -11385,7 +11455,7 @@ test("day & night mask: a new overlay gets one hidden Night mask in its group, c
 test("day & night mask: Add again and Refresh controls x3 keep one mask, connected once; a deleted mask comes back once", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   context.GeoControlPanel.sync(map);
   const full = api.getCompLayers(false).length;
   for (let i = 0; i < 3; i++) { context.GeoControlPanel.sync(map); G.addDayNight(map, { dayOfYear: 81, utcTime: 3 }); }
@@ -11409,7 +11479,7 @@ test("day & night mask: Add again and Refresh controls x3 keep one mask, connect
 test("day & night mask: an older overlay gets its mask on refresh, one the record forgot is adopted, deleting the overlay deletes it", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), G = context.GeoScene;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   const old = Object.assign({}, rec); delete old.mask;
   api.setUserData(g, "geoDayNight", old);
   assert.equal(G.findDayNight(map).mask, rec.mask, "adopted by its tag");
@@ -11428,7 +11498,7 @@ test("day & night mask: an older overlay gets its mask on refresh, one the recor
 test("day & night: Refresh controls and Add again bring the night layers' and the mask's drawing up to date, once, touching nothing else", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   const EXPR = "generator.expression";
   context.GeoControlPanel.sync(map); // makes the Controls layers first
   const want = (id) => api.get(id, EXPR);
@@ -12190,7 +12260,7 @@ function nightFixture(zoom) {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, zoom || 4);
   context.GeoNet.cachedTile = (base) => base + ".jpg";
-  const g = context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId;
   return { context, api, map, dn: g, rec: dnRec(api, g) };
 }
 
@@ -12292,7 +12362,7 @@ test("night lights: a bent build makes one matted reference in Night lights, wit
   const { context, api } = buildSandbox();
   const map = context.GeoScene.createMap("World", { lat: 0, lon: 170, zoom: 3, rotation: 0, projection: 2 });
   context.GeoNet.cachedTile = (base) => base + ".jpg";
-  const rec = dnRec(api, context.GeoScene.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   const plan = context.GeoScene.planNightLights(map);
   assert.equal(plan.bent, true);
   const r = context.GeoScene.buildImagery(map, context.GeoSources.night(), {}, plan);
@@ -12415,7 +12485,7 @@ test("night lights: a bent build leaves the four night layers shown and the Nigh
   const G = context.GeoScene;
   const map = G.createMap("World", { lat: 0, lon: 170, zoom: 3, rotation: 0, projection: 2 });
   context.GeoNet.cachedTile = (base) => base + ".jpg";
-  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
   G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.equal(rec.layers.length, 4);
   rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown"));
@@ -12545,7 +12615,7 @@ function satellitePanelMap(context, api) {
   const map = context.currentMap(), G = context.GeoScene, eox = tileSource(context);
   const realCached = context.GeoNet.cachedTile;
   context.GeoNet.cachedTile = (base) => base + ".jpg";
-  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 });
   G.buildImagery(map, eox, {}, G.planImagery(map, eox, {}));
   context.GeoNet.cachedTile = () => null; // night tiles are not downloaded yet
   return { map, realCached };
