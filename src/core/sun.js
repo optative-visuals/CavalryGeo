@@ -96,13 +96,34 @@ var GeoSun = (function () {
     return res;
   }
 
-  function drawRings(path, rings, project) {
+  // How far (screen px) the night is drawn past the Earth's edge, so the night layers' blur fades out
+  // there, where the Night mask cuts it away, and not inside the Earth.
+  function overscan(cam) { return 2 * blurAmount(cam.zoom, 1) + 2; }
+
+  // Equal Earth: how many degrees of lon to draw past +-180 so the extra width is at least 2 M px, measured
+  // at the ring's highest latitude (where a degree of lon is narrowest), at most 30.
+  function overscanLon(ring, cam, M) {
+    var top = 0, i;
+    for (i = 0; i < ring.length; i++) top = Math.max(top, Math.abs(ring[i][1]));
+    var pr = GeoProjection.makeProjector({ lat: 0, lon: 0, zoom: cam.zoom, rotation: 0, projection: 1 }), a = [0, 0], b = [0, 0];
+    pr(0, top, a); pr(1, top, b);
+    var w = Math.abs(b[0] - a[0]);
+    return w < 1e-9 ? 30 : Math.min(30, 2 * M / w);
+  }
+
+  // push: { m, lim, ux, uy } moves a point whose |lat| >= lim (on the map's top or bottom edge) m px
+  // outward along the screen's up direction (ux, uy).
+  function drawRings(path, rings, project, push) {
     var out = [0, 0];
     for (var i = 0; i < rings.length; i++) {
       var r = rings[i];
       if (r.length < 3) continue;
       for (var k = 0; k < r.length; k++) {
         project(r[k][0], r[k][1], out);
+        if (push && Math.abs(r[k][1]) >= push.lim) {
+          var sg = r[k][1] > 0 ? 1 : -1;
+          out[0] += sg * push.m * push.ux; out[1] += sg * push.m * push.uy;
+        }
         if (k === 0) path.moveTo(out[0], out[1]); else path.lineTo(out[0], out[1]);
       }
       path.close();
@@ -123,13 +144,14 @@ var GeoSun = (function () {
     var nz = sl * Math.sin(p) + cl * Math.cos(p) * Math.cos(dl);
     var h = Math.sin(num(depression, 0) * D2R), rho = Math.sqrt(1 - h * h), sxy = Math.sqrt(nx * nx + ny * ny);
     var first = true;
+    var over = 1 + overscan(cam) / R; // the limb is drawn this much further out
     function put(x, y) {
       x *= R; y *= R;
       var X = x * cr - y * sr, Y = x * sr + y * cr;
       if (first) { path.moveTo(X, Y); first = false; } else path.lineTo(X, Y);
     }
     if (sxy < 1e-9) { // the antisolar point faces the camera (night in the middle) or the back
-      if (nz > 0) { for (k = 0; k < N; k++) put(rho * Math.cos(2 * Math.PI * k / N), rho * Math.sin(2 * Math.PI * k / N)); path.close(); }
+      if (nz > 0) { var rr = h === 0 ? over : rho; for (k = 0; k < N; k++) put(rr * Math.cos(2 * Math.PI * k / N), rr * Math.sin(2 * Math.PI * k / N)); path.close(); }
       return path;
     }
     // Terminator circle: h n + rho (cos t u + sin t v), u level with the screen (uz = 0).
@@ -151,7 +173,7 @@ var GeoSun = (function () {
     function rel(f) { f -= fn; while (f > Math.PI) f -= 2 * Math.PI; while (f < -Math.PI) f += 2 * Math.PI; return f; }
     var d1 = rel(Math.atan2(ty(a1), tx(a1))), d0 = rel(Math.atan2(ty(a0), tx(a0)));
     m = Math.max(1, Math.ceil(Math.abs(d0 - d1) / (2 * Math.PI) * N));
-    for (k = 1; k < m; k++) { var f = fn + d1 + (d0 - d1) * k / m; put(Math.cos(f), Math.sin(f)); }
+    for (k = 0; k <= m; k++) { var f = fn + d1 + (d0 - d1) * k / m; put(over * Math.cos(f), over * Math.sin(f)); } // both ends go straight out from the terminator
     path.close();
     return path;
   }
@@ -168,19 +190,26 @@ var GeoSun = (function () {
     if (proj >= 2) return globeNight(path, cam, doy, utc, depression);
     var ring = nightRing(doy, utc, depression), rings = [], lo = Infinity, hi = -Infinity, k;
     for (k = 0; k < ring.length; k++) { if (ring[k][0] < lo) lo = ring[k][0]; if (ring[k][0] > hi) hi = ring[k][0]; }
+    var M = overscan(cam), rot = num(cam.rotation, 0) * D2R;
+    var push = { m: M, lim: proj === 1 ? 90 - 1e-9 : GeoProjection.MAX_LAT - 1e-9, ux: -Math.sin(rot), uy: Math.cos(rot) };
     if (proj === 1) {
-      rings.push(densify(clipLon(clipLon(ring, -180, 1), 180, -1)));
-      if (hi > 180 + 1e-9) rings.push(densify(shiftRing(clipLon(ring, 180, 1), -360)));
-      if (lo < -180 - 1e-9) rings.push(densify(shiftRing(clipLon(ring, -180, -1), 360)));
+      // Cut at +-(180 + d), not at the oval: the copy of the ring a world to the left or right fills the
+      // strip past each edge, and the mask cuts it off.
+      var X = 180 + overscanLon(ring, cam, M);
+      [0, -360, 360].forEach(function (sh) {
+        var piece = clipLon(clipLon(sh === 0 ? ring : shiftRing(ring, sh), -X, 1), X, -1);
+        if (piece.length >= 3) rings.push(densify(piece));
+      });
     } else {
-      var c = num(cam.lon, 0), from = Math.min(-180, c - 180), to = Math.max(180, c + 180);
+      var c = num(cam.lon, 0), pad = M / GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(cam.zoom, 0)))) / D2R;
+      var from = Math.min(-180, c - 180) - pad, to = Math.max(180, c + 180) + pad; // a little further, so the blur fades off the edge
       var k0 = Math.floor((from - hi) / 360), k1 = Math.ceil((to - lo) / 360);
       for (k = k0; k <= k1; k++) {
         var sh = k * 360;
         if (hi + sh > from + 1e-9 && lo + sh < to - 1e-9) rings.push(sh === 0 ? ring : shiftRing(ring, sh));
       }
     }
-    drawRings(path, rings, GeoProjection.makeProjector(cam));
+    drawRings(path, rings, GeoProjection.makeProjector(cam), push);
     return path;
   }
 
@@ -190,6 +219,42 @@ var GeoSun = (function () {
     var n = Math.max(0, Math.min(100, num(night, 55)));
     if (num(twilight, 1) >= 0.5) return (1 - Math.pow(1 - n / 100, 1 / 4)) * 100;
     return Math.round(num(step, 0)) === 0 ? n : 0;
+  }
+
+  // Fast Blur amount (pixels, both axes) that smooths the four stacked steps into one gradient:
+  // half a twilight step (6 degrees of arc) on the screen at this zoom, at most 200; none for a
+  // hard edge (twilight under 0.5).
+  function blurAmount(zoom, twilight) {
+    if (num(twilight, 1) < 0.5) return 0;
+    var z = Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(zoom, 2)));
+    return Math.min(200, 0.5 * 6 * Math.PI / 180 * GeoProjection.worldScale(z));
+  }
+
+  // The Earth's outline on screen for the camera, as one closed path: the globe's disc, the Equal Earth oval
+  // (its two meridians at -180 / +180 and its two pole lines), or the Web Mercator rectangle over the longitudes the night is drawn on (the world plus the copies past the date line). The night
+  // layers are masked to it, so their blur doesn't spill past the edge.
+  function earthOutline(cam, cav) {
+    var path = new cav.Path(), proj = Math.round(num(cam.projection, 0)), k, N = 180, first = true;
+    function put(x, y) { if (first) { path.moveTo(x, y); first = false; } else path.lineTo(x, y); }
+    if (proj >= 2) {
+      var R = GeoProjection.worldScale(Math.max(0, Math.min(GeoProjection.MAX_ZOOM, num(cam.zoom, 2))));
+      for (k = 0; k < N; k++) put(R * Math.cos(2 * Math.PI * k / N), R * Math.sin(2 * Math.PI * k / N));
+      path.close();
+      return path;
+    }
+    var project = GeoProjection.makeProjector(cam), out = [0, 0], M = 90;
+    function at(lon, lat) { project(lon, lat, out); put(out[0], out[1]); }
+    if (proj === 1) {
+      for (k = 0; k <= M; k++) at(-180, -90 + 180 * k / M);   // -180 meridian, south to north
+      for (k = 1; k <= 10; k++) at(-180 + 36 * k, 90);          // north pole line
+      for (k = 1; k <= M; k++) at(180, 90 - 180 * k / M);     // +180 meridian, north to south
+      for (k = 1; k < 10; k++) at(180 - 36 * k, -90);           // south pole line
+    } else {
+      var lat = GeoProjection.MAX_LAT, c = num(cam.lon, 0), from = Math.min(-180, c - 180), to = Math.max(180, c + 180); // nightPath's span
+      at(from, lat); at(to, lat); at(to, -lat); at(from, -lat);
+    }
+    path.close();
+    return path;
   }
 
   function two(n) { return (n < 10 ? "0" : "") + n; }
@@ -218,6 +283,6 @@ var GeoSun = (function () {
     return p;
   }
 
-  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, stepOpacity: stepOpacity, timeText: timeText, timeLabel: timeLabel };
+  return { dayOfYear: dayOfYear, subsolar: subsolar, nightRing: nightRing, nightPath: nightPath, earthOutline: earthOutline, stepOpacity: stepOpacity, blurAmount: blurAmount, timeText: timeText, timeLabel: timeLabel };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoSun;

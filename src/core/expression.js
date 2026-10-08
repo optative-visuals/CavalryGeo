@@ -189,6 +189,31 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
   }
 
+  // Globe legs are cut off where they go round the back: three helpers per leg (trim start, trim
+  // end, fade) share one input list, so they are wired alike. The fade inputs come first (an older
+  // route's fade helper keeps its two and gains the rest); the leg's ends and offsets are read
+  // from the line itself.
+  var CLIP_INPUTS = FADE_INPUTS.concat([["aX", 0], ["aY", 0], ["bX", 0], ["bY", 0], ["startX", 0], ["startY", 0], ["endX", 0], ["endY", 0],
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0], ["draw", 100]]);
+  // Every leg on the globe is clipped (whatever its Shape); the span (null = all hidden) is _sp.
+  // The fade only asks whether anything is in front.
+  var CLIP_SRC = "var _gl = Math.round(_i15) === 2;\n" +
+    "var _gc = {cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19};\n" +
+    "var _sp = _gl ? GeoCurve.legSpan([_i2, _i3], [_i4, _i5], [_i6, _i7], [_i8, _i9], " +
+    "_gc, _i10) : {s0: 0, s1: 1};\n";
+  function clipExpression(curveSrc, meta, body, src) {
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(CLIP_INPUTS) + (src || CLIP_SRC) + body + "\n";
+  }
+  var FADE_SRC = "var _gl = Math.round(_i15) === 2;\n" +
+    "var _gc = {cam: {lat: _i11, lon: _i12, zoom: _i13, rotation: _i14, projection: _i15}, aLon: _i16, aLat: _i17, bLon: _i18, bLat: _i19};\n";
+  // Trim start: the span's start, never past the draw (so trim start <= trim end).
+  function routeClipStartExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "Math.min(_sp ? _sp.s0 * 100 : 0, _i20);"); }
+  // Trim end: the draw, held at the span's end.
+  function routeClipEndExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_sp ? Math.min(_i20, _sp.s1 * 100) : _i20);"); }
+  // Opacity: fully shown unless none of the leg is visible; legs that are not clipped still
+  // fade with their stops.
+  function routeClipFadeExpression(curveSrc, meta) { return clipExpression(curveSrc, meta, "(_gl ? (GeoCurve.anyVisible(_gc) ? 100 : 0) : Math.min(_i0, _i1));", FADE_SRC); }
+
   // Route travellers: a leg's copy sits at the tip of its draw-on (Cavalry wraps 100 % back
   // to the start, so stop just short) and only shows on the leg currently drawing.
   var TRAVELLER_TIP_INPUTS = [["drawOn", 100]];
@@ -230,10 +255,13 @@ var GeoExpression = (function () {
   function travellerShowInputs(laterCount) {
     var inputs = [["drawOn", 100], ["legOpacity", 100]];
     for (var k = 1; k <= laterCount; k++) inputs.push(["later" + k, 0]);
+    // The leg's trim start and un-clipped draw: the copy hides while its tip is before the clip
+    // start, or after the draw has gone past a clipped end (both 0 / absent on an unclipped leg).
+    inputs.push(["trimStart", 0], ["drawFull", 0]);
     return inputs;
   }
   function travellerShowExpression(meta, laterCount) {
-    var cond = "_i0 > 0";
+    var cond = "_i0 > _i" + (laterCount + 2) + " && _i" + (laterCount + 3) + " <= _i0 + 1e-6";
     for (var k = 0; k < laterCount; k++) cond += " && _i" + (k + 2) + " <= 0";
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(travellerShowInputs(laterCount)) + "((" + cond + ") ? _i1 : 0);\n";
   }
@@ -271,6 +299,21 @@ var GeoExpression = (function () {
       "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1, _s = isFinite(Number(_i2)) ? Math.round(Number(_i2)) : 0;\n" +
       "(_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n";
   }
+  // Fast Blur amount for the night layers' blurs: the same formula as GeoSun.blurAmount (a unit test
+  // keeps them equal); the [x, y] it returns drives every blur's Amount.
+  var NIGHT_BLUR_INPUTS = [["zoom", 2], ["twilight", 1]];
+  function nightBlurExpression(meta) {
+    return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_BLUR_INPUTS) +
+      "var _z = Math.max(0, Math.min(22, isFinite(Number(_i0)) ? Number(_i0) : 2));\n" +
+      "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1;\n" +
+      "var _a = _t >= 0.5 ? Math.min(200, 0.5 * 6 * Math.PI / 180 * (256 * Math.pow(2, _z) / (2 * Math.PI))) : 0;\n" +
+      "[_a, _a];\n";
+  }
+  // The Earth's outline for the night mask (GeoSun.earthOutline).
+  function nightMaskExpression(src, meta) {
+    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(CAMERA_FIVE) +
+      "GeoSun.earthOutline({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}, cavalry);\n";
+  }
   function timeLabelExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
       "GeoSun.timeLabel({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, dayOfYear: _i5, utcTime: _i6, compW: _i7, compH: _i8, corner: _i9, margin: _i10, size: _i11}, cavalry);\n";
@@ -278,7 +321,7 @@ var GeoExpression = (function () {
 
   return {
     NIGHT_INPUTS: NIGHT_INPUTS, NIGHT_OPACITY_INPUTS: NIGHT_OPACITY_INPUTS, TIME_LABEL_INPUTS: TIME_LABEL_INPUTS,
-    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, timeLabelExpression: timeLabelExpression,
+    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, NIGHT_BLUR_INPUTS: NIGHT_BLUR_INPUTS, NIGHT_MASK_INPUTS: CAMERA_FIVE, nightBlurExpression: nightBlurExpression, nightMaskExpression: nightMaskExpression, timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
@@ -290,7 +333,7 @@ var GeoExpression = (function () {
     writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression, imageryViewExpression: imageryViewExpression,
-    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
+    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
     CALLOUT_GEOM_INPUTS: CALLOUT_GEOM_INPUTS, CALLOUT_DRAW_INPUTS: CALLOUT_DRAW_INPUTS, calloutEdgeExpression: calloutEdgeExpression, calloutBendExpression: calloutBendExpression, calloutDrawExpression: calloutDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,

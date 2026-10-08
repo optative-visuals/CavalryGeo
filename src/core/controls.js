@@ -37,7 +37,7 @@ var GeoControls = (function () {
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
     calloutDraw: [CO_DRAW, CO_STYLE], calloutBend: [CO_STYLE], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
-    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
+    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
@@ -265,7 +265,8 @@ var GeoControls = (function () {
       valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(N_TIME, TL("utcTime")), { hardMin: 0, hardMax: 24 });
       value("dn:colour", "color", dsn + "Night colour", nl, FILL);
       value("dn:night", "double", dsn + "Night opacity", nh, NH_NIGHT, { hardMin: 0, hardMax: 100 });
-      value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", nh, NH_TWILIGHT, choice(1));
+      // The Night blur helper's twilight is the same input number, so one value drives all of them.
+      value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", dn.blurHelper ? nh.concat([dn.blurHelper]) : nh, NH_TWILIGHT, choice(1));
       direct(dn.id, "hidden", dsn + "Hide");
       if (tl) {
         var tn = "Time label" + SEP;
@@ -290,7 +291,7 @@ var GeoControls = (function () {
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var dn = model.dayNight;
-    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], [dn.label]).forEach(add); }
+    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label]).forEach(add); }
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};

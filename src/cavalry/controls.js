@@ -283,7 +283,8 @@ var GeoControlPanel = (function () {
     });
     var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
     model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
-      helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), label: dnMember(dn.label, S.timeLabel) } : null;
+      helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), blurs: dn.blurs.filter(Boolean),
+      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel) } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -462,6 +463,8 @@ var GeoControlPanel = (function () {
     var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: GeoScene.findImagery(map) };
     found.order = mapOrder(map, found.imagery);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
+    // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
+    attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {

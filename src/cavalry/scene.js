@@ -244,7 +244,9 @@ var GeoScene = (function () {
 
   // A "Leg k draw" helper: the route's Travel % -> this leg's trim end. A helper that can't be
   // set up and wired is deleted again before the error goes on.
-  function addLegDraw(map, parentId, line, index, count, track) {
+  // clipEnd (a new-style leg's trim-end clip helper, already on the line's trim end) takes the draw
+  // as its input instead of the line.
+  function addLegDraw(map, parentId, line, index, count, track, clipEnd) {
     var id = api.create(A.CAMERA_LAYER_TYPE, "Leg " + (index + 1) + " draw");
     if (track) track(id);
     try {
@@ -252,7 +254,69 @@ var GeoScene = (function () {
       setOne(id, A.CAMERA_EXPR_ATTR, GeoExpression.routeDrawExpression({ camera: map.cameraId, category: "routeDraw" }));
       api.parent(id, parentId);
       try { setOne(line, "stroke.trim", true); } catch (e) { /* draw-on stays off */ }
-      api.connect(id, A.DRIVER_OUTPUT_ATTR, line, "stroke.trimEnd", true);
+      if (clipEnd) api.connect(id, A.DRIVER_OUTPUT_ATTR, clipEnd, A.CAMERA_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.CLIP_INPUTS, "draw"), true);
+      else api.connect(id, A.DRIVER_OUTPUT_ATTR, line, "stroke.trimEnd", true);
+    } catch (e) {
+      try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ }
+      throw e;
+    }
+    return id;
+  }
+
+  // Globe legs are cut off where they go round the back: a clip helper per leg trims the line to
+  // the part of its great circle that is in front (start / end) and a fade helper hides it only
+  // when none of it is. All three read the leg's ends and offsets from the line itself, the camera,
+  // and the stops' places; the start / end helpers also take the draw.
+  var CLIP_META = { start: "legClip", end: "legClip", fade: "legFade" };
+  // Adds the inputs a helper lacks (names and defaults from the list; values override).
+  function extendInputs(id, arrayAttr, inputs, values) {
+    for (var i = 0; i < inputs.length; i++) {
+      var attr = arrayAttr + "." + i;
+      if (api.hasAttribute(id, attr)) continue;
+      api.addDynamic(id, arrayAttr, "double");
+      try { api.renameAttribute(id, attr, inputs[i][0]); } catch (e) { /* display name only */ }
+      setOne(id, attr, values && values[inputs[i][0]] !== undefined ? values[inputs[i][0]] : inputs[i][1]);
+    }
+  }
+  function clipExpressionFor(map, which) {
+    var E = GeoExpression, meta = { camera: map.cameraId, category: CLIP_META[which] };
+    if (which !== "fade") meta.which = which;
+    var make = which === "start" ? E.routeClipStartExpression : (which === "end" ? E.routeClipEndExpression : E.routeClipFadeExpression);
+    return make(GEO_CURVE_SRC, meta);
+  }
+  // Connects a clip helper to the line's ends and offsets, the camera, the stops' places and the
+  // leg's shape (taken from its start handle). a / b: the leg's stops ({ position }).
+  function wireClip(map, id, line, a, b, startHandle) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, at = function (name) { return CA + "." + E.inputIndex(E.CLIP_INPUTS, name); };
+    [["aX", "generator.startPosition.x"], ["aY", "generator.startPosition.y"], ["bX", "generator.endPosition.x"], ["bY", "generator.endPosition.y"],
+      ["startX", "generator.startOffset.x"], ["startY", "generator.startOffset.y"], ["endX", "generator.endOffset.x"], ["endY", "generator.endOffset.y"]]
+      .forEach(function (c) { api.connect(line, c[1], id, at(c[0]), true); });
+    ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach(function (name, i) { api.connect(map.cameraId, CA + "." + i, id, at(name), true); });
+    api.connect(a.position, CA + ".5", id, at("aLon"), true);
+    api.connect(a.position, CA + ".6", id, at("aLat"), true);
+    api.connect(b.position, CA + ".5", id, at("bLon"), true);
+    api.connect(b.position, CA + ".6", id, at("bLat"), true);
+    if (startHandle) api.connect(startHandle, CA + "." + E.inputIndex(E.HANDLE_INPUTS, "shape"), id, at("shape"), true);
+  }
+  // A clip helper ("start" -> trim start, "end" -> trim end, "fade" -> opacity), parented and wired;
+  // one that can't be set up is deleted again before the error goes on.
+  function addLegClip(map, parentId, line, name, which, a, b, startHandle, track) {
+    var E = GeoExpression, cam = readCamera(map.cameraId);
+    var id = api.create(A.CAMERA_LAYER_TYPE, name + (which === "fade" ? " fade" : " clip " + which));
+    if (track) track(id);
+    try {
+      addInputs(id, A.CAMERA_ARRAY_ATTR, E.CLIP_INPUTS, { camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection });
+      setOne(id, A.CAMERA_EXPR_ATTR, clipExpressionFor(map, which));
+      api.parent(id, parentId);
+      wireClip(map, id, line, a, b, startHandle);
+      if (which === "fade") {
+        api.connect(a.holder, "opacity", id, A.CAMERA_ARRAY_ATTR + ".0", true);
+        api.connect(b.holder, "opacity", id, A.CAMERA_ARRAY_ATTR + ".1", true);
+        api.connect(id, A.DRIVER_OUTPUT_ATTR, line, "opacity", true);
+      } else {
+        try { setOne(line, "stroke.trim", true); } catch (e) { /* clipping stays off */ }
+        api.connect(id, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "stroke.trimStart" : "stroke.trimEnd", true);
+      }
     } catch (e) {
       try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ }
       throw e;
@@ -261,11 +325,14 @@ var GeoScene = (function () {
   }
   // A leg's trim end is the user's when it is keyframed, connected to anything, or set by hand
   // to something other than fully drawn (100): such a leg gets no draw helper.
-  function trimTaken(line) {
+  // The leg's own clip end or draw helper on the trim end is ours: only keys can make it the user's
+  // (api.get then returns the driven value, so it is never read).
+  function trimTaken(line, clipEnd, draw) {
     var from = "";
     try { from = String(api.getInConnection(line, "stroke.trimEnd") || ""); } catch (e) { from = ""; }
     var keys = [];
     try { keys = api.getKeyframeTimes(line, "stroke.trimEnd") || []; } catch (e) { keys = []; }
+    if ((clipEnd && from.indexOf(clipEnd + ".") === 0) || (draw && from.indexOf(draw + ".") === 0)) return keys.length > 0;
     if (from || keys.length > 0) return true;
     var v = NaN;
     try { v = Number(api.get(line, "stroke.trimEnd")); } catch (e) { v = NaN; }
@@ -453,10 +520,10 @@ var GeoScene = (function () {
         api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
         handle[which] = h;
       });
-      var fade = utility(name + " fade", E.FADE_INPUTS, {}, E.routeFadeExpression(meta("legFade")));
-      feed(fade, [[a.holder, "opacity"], [b.holder, "opacity"]]);
-      api.connect(fade, A.DRIVER_OUTPUT_ATTR, line, "opacity", true);
-      return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, from: placeIndex(pair[0]), to: placeIndex(pair[1]) };
+      var fade = addLegClip(map, helpers, line, name, "fade", a, b, handle.start, track);
+      var clipStart = addLegClip(map, helpers, line, name, "start", a, b, handle.start, track);
+      var clipEnd = addLegClip(map, helpers, line, name, "end", a, b, handle.start, track);
+      return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, clipStart: clipStart, clipEnd: clipEnd, from: placeIndex(pair[0]), to: placeIndex(pair[1]) };
     });
 
     // New layers land on top of their group: legs first, then stops last-to-first, so the
@@ -467,7 +534,7 @@ var GeoScene = (function () {
       api.set(stopData[i].holder, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
     }
 
-    legData.forEach(function (l, i) { l.draw = addLegDraw(map, helpers, l.line, i, legData.length, track); });
+    legData.forEach(function (l, i) { l.draw = addLegDraw(map, helpers, l.line, i, legData.length, track, l.clipEnd); });
     api.setUserData(groupId, ROUTE_KEY, {
       camera: map.cameraId, helpers: helpers,
       stops: stopData.map(function (s) { return { name: s.name, holder: s.holder, circle: s.circle, label: s.label, position: s.position, visibility: s.visibility, endPoint: s.endPoint }; }),
@@ -1441,7 +1508,7 @@ var GeoScene = (function () {
     if (rec) {
       return {
         name: rec.name, helpers: rec.helpers && layerThere(rec.helpers) ? rec.helpers : groupId,
-        legs: rec.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) { return { number: l.number, line: l.line }; })
+        legs: rec.legs.slice().sort(function (a, b) { return a.number - b.number; }).map(function (l) { return { number: l.number, line: l.line, draw: l.draw }; })
       };
     }
     var legs = findMapLayers(map).filter(function (l) { return l.meta.category === "route" && api.getParent(l.id) === groupId; });
@@ -1477,7 +1544,7 @@ var GeoScene = (function () {
     findRoutes(map).forEach(function (r) {
       claim(r.groupId, [r.groupId, r.helpers]);
       r.stops.forEach(function (s) { claim(r.groupId, [s.holder, s.circle, s.label, s.position, s.visibility, s.endPoint]); });
-      r.legs.forEach(function (l) { claim(r.groupId, [l.line, l.startHandle, l.endHandle, l.fade]); });
+      r.legs.forEach(function (l) { claim(r.groupId, [l.line, l.startHandle, l.endHandle, l.fade, l.clipStart, l.clipEnd]); });
       claim(r.groupId, routeDraws(r.groupId));
     });
     findTravellers(map).forEach(function (t) {
@@ -1521,10 +1588,11 @@ var GeoScene = (function () {
     if (rec && rec.legs) {
       try {
         rec.legs.forEach(function (l) {
-          if ((l.draw && layerThere(l.draw)) || !l.line || !layerThere(l.line) || trimTaken(l.line)) return;
+          var clipEnd = l.clipEnd && layerThere(l.clipEnd) ? l.clipEnd : null;
+          if ((l.draw && layerThere(l.draw)) || !l.line || !layerThere(l.line) || trimTaken(l.line, clipEnd)) return;
           var at = 0;
           legs.forEach(function (x, i) { if (x.line === l.line) at = i; });
-          l.draw = addLegDraw(map, rec.helpers && layerThere(rec.helpers) ? rec.helpers : g, l.line, at, count);
+          l.draw = addLegDraw(map, rec.helpers && layerThere(rec.helpers) ? rec.helpers : g, l.line, at, count, null, clipEnd);
           changed = true;
         });
       } finally {
@@ -1549,6 +1617,76 @@ var GeoScene = (function () {
     }
   }
 
+  // A route made before legs were clipped at the globe's edge: its legs gain the clip start /
+  // clip end helpers (the end only where the draw helper owns the trim end), and the fade helper
+  // gains the inputs of the new fade. Anything already there is left alone, so a second refresh
+  // changes nothing.
+  function upgradeClips(map, g) {
+    var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    if (!rec || !rec.legs || !rec.stops) return;
+    var parent = rec.helpers && layerThere(rec.helpers) ? rec.helpers : g, changed = false;
+    try {
+      rec.legs.forEach(function (l) {
+        var a = rec.stops[l.from], b = rec.stops[l.to];
+        if (!l.line || !layerThere(l.line) || !l.startHandle || !layerThere(l.startHandle) || !a || !b || !a.position || !b.position || !a.holder || !b.holder ||
+            !layerThere(a.position) || !layerThere(b.position) || !layerThere(a.holder) || !layerThere(b.holder)) return;
+        var name = "Leg " + l.number + ": " + a.name + " → " + b.name;
+        try {
+          if (l.fade && layerThere(l.fade) && !api.hasAttribute(l.fade, CA + "." + (E.CLIP_INPUTS.length - 1))) {
+            var cam = readCamera(map.cameraId);
+            extendInputs(l.fade, CA, E.CLIP_INPUTS, { camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection });
+            wireClip(map, l.fade, l.line, a, b, l.startHandle);
+            setOne(l.fade, A.CAMERA_EXPR_ATTR, clipExpressionFor(map, "fade"));
+          }
+          if (!(l.clipStart && layerThere(l.clipStart))) {
+            l.clipStart = addLegClip(map, parent, l.line, name, "start", a, b, l.startHandle);
+            changed = true;
+          }
+          // A clip end nobody connected the trim end to (and the user did not take it over) goes back on it;
+          // a trim end the user has taken over (keyed, wired elsewhere or set by hand) loses the clip end.
+          if (l.clipEnd && layerThere(l.clipEnd)) {
+            var cur = "";
+            try { cur = String(api.getInConnection(l.line, "stroke.trimEnd") || ""); } catch (e) { cur = ""; }
+            if (!cur && !trimTaken(l.line)) api.connect(l.clipEnd, A.DRIVER_OUTPUT_ATTR, l.line, "stroke.trimEnd", true);
+            if (trimTaken(l.line, l.clipEnd, l.draw)) {
+              api.deleteLayer(l.clipEnd);
+              l.clipEnd = null;
+              changed = true;
+            }
+          }
+          var from = "";
+          try { from = String(api.getInConnection(l.line, "stroke.trimEnd") || ""); } catch (e) { from = ""; }
+          if (!(l.clipEnd && layerThere(l.clipEnd)) && l.draw && layerThere(l.draw) && from.indexOf(l.draw + ".") === 0) {
+            try { api.disconnect(l.draw, A.DRIVER_OUTPUT_ATTR, l.line, "stroke.trimEnd"); } catch (e) { /* replaced by the new connection */ }
+            l.clipEnd = addLegClip(map, parent, l.line, name, "end", a, b, l.startHandle);
+            api.connect(l.draw, A.DRIVER_OUTPUT_ATTR, l.clipEnd, CA + "." + E.inputIndex(E.CLIP_INPUTS, "draw"), true);
+            changed = true;
+          }
+        } catch (e) { /* the next Controls refresh tries this leg again */ }
+      });
+    } finally {
+      if (changed) api.setUserData(g, ROUTE_KEY, rec);
+    }
+  }
+
+  // A traveller made before clipped legs: its show helpers gain the trim start / draw inputs.
+  function upgradeTravellers(map, g) {
+    var d = userData(g, TRAVELLER_KEY), rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    if (!d || !d.legs || !rec || !rec.legs) return;
+    var drawOf = {};
+    rec.legs.forEach(function (l) { if (l.line) drawOf[l.line] = l.draw; });
+    d.legs.forEach(function (leg, i) {
+      if (!leg.show || !layerThere(leg.show) || !leg.line || !layerThere(leg.line)) return;
+      var later = d.legs.length - 1 - i;
+      if (api.hasAttribute(leg.show, CA + "." + (later + 3)) || !api.hasAttribute(leg.show, CA + "." + (later + 1)) || api.hasAttribute(leg.show, CA + "." + (later + 2))) return;
+      try {
+        extendInputs(leg.show, CA, E.travellerShowInputs(later), {});
+        setOne(leg.show, A.CAMERA_EXPR_ATTR, E.travellerShowExpression({ camera: map.cameraId, category: "travellerShow" }, later));
+        wireShowClip(leg.show, { line: leg.line, draw: drawOf[leg.line] }, later);
+      } catch (e) { /* the next Controls refresh tries again */ }
+    });
+  }
+
   // Numbers routes made before route numbers (and duplicated ones) and gives legs without one a
   // draw helper. mapLayers / routes / order: the lists and Scene Window order the caller already
   // read (no extra comp scans). A route that fails is left as it is; the others still go ahead.
@@ -1561,6 +1699,8 @@ var GeoScene = (function () {
     groups.forEach(function (g) {
       try { upgradeHandles(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { prepareTravel(map, g, mapLayers); } catch (e) { /* the next Controls refresh tries again */ }
+      try { upgradeClips(map, g); } catch (e) { /* the next Controls refresh tries again */ }
+      try { upgradeTravellers(map, g); } catch (e) { /* the next Controls refresh tries again */ }
     });
   }
 
@@ -1614,6 +1754,15 @@ var GeoScene = (function () {
     for (var guard = api.getChildren(parent).length; guard > 0 && at(id) < at(below) - 1; guard--) api.moveBackward();
   }
 
+  // A traveller's show helper also reads the leg's trim start and its un-clipped draw, so the copy
+  // hides while its tip is before the leg's clip start or after a clipped end. A leg without a
+  // draw helper (the user owns its trim end) leaves Draw unconnected: it never clips.
+  function wireShowClip(show, leg, laterCount) {
+    var CA = A.CAMERA_ARRAY_ATTR;
+    api.connect(leg.line, "stroke.trimStart", show, CA + "." + (laterCount + 2), true);
+    if (leg.draw && layerThere(leg.draw)) api.connect(leg.draw, A.DRIVER_OUTPUT_ATTR, show, CA + "." + (laterCount + 3), true);
+  }
+
   // kind: "plane" | "arrow" | "dot" | "layer" (userLayerId then names the layer to send).
   // Replaces any traveller the route already had. Returns { routeName, replaced }.
   function addTraveller(map, groupId, kind, userLayerId) {
@@ -1660,6 +1809,7 @@ var GeoScene = (function () {
         api.connect(leg.line, "stroke.trimEnd", show, CA + ".0", true);
         api.connect(leg.line, "opacity", show, CA + ".1", true);
         later.forEach(function (m, k) { api.connect(m.line, "stroke.trimEnd", show, CA + "." + (k + 2), true); });
+        wireShowClip(show, leg, later.length);
         api.connect(show, A.DRIVER_OUTPUT_ATTR, dup, "opacity", true);
         // Helpers are utilities (no transform to reset); the duplicator is reset after parenting.
         api.parent(tip, info.helpers); api.parent(show, info.helpers);
@@ -2209,8 +2359,9 @@ var GeoScene = (function () {
   // ---- Day & night ---------------------------------------------------------------------------
   // One overlay per map: a group "Day & night" in the map group holding four night layers (one per
   // twilight depression, since a Cavalry shape has a single opacity) and a helpers group with one
-  // opacity helper per layer. An optional "Time label" sits in the map group like map furniture.
-  // The group's user data records every member (geoDayNight).
+  // opacity helper per layer, plus a Fast Blur per layer (all four driven by one "Night blur" helper)
+  // that smooths the steps into a gradient, and a hidden "Night mask" (the Earth's outline) in the group's masks. An optional "Time label" sits in the map group like map
+  // furniture. The group's user data records every member (geoDayNight).
   var DAYNIGHT_KEY = "geoDayNight", TIME_LABEL_NAME = "Time label", NIGHT_DEPRESSIONS = [0, 6, 12, 18];
 
   // This map's day & night group, straight from the map group's children (top first).
@@ -2232,7 +2383,7 @@ var GeoScene = (function () {
   // group's own member of that kind is used: the child night layer with that depression, the helper
   // with that step (a missing one reads as null). recorded / adopted count how each was found.
   function dayNightMembers(map, g, rec) {
-    var out = { layers: [], helpers: [], recorded: 0, adopted: 0 }, kids = null, inner = null;
+    var out = { layers: [], helpers: [], blurs: [], blurHelper: null, mask: null, blurAdopted: false, recorded: 0, adopted: 0 }, kids = null, inner = null;
     function children() { if (!kids) { try { kids = api.getChildren(g) || []; } catch (e) { kids = []; } } return kids; }
     function grandchildren() {
       if (!inner) {
@@ -2263,9 +2414,36 @@ var GeoScene = (function () {
       }
       out.layers.push(id || null); out.helpers.push(h || null);
     });
+    // The blurs and their helper (made after the first release): a recorded one counts while it sits in
+    // a group inside this one; otherwise the Fast Blur on the layer's filters, or the helper tagged
+    // dayNightBlur, among the group's own members. Not part of the score that picks between copies.
+    NIGHT_DEPRESSIONS.forEach(function (a, i) {
+      var b = (rec.blurs || [])[i], bp = b && layerThere(b) ? api.getParent(b) : null;
+      if (!(bp && bp !== g && api.getParent(bp) === g)) {
+        b = null;
+        var lay = out.layers[i], inner = grandchildren();
+        for (var q = 0; lay && q < inner.length && !b; q++) {
+          if (typeof api.getLayerType === "function" && api.getLayerType(inner[q]) === "blurFilter" && blurOnLayer(inner[q], lay)) { b = inner[q]; out.blurAdopted = true; }
+        }
+      }
+      out.blurs.push(b || null);
+    });
+    var bh = rec.blurHelper, bhp = bh && layerThere(bh) ? api.getParent(bh) : null;
+    if (!(bhp && bhp !== g && api.getParent(bhp) === g)) {
+      bh = tagged(grandchildren(), A.CAMERA_EXPR_ATTR, function (m) { return m.category === "dayNightBlur"; });
+      if (bh) out.blurAdopted = true;
+    }
+    out.blurHelper = bh || null;
+    // The night mask: a recorded one counts while it is a child of the group, otherwise the child tagged dayNightMask.
+    var mk = rec.mask;
+    if (!(mk && layerThere(mk) && api.getParent(mk) === g)) {
+      mk = tagged(children(), A.MAP_EXPR_ATTR, function (m) { return m.category === "dayNightMask"; });
+      if (mk) out.blurAdopted = true;
+    }
+    out.mask = mk || null;
     return out;
   }
-  // { groupId, layers: [4], helpers: [4], label } or null. With more than one group (a duplicate), the
+  // { groupId, layers: [4], helpers: [4], blurs: [4], blurHelper, label } or null. With more than one group (a duplicate), the
   // one whose record names its own children wins, then the one owning the most members of its own;
   // a tie goes to the top one. A copy's record is pointed at the members it adopted.
   function findDayNight(map) {
@@ -2276,14 +2454,15 @@ var GeoScene = (function () {
     });
     if (!best) return null;
     var g = best.g, rec = best.rec, m = best.m;
-    if (m.adopted && typeof api.setUserData === "function") {
+    if ((m.adopted || m.blurAdopted) && typeof api.setUserData === "function") {
       var fixed = {};
       Object.keys(rec).forEach(function (k) { fixed[k] = rec[k]; });
       fixed.layers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.layers[i] || (rec.layers || [])[i] || null; });
       fixed.helpers = NIGHT_DEPRESSIONS.map(function (a, i) { return m.helpers[i] || (rec.helpers || [])[i] || null; });
+      if (m.blurAdopted) { fixed.blurs = m.blurs; fixed.blurHelper = m.blurHelper; fixed.mask = m.mask; }
       try { api.setUserData(g, DAYNIGHT_KEY, fixed); } catch (e) { /* read again next time */ }
     }
-    return { groupId: g, layers: m.layers, helpers: m.helpers, label: ownTimeLabel(map, rec.label) };
+    return { groupId: g, layers: m.layers, helpers: m.helpers, blurs: m.blurs, blurHelper: m.blurHelper, mask: m.mask, label: ownTimeLabel(map, rec.label) };
   }
   // Time labels of this map in the map group that the overlay's record doesn't name (left behind when
   // their group was deleted).
@@ -2295,7 +2474,7 @@ var GeoScene = (function () {
     var out = {}, f = findDayNight(map);
     if (!f) return out;
     out[f.groupId] = true;
-    f.layers.concat(f.helpers, [f.label]).forEach(function (id) { if (id) out[id] = true; });
+    f.layers.concat(f.helpers, f.blurs, [f.blurHelper, f.mask, f.label]).forEach(function (id) { if (id) out[id] = true; });
     f.helpers.forEach(function (id) { var p = id ? api.getParent(id) : ""; if (p && p !== f.groupId) out[p] = true; });
     return out;
   }
@@ -2377,6 +2556,113 @@ var GeoScene = (function () {
     if (isNew(track, layer)) { api.parent(layer, g); api.set(layer, identityTransform()); }
     return [layer, helper];
   }
+  // Whether this Fast Blur already sits in the layer's filters (a layer's own "filters" input reads back
+  // empty; the blur's outputs list "layer.filters.N", whatever other filters the layer has).
+  function blurOnLayer(blur, layer) {
+    try { return (api.getOutConnections(blur, "id") || []).some(function (c) { return String(c).indexOf(layer + ".filters.") === 0; }); } catch (e) { return false; }
+  }
+  // Whether this mask shape is already in the group's masks list (the group's own "masks" input reads back
+  // empty, like "filters"; the mask's outputs list "group.masks.N").
+  function maskOnGroup(mask, group) {
+    try { return (api.getOutConnections(mask, "id") || []).some(function (c) { return String(c).indexOf(group + ".masks.") === 0; }); } catch (e) { return false; }
+  }
+  // The hidden "Night mask" shape (the Earth's outline for the camera) connected into the masks of the
+  // group holding the night layers, so their blur is cut at the Earth's edge. Makes whichever is missing
+  // once; returns the mask's id. The time label sits outside the group, so the mask never clips it.
+  function ensureNightMask(map, g, mask, track) {
+    var E = GeoExpression, MA = A.MAP_ARRAY_ATTR;
+    if (!mask || !layerThere(mask)) {
+      mask = track(api.create(A.MAP_LAYER_TYPE, "Night mask"));
+      addInputs(mask, MA, E.NIGHT_MASK_INPUTS);
+      setOne(mask, A.MAP_EXPR_ATTR, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
+      connectCamera(map.cameraId, mask, MA);
+      api.parent(mask, g);
+      api.set(mask, identityTransform());
+      api.set(mask, { hidden: true });
+    }
+    if (!maskOnGroup(mask, g)) api.connect(mask, "id", g, "masks");
+    return mask;
+  }
+  // Rewrites the drawing script of each night layer and of the Night mask to the current one when it differs
+  // (layers made by an earlier version carry the old drawing); inputs, values and connections stay. Compares
+  // first, so a layer that is up to date is not written.
+  function refreshNightScripts(map, layers, mask) {
+    var E = GeoExpression;
+    function fresh(id, expr) {
+      if (!id || !layerThere(id)) return;
+      var now = String(readExpr(id, A.MAP_EXPR_ATTR) || "");
+      if (now !== expr) setOne(id, A.MAP_EXPR_ATTR, expr);
+    }
+    layers.forEach(function (id, i) { fresh(id, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: NIGHT_DEPRESSIONS[i] })); });
+    fresh(mask, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
+  }
+  // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
+  // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
+  // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
+  // Everything it makes goes through track.
+  function ensureNightBlur(map, g, layers, helpers, blurs, blurHelper, track) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, out = { blurs: blurs.slice(), blurHelper: blurHelper && layerThere(blurHelper) ? blurHelper : null };
+    var holder = null;
+    helpers.forEach(function (h) { if (h && !holder && layerThere(h)) holder = api.getParent(h); });
+    if (!holder) holder = api.getChildren(g).filter(function (id) { return api.getNiceName(id) === "Day & night helpers"; })[0] || null;
+    if (!out.blurHelper) {
+      if (!holder) holder = makeHelperGroup(g, track);
+      var bh = track(api.create(A.CAMERA_LAYER_TYPE, "Night blur"));
+      addInputs(bh, CA, E.NIGHT_BLUR_INPUTS, { zoom: readCamera(map.cameraId).zoom });
+      setOne(bh, A.CAMERA_EXPR_ATTR, E.nightBlurExpression({ camera: map.cameraId, category: "dayNightBlur" }));
+      api.parent(bh, holder);
+      api.connect(map.cameraId, CA + ".2", bh, CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "zoom"), true);
+      var src = helpers.filter(function (h) { return h && layerThere(h); })[0];
+      if (src) {
+        var from = "", at = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight"), to = CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight");
+        try { from = String(api.getInConnection(src, at) || ""); } catch (e) { from = ""; }
+        if (from.indexOf(".") > 0) api.connect(from.slice(0, from.indexOf(".")), from.slice(from.indexOf(".") + 1), bh, to, true);
+        else setOne(bh, to, api.get(src, at));
+      }
+      out.blurHelper = bh;
+    }
+    layers.forEach(function (layer, i) {
+      if (!layer || !layerThere(layer)) return;
+      var b = out.blurs[i] && layerThere(out.blurs[i]) ? out.blurs[i] : null;
+      if (!b) {
+        if (!holder) holder = makeHelperGroup(g, track);
+        b = track(api.create("blurFilter", "Night blur " + NIGHT_DEPRESSIONS[i] + "°"));
+        setOne(b, "amount", { x: 0, y: 0 });
+        api.parent(b, holder);
+      }
+      var driven = "";
+      try { driven = String(api.getInConnection(b, "amount") || ""); } catch (e) { driven = ""; }
+      if (!blurOnLayer(b, layer)) api.connect(b, "id", layer, "filters");
+      if (driven.indexOf(out.blurHelper + ".") !== 0) api.connect(out.blurHelper, A.DRIVER_OUTPUT_ATTR, b, "amount", true);
+      out.blurs[i] = b;
+    });
+    return out;
+  }
+
+  // The Controls refresh: an overlay made before the blur gets its blurs and helper; one that has them
+  // is left as it is. What was made is deleted again if the work fails.
+  function prepareDayNight(map) {
+    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return;
+    var f = findDayNight(map);
+    if (!f) return;
+    var made = [];
+    function track(id) { made.push(id); return id; }
+    try {
+      var res = ensureNightBlur(map, f.groupId, f.layers, f.helpers, f.blurs, f.blurHelper, track);
+      var mask = ensureNightMask(map, f.groupId, f.mask, track);
+      refreshNightScripts(map, f.layers, mask);
+      if (made.length) {
+        var old = userData(f.groupId, DAYNIGHT_KEY) || {}, fixed = {};
+        Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
+        fixed.blurs = res.blurs; fixed.blurHelper = res.blurHelper; fixed.mask = mask;
+        api.setUserData(f.groupId, DAYNIGHT_KEY, fixed);
+      }
+    } catch (e) {
+      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
+      throw e;
+    }
+  }
+
   // True when id was made by this call (track keeps the list).
   function isNew(track, id) { return track.made.indexOf(id) >= 0; }
 
@@ -2415,14 +2701,17 @@ var GeoScene = (function () {
           layers[k] = pair[0]; helpers[k] = pair[1];
         }
         var restored = made.filter(function (id) { return id !== holder; }).length;
+        var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
+        var maskId = ensureNightMask(map, found.groupId, found.mask, track);
+        refreshNightScripts(map, layers, maskId);
         label = found.label;
         if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
         found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
         if (label && !isNew(track, label)) setDayNightTime(map, label, E.TIME_LABEL_INPUTS, given, kept);
-        if (label !== found.label || restored) {
+        if (label !== found.label || restored || made.length > madeBefore) {
           var old = userData(found.groupId, DAYNIGHT_KEY) || {}, fixed = {};
           Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label;
+          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label; fixed.blurs = blur.blurs; fixed.blurHelper = blur.blurHelper; fixed.mask = maskId;
           api.setUserData(found.groupId, DAYNIGHT_KEY, fixed);
         }
         return { groupId: found.groupId, created: false, restored: restored, kept: keptNames() };
@@ -2437,10 +2726,12 @@ var GeoScene = (function () {
         var p = makeNightPair(map, i, null, null, g, box, day, time, colour, track);
         made4.push(p[0]); helpers4.push(p[1]);
       });
+      var blur4 = ensureNightBlur(map, g, made4, helpers4, [], null, track);
+      var mask4 = ensureNightMask(map, g, null, track);
       label = null;
       if (opts.label && strays.length) { label = strays.shift(); setDayNightTime(map, label, E.TIME_LABEL_INPUTS, { dayOfYear: day, utcTime: time }, kept); }
       else if (opts.label) label = createTimeLabel(map, day, time, track);
-      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, label: label });
+      api.setUserData(g, DAYNIGHT_KEY, { camera: map.cameraId, layers: made4, helpers: helpers4, blurs: blur4.blurs, blurHelper: blur4.blurHelper, mask: mask4, label: label });
       try { stackDayNight(map, g); } catch (e1) { /* cosmetic: it stays where it landed */ }
       // Without the label option, labels left behind by a deleted overlay go (so they're never doubled).
       if (!opts.label) strays.forEach(function (id) { try { deleteIfThere(id); } catch (e4) { /* left in place */ } });
@@ -2731,7 +3022,7 @@ var GeoScene = (function () {
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
-    addDayNight: addDayNight, findDayNight: findDayNight, dayNightParts: dayNightParts,
+    addDayNight: addDayNight, prepareDayNight: prepareDayNight, findDayNight: findDayNight, dayNightParts: dayNightParts,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
