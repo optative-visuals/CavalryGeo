@@ -146,12 +146,19 @@ var GeoScene = (function () {
 
   function layerMeta(id) { return GeoExpression.readTag(readExpr(id, A.MAP_EXPR_ATTR), "GEO_META"); }
 
+  // The call that follows a layer's data: its options (the comp frame, nearest, whole) are written there.
+  function callOf(expr) { var i = expr.lastIndexOf("GEO_DATA_END*/"); return i < 0 ? expr : expr.slice(i); }
+  // frame: the inputs of the comp size (null for a layer that does not repeat); nearest / whole: how a single thing or a highlight draws.
   function findMapLayers(map) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
       var expr = readExpr(id, A.MAP_EXPR_ATTR), meta = GeoExpression.readTag(expr, "GEO_META");
       // size (the expression's length, data included) tells a caller whether a layer's data changed
-      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length });
+      if (meta && meta.camera === map.cameraId) {
+        var call = callOf(expr);
+        out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length, frame: GeoExpression.frameInputs(call),
+          nearest: call.indexOf(", nearest: true") >= 0, whole: call.indexOf("whole: true") >= 0 });
+      }
     });
     return out;
   }
@@ -452,6 +459,62 @@ var GeoScene = (function () {
         wireHandleExtras(map, h, a.position, b.position);
         setOne(h, A.CAMERA_EXPR_ATTR, E.routeHandleExpression(GEO_CURVE_SRC, { camera: map.cameraId, category: "legHandle" }, w[0]));
       });
+    });
+  }
+
+  // A route made before the date line: its stops gain the chained longitude and the route's reference longitude, and its
+  // handles the chained ends, worked out from its legs in travel order (the chain a new route is drawn with). Only a route
+  // whose stops lack the chain is worked out: a current route keeps its own (a pinned stop keeps the chain it was dropped
+  // on). A place visited a whole turn apart (round the world) needs a holder of its own for the second visit, which an
+  // older route does not have, so such a route stays unchained. Handles are written before stops, so a refresh that is
+  // interrupted is tried again (the stops are what say a route is still older).
+  function upgradeChains(map, g) {
+    var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    if (!rec || !rec.stops || !rec.legs || !rec.legs.length) return;
+    var stops = rec.stops, chainIn = E.inputIndex(E.ROUTE_STOP_INPUTS, "chainLon"), refIn = E.inputIndex(E.ROUTE_STOP_INPUTS, "refLon");
+    if (!stops.every(function (s) { return !!s && !!s.position && layerThere(s.position); })) return;
+    if (!stops.some(function (s) { return !api.hasAttribute(s.position, CA + "." + chainIn); })) return;
+    // Travel order: the first leg's start, then each leg's end (each leg starts where the one before it ended).
+    var seq = [rec.legs[0].from];
+    for (var i = 0; i < rec.legs.length; i++) {
+      if (rec.legs[i].from !== seq[seq.length - 1]) return;
+      seq.push(rec.legs[i].to);
+    }
+    if (seq.some(function (h) { return !stops[h]; })) return;
+    var lons = seq.map(function (h) { return Number(api.get(stops[h].position, CA + ".5")); });
+    if (!lons.every(isFinite)) return;
+    var chained = GeoRoutes.chainLons(lons), chainOf = {};
+    for (var k = 0; k < seq.length; k++) {
+      if (chainOf[seq[k]] === undefined) chainOf[seq[k]] = chained[k];
+      else if (Math.abs(chainOf[seq[k]] - chained[k]) > 1e-9) return;
+    }
+    var refLon = (chained[0] + chained[chained.length - 1]) / 2;
+    // A stop no leg visits keeps its own longitude as its chain.
+    stops.forEach(function (s, h) { if (chainOf[h] === undefined) chainOf[h] = Number(api.get(s.position, CA + ".5")); });
+    var aAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "aChainLon"), bAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "bChainLon"), rAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "refLon");
+    var cameraCat = { camera: map.cameraId, category: "legHandle" };
+    rec.legs.forEach(function (l) {
+      [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(function (w) {
+        var hd = w[0];
+        if (!hd || !layerThere(hd)) return;
+        extendInputs(hd, CA, E.HANDLE_INPUTS, { aChainLon: chainOf[l.from], bChainLon: chainOf[l.to], refLon: refLon });
+        var o = {};
+        if (Number(api.get(hd, aAt)) !== chainOf[l.from]) o[aAt] = chainOf[l.from];
+        if (Number(api.get(hd, bAt)) !== chainOf[l.to]) o[bAt] = chainOf[l.to];
+        if (Number(api.get(hd, rAt)) !== refLon) o[rAt] = refLon;
+        if (Object.keys(o).length) api.set(hd, o);
+        var fresh = E.routeHandleExpression(GEO_CURVE_SRC, cameraCat, w[1], { chained: true });
+        if (readExpr(hd, A.CAMERA_EXPR_ATTR) !== fresh) setOne(hd, A.CAMERA_EXPR_ATTR, fresh);
+      });
+    });
+    stops.forEach(function (s, h) {
+      var pos = s.position, o = {};
+      extendInputs(pos, CA, E.ROUTE_STOP_INPUTS, { chainLon: chainOf[h], refLon: refLon });
+      if (Number(api.get(pos, CA + "." + chainIn)) !== chainOf[h]) o[CA + "." + chainIn] = chainOf[h];
+      if (Number(api.get(pos, CA + "." + refIn)) !== refLon) o[CA + "." + refIn] = refLon;
+      if (Object.keys(o).length) api.set(pos, o);
+      var fresh = E.routeStopDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "stopDriver" }, A.DRIVER_RETURN);
+      if (readExpr(pos, A.CAMERA_EXPR_ATTR) !== fresh) setOne(pos, A.CAMERA_EXPR_ATTR, fresh);
     });
   }
 
@@ -1941,6 +2004,7 @@ var GeoScene = (function () {
     numberRoutes(map, groups);
     groups.forEach(function (g) {
       try { upgradeHandles(map, g); } catch (e) { /* the next Controls refresh tries again */ }
+      try { upgradeChains(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { prepareTravel(map, g, mapLayers); } catch (e) { /* the next Controls refresh tries again */ }
       try { upgradeClips(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { upgradeTravellers(map, g); } catch (e) { /* the next Controls refresh tries again */ }
@@ -2396,6 +2460,16 @@ var GeoScene = (function () {
   // line stays exactly where it was) and the current script. Compares first, so a second refresh writes nothing.
   function upgradeCalloutAnchors(m) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    // The place helper sits on the copy nearest the camera (a callout made before that projects onto the global place).
+    if (m.place && layerThere(m.place)) {
+      try {
+        var nowPlace = readExpr(m.place, A.CAMERA_EXPR_ATTR), placeMeta = E.readTag(nowPlace, "GEO_META");
+        if (placeMeta) {
+          var freshPlace = E.labelDriverExpression(GEO_RUNTIME_SRC, placeMeta, A.DRIVER_RETURN, { nearest: true });
+          if (nowPlace !== freshPlace) setOne(m.place, A.CAMERA_EXPR_ATTR, freshPlace);
+        }
+      } catch (e) { /* the next Controls refresh tries this helper again */ }
+    }
     var helpers = [[m.edge, E.CALLOUT_GEOM_INPUTS, E.calloutEdgeExpression], [m.bend, E.CALLOUT_GEOM_INPUTS, E.calloutBendExpression]];
     (m.draws || []).forEach(function (id) { helpers.push([id, E.CALLOUT_DRAW_INPUTS, E.calloutDrawExpression]); });
     helpers.forEach(function (h) {
@@ -3172,6 +3246,73 @@ var GeoScene = (function () {
     });
   }
 
+  // The data layers that repeat on a flat map: each display's inputs and its expression builder (null for the rest).
+  function dataFrame(display) {
+    var E = GeoExpression;
+    if (display === "regions") return { inputs: E.REGION_INPUTS, build: function (data, meta) { return E.regionsExpression(GEO_DATA_RUNTIME_SRC, data, meta); } };
+    if (display === "bubbles") return { inputs: E.BUBBLE_INPUTS, build: function (data, meta) { return E.bubblesExpression(GEO_DATA_RUNTIME_SRC, data, meta, { ellipseScale: A.ELLIPSE_SCALE }); } };
+    if (display === "labels") return { inputs: E.VALUE_LABEL_INPUTS, build: function (data, meta) { return E.valueLabelsExpression(GEO_DATA_RUNTIME_SRC, data, meta); } };
+    return null;
+  }
+  // Layers made before the date line, brought up to date by Refresh controls (a layer already current is not written).
+  // Base and extract layers and the data layers' regions, bubbles and value labels gain the comp size as their last inputs
+  // (compW, compH, appended: no earlier input moves) and the frame in their call, so they repeat on a flat map. Pins and
+  // labels on the map draw the copy nearest the camera, and highlight shapes draw whole. An old-style route's stop (a pin or
+  // label in the route's group, not the map's) and its legs stay as they are. Each layer and driver is guarded: a failing
+  // one is tried again by the next refresh. mapLayers / drivers: the lists the sync already read (no comp scan here).
+  function upgradeMapLayers(map, mapLayers, drivers) {
+    var E = GeoExpression, RT = GEO_RUNTIME_SRC, MA = A.MAP_ARRAY_ATTR, EX = A.MAP_EXPR_ATTR, size = compSize();
+    var comp = { compW: size.width, compH: size.height };
+    mapLayers.forEach(function (l) {
+      var c = l.meta.category, df = c === "data" ? dataFrame(l.meta.display) : null;
+      try {
+        if (c === "pin" || c === "label") {
+          if (l.nearest || api.getParent(l.id) !== map.groupId) return;
+          var pointData = readLayerData(l.id);
+          setOne(l.id, EX, E.mapLayerExpression(RT, pointData, l.meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: true }));
+        } else if (c === "highlight") {
+          if (l.whole) return;
+          var shapeData = readLayerData(l.id);
+          setOne(l.id, EX, E.highlightLayerExpression(RT, shapeData, l.meta, { ellipseScale: A.ELLIPSE_SCALE }));
+        } else if (df) {
+          if (l.frame) return;
+          var regionData = readLayerData(l.id);
+          extendInputs(l.id, MA, df.inputs, comp);
+          setOne(l.id, EX, df.build(regionData, l.meta));
+        } else if (GeoControls.BASE.indexOf(c) >= 0 || c === "extract") {
+          if (l.frame) return;
+          var baseData = readLayerData(l.id);
+          extendInputs(l.id, MA, E.MAP_LAYER_INPUTS, comp);
+          setOne(l.id, EX, E.mapLayerExpression(RT, baseData, l.meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: false, single: false }));
+        }
+      } catch (e) { /* the next Controls refresh tries this layer again */ }
+    });
+    (drivers || []).forEach(function (d) {
+      try {
+        // A label on a route's stop (in the route's group) keeps its place: only the map's own labels are nearest.
+        if (api.getParent(d.driver) !== map.groupId) return;
+        var now = readExpr(d.driver, A.CAMERA_EXPR_ATTR), meta = E.readTag(now, "GEO_META");
+        if (!meta) return;
+        var fresh = E.labelDriverExpression(RT, meta, A.DRIVER_RETURN, { nearest: true });
+        if (now !== fresh) setOne(d.driver, A.CAMERA_EXPR_ATTR, fresh);
+      } catch (e) { /* the next Controls refresh tries this driver again */ }
+    });
+  }
+  // Keeps the comp size in step with the composition in every repeating layer's frame inputs (the layers can't read it).
+  // mapLayers: the list the sync read (a layer upgraded in this refresh already has the size).
+  function fitLayers(mapLayers) {
+    var s = compSize(), MA = A.MAP_ARRAY_ATTR;
+    mapLayers.forEach(function (l) {
+      if (!l.frame) return;
+      try {
+        var o = {}, w = MA + "." + l.frame.w, h = MA + "." + l.frame.h;
+        if (Number(api.get(l.id, w)) !== s.width) o[w] = s.width;
+        if (Number(api.get(l.id, h)) !== s.height) o[h] = s.height;
+        if (Object.keys(o).length) api.set(l.id, o);
+      } catch (e) { /* the next Controls refresh tries this layer again */ }
+    });
+  }
+
   // The ids of every part of a map a style colours (see GeoStyles.targets).
   function styleParts(map) {
     var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], furniture: [], regions: [], calloutLines: [], calloutDots: [], calloutBoxes: [], nightLayers: [], timeLabels: [] };
@@ -3360,7 +3501,8 @@ var GeoScene = (function () {
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
     addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, imageryNote: imageryNote, findDayNight: findDayNight, dayNightParts: dayNightParts,
     nightMattes: nightMattes, dayNightComplete: dayNightComplete, NIGHT_TYPE: NIGHT_TYPE, DAYNIGHT_MISSING: DAYNIGHT_MISSING, layerTypeAvailable: layerTypeAvailable, nightAvailable: nightAvailable,
-    addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
+    addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture, fitLayers: fitLayers, upgradeMapLayers: upgradeMapLayers,
+    labelDrivers: labelDrivers,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
 })();

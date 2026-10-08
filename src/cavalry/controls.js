@@ -304,7 +304,8 @@ var GeoControlPanel = (function () {
       blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel), nightLights: lights ? dnMember(lights, S.nightLights) : null } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
-    model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
+    var driverLabels = (found.labelDrivers || GeoScene.labelDrivers(map)).map(function (l) { return l.text; });
+    model.labels = driverLabels.concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
     model.imagery = imagery.map(function (im) { return { id: im.groupId, name: String(api.getNiceName(im.groupId)) }; }).sort(order);
     return model;
   }
@@ -509,6 +510,8 @@ var GeoControlPanel = (function () {
     var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: imageryAll.filter(function (im) { return !im.meta.night; }) };
     found.night = imageryAll.filter(function (im) { return !!im.meta.night; });
     found.order = mapOrder(map, found.imagery, found.night);
+    // The map's driver-mode labels, read once here (the model and the upgrades below share the list).
+    found.labelDrivers = GeoScene.labelDrivers(map);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An older overlay is upgraded when the plugin is installed; without it, it is left as it is and the note says so.
     var dayNightNote = null;
@@ -535,6 +538,8 @@ var GeoControlPanel = (function () {
     });
     // Callouts are numbered the same way (a duplicate takes the next free number).
     attempt(function () { keepSelection(function () { GeoScene.prepareCallouts(map); }); });
+    // Layers made before the date line (repeat frames, nearest copies, whole highlights): see GeoScene.upgradeMapLayers.
+    attempt(function () { keepSelection(function () { GeoScene.upgradeMapLayers(map, found.mapLayers, found.labelDrivers); }); });
     var model = readModel(map, V, found), p = G.plan(model);
     // The comp size is kept in step from the furniture this read already found (no extra comp scan).
     attempt(function () {
@@ -542,6 +547,8 @@ var GeoControlPanel = (function () {
       GeoScene.fitFurniture(map, { scaleBar: fu.scaleBar ? fu.scaleBar.id : null, northArrow: fu.northArrow ? fu.northArrow.id : null,
         timeLabel: model.dayNight && model.dayNight.label ? model.dayNight.label.id : null });
     });
+    // The repeating layers' comp size follows the composition too (the layers can't read it themselves).
+    attempt(function () { GeoScene.fitLayers(found.mapLayers); });
     var slots = userData(V, SLOTS_KEY) || {}, wanted = { main: [], overlay: [], data: [], extract: [], time: [] };
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {

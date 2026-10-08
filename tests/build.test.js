@@ -14161,3 +14161,201 @@ test("Bake: a repeating flat layer bakes every copy the comp frame shows; pins a
     api.createEditable = realEditable;
   }
 });
+
+// Date line, task 8: Refresh controls brings a map made before the date line up to date.
+// An older map is this version's layers made, then aged to the base branch's shapes: their inputs stop before the
+// comp size and the chained longitudes, and their expressions have no frame, nearest, whole or chained option.
+function dlBase(expr) {
+  return expr.replace(/, frame: \{w: _i\d+, h: _i\d+\}/g, "").replace(/, nearest: true/g, "").replace(/, whole: true/g, "")
+    .replace(/GeoRuntime\.projectNearest\(/g, "GeoRuntime.projectPoint(");
+}
+// Cuts a layer's inputs from index n on and gives it the base expression; `olds` keeps the aged expression.
+function dlAge(api, olds, id, arr, exprAttr, n, expr) {
+  if (n !== undefined) api._truncate(id, arr, n);
+  const text = expr === undefined ? dlBase(String(api.get(id, exprAttr))) : expr;
+  api.set(id, { [exprAttr]: text });
+  olds[id] = text;
+}
+// The values of the first n inputs of each [id, arr], and every connection those layers have (what a refresh must not touch).
+function dlSnap(api, pairs) {
+  return {
+    values: pairs.map(([id, arr, n]) => Array.from({ length: n }, (_, i) => api.get(id, arr + "." + i))),
+    conns: api._connections.filter((c) => pairs.some((p) => c[0] === p[0] || c[2] === p[0])).map((c) => JSON.stringify(c))
+  };
+}
+function dlOldMap(context, api) {
+  const G = context.GeoScene, A = context.GeoAttrs, C = require("../src/core/codec.js");
+  const map = controlsMap(context), cam = map.cameraId, MA = A.MAP_ARRAY_ATTR, EX = A.MAP_EXPR_ATTR;
+  const o = { map: map, olds: {}, pairs: [] };
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Land", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]] }] });
+  o.countries = G.createMapLayer(map, "Countries", enc, { camera: cam, category: "countries" }, {}, {});
+  o.extract = G.createMapLayer(map, "France", enc, { camera: cam, category: "extract", source: "countries" }, G.layerStyle(map, "extractFill"), {});
+  o.pin = G.addPin(map, "Paris", 2.35, 48.85);
+  dlAge(api, o.olds, o.countries, MA, EX, 7);
+  dlAge(api, o.olds, o.extract, MA, EX, 7);
+  dlAge(api, o.olds, o.pin, MA, EX, 7);
+  // a Label in driver mode: the position helper (7 inputs, projectPoint) moves its text
+  G.createLabel(map, "Paris", 2.35, 48.85);
+  o.driver = api.getCompLayers().filter((id) => api.getNiceName(id) === "Paris position")[0];
+  dlAge(api, o.olds, o.driver, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  // a callout's place helper
+  o.callout = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  o.place = coRec(api, o.callout).place;
+  dlAge(api, o.olds, o.place, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  // a highlight shape (drawn whole in this version)
+  o.highlight = hlRec(api, G.createHighlight(map, o.extract, "fill", { start: 0, duration: 20 })).shape;
+  dlAge(api, o.olds, o.highlight, MA, EX, undefined);
+  // data layers: regions, bubbles and value labels (the base branch's input counts)
+  const data = G.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: false }).layers;
+  o.regions = data.regions; o.bubbles = data.bubbles; o.labels = data.labels;
+  dlAge(api, o.olds, o.regions, MA, EX, 16);
+  dlAge(api, o.olds, o.bubbles, MA, EX, 9);
+  dlAge(api, o.olds, o.labels, MA, EX, 11);
+  // an old-style route stop (a pin inside a route group, nearest false): stays as it is
+  const grp = api.create("group", "Route 7: Old way");
+  api.parent(grp, map.groupId);
+  o.oldStop = G.addPin(map, "Stop", 0, 0, grp, false);
+  dlAge(api, o.olds, o.oldStop, MA, EX, 7);
+  // a new-style route, aged: stops and handles as the base branch had them (labelDriver stops, unchained handles)
+  o.route = G.createRoute(map, ABC, { arc: 40, labels: false });
+  ageRoute(context, api, o, o.route.groupId);
+  Object.keys(o.olds).forEach((id) => { o.pairs.push([id, MA]); });
+  return o;
+}
+// Ages a route's stops (7 inputs, the base driver) and handles (24 inputs, the unchained base expression).
+function ageRoute(context, api, o, groupId) {
+  const E = context.GeoExpression, A = context.GeoAttrs, cam = o.map.cameraId, CA = A.CAMERA_ARRAY_ATTR;
+  const d = routeData(api, groupId);
+  d.stops.forEach((s) => {
+    api._truncate(s.position, CA, 7);
+    dlAge(api, o.olds, s.position, CA, A.CAMERA_EXPR_ATTR, undefined, E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: cam, category: "stopDriver" }, A.DRIVER_RETURN));
+  });
+  d.legs.forEach((l) => [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
+    api._truncate(h, CA, 24);
+    dlAge(api, o.olds, h, CA, A.CAMERA_EXPR_ATTR, undefined, E.routeHandleExpression(context.GEO_CURVE_SRC, { camera: cam, category: "legHandle" }, which));
+  }));
+  return d;
+}
+
+test("date line upgrades: Refresh controls brings an older map's layers up to date, keeping their inputs, keys and connections", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api), E = context.GeoExpression, A = context.GeoAttrs, RT = context.GEO_RUNTIME_SRC;
+  const MA = A.MAP_ARRAY_ATTR, cam = o.map.cameraId, meta = (id) => E.readTag(o.olds[id], "GEO_META"), data = (id) => E.readData(o.olds[id]);
+  const pairs = [[o.countries, MA, 7], [o.extract, MA, 7], [o.pin, MA, 7], [o.regions, MA, 16], [o.bubbles, MA, 9], [o.labels, MA, 11], [o.highlight, MA, 8],
+    [o.driver, A.CAMERA_ARRAY_ATTR, 7], [o.place, A.CAMERA_ARRAY_ATTR, 7]];
+  const before = dlSnap(api, pairs);
+  context.GeoControlPanel.sync(o.map);
+  const after = dlSnap(api, pairs);
+  // the Controls rows link their own inputs on the first refresh (detail, point size, ...): every earlier connection stays
+  assert.deepEqual(after.values, before.values, "earlier inputs' values are unchanged");
+  before.conns.forEach((c) => assert.ok(after.conns.indexOf(c) >= 0, "connection kept: " + c));
+  // base and extract layers repeat: the comp size as the last two inputs, and the frame expression
+  [o.countries, o.extract].forEach((id) => {
+    assert.equal(api.get(id, MA + ".7"), 1920, "compW"); assert.equal(api.get(id, MA + ".8"), 1080, "compH");
+    assert.equal(api.get(id, A.MAP_EXPR_ATTR), E.mapLayerExpression(RT, data(id), meta(id), { ellipseScale: A.ELLIPSE_SCALE, nearest: false, single: false }));
+  });
+  // pins, labels and callout places sit on the copy nearest the camera; highlights draw whole
+  assert.equal(api.get(o.pin, A.MAP_EXPR_ATTR), E.mapLayerExpression(RT, data(o.pin), meta(o.pin), { ellipseScale: A.ELLIPSE_SCALE, nearest: true, single: true }));
+  assert.equal(api.get(o.driver, A.CAMERA_EXPR_ATTR), E.labelDriverExpression(RT, meta(o.driver), A.DRIVER_RETURN, { nearest: true }));
+  assert.equal(api.get(o.place, A.CAMERA_EXPR_ATTR), E.labelDriverExpression(RT, meta(o.place), A.DRIVER_RETURN, { nearest: true }));
+  assert.equal(api.get(o.highlight, A.MAP_EXPR_ATTR), E.highlightLayerExpression(RT, data(o.highlight), meta(o.highlight), { ellipseScale: A.ELLIPSE_SCALE }));
+  // data layers: the comp size is appended (regions 16 / 17, bubbles 9 / 10, value labels 11 / 12) and the frame is in the call
+  [[o.regions, 16], [o.bubbles, 9], [o.labels, 11]].forEach(([id, n]) => {
+    assert.equal(api.get(id, MA + "." + n), 1920); assert.equal(api.get(id, MA + "." + (n + 1)), 1080);
+  });
+  assert.equal(api.get(o.regions, A.MAP_EXPR_ATTR), E.regionsExpression(context.GEO_DATA_RUNTIME_SRC, data(o.regions), meta(o.regions)));
+  assert.equal(api.get(o.bubbles, A.MAP_EXPR_ATTR), E.bubblesExpression(context.GEO_DATA_RUNTIME_SRC, data(o.bubbles), meta(o.bubbles), { ellipseScale: A.ELLIPSE_SCALE }));
+  assert.equal(api.get(o.labels, A.MAP_EXPR_ATTR), E.valueLabelsExpression(context.GEO_DATA_RUNTIME_SRC, data(o.labels), meta(o.labels)));
+  // an old-style route stop is left exactly as it was
+  assert.equal(api.get(o.oldStop, A.MAP_EXPR_ATTR), o.olds[o.oldStop]);
+  assert.equal(api.hasAttribute(o.oldStop, MA + ".7"), false);
+  // the new-style route: stops carry the chain and the reference (ABC: 0, 10, 20 -> reference 10), handles the chained ends
+  const d = routeData(api, o.route.groupId), CA = A.CAMERA_ARRAY_ATTR, HI = (n) => CA + "." + E.inputIndex(E.HANDLE_INPUTS, n);
+  const chainOf = { A: 0, B: 10, C: 20 };
+  d.stops.forEach((s) => {
+    assert.equal(api.get(s.position, CA + ".7"), chainOf[s.name], s.name + " chainLon");
+    assert.equal(api.get(s.position, CA + ".8"), 10, "refLon");
+    assert.equal(api.get(s.position, A.CAMERA_EXPR_ATTR), E.routeStopDriverExpression(RT, { camera: cam, category: "stopDriver" }, A.DRIVER_RETURN));
+  });
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
+      assert.equal(api.get(h, HI("aChainLon")), chainOf[a.name]); assert.equal(api.get(h, HI("bChainLon")), chainOf[b.name]); assert.equal(api.get(h, HI("refLon")), 10);
+      assert.equal(api.get(h, A.CAMERA_EXPR_ATTR), E.routeHandleExpression(context.GEO_CURVE_SRC, { camera: cam, category: "legHandle" }, which, { chained: true }));
+    });
+  });
+});
+
+test("date line upgrades: a second Refresh controls writes nothing to the older map", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api);
+  context.GeoControlPanel.sync(o.map);
+  const ids = Object.keys(o.olds).concat([o.route.groupId]);
+  const snap = () => JSON.stringify([ids.map((id) => [api.get(id, "generator.expression"), api.get(id, "expression")]), api._connections, ids.map((id) => api.getUserDataKey(id, "geoRoute") || null)]);
+  const before = snap();
+  // Labels (renameAttribute) are set on every refresh for the Controls rows, so they are not counted: values, inputs and connections are.
+  const writes = [], realSet = api.set, realAdd = api.addDynamic, realConnect = api.connect, realDisconnect = api.disconnect;
+  api.set = function (id) { writes.push(["set", id]); return realSet.apply(api, arguments); };
+  api.addDynamic = function (id) { writes.push(["add", id]); return realAdd.apply(api, arguments); };
+  api.connect = function () { writes.push(["connect", arguments[0]]); return realConnect.apply(api, arguments); };
+  api.disconnect = function () { writes.push(["disconnect", arguments[0]]); return realDisconnect.apply(api, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.set = realSet; api.addDynamic = realAdd; api.connect = realConnect; api.disconnect = realDisconnect; }
+  assert.deepEqual(writes.filter((w) => ids.indexOf(w[1]) >= 0 || w[0] === "add"), [], "no writes to the map's layers");
+  assert.equal(snap(), before);
+});
+
+test("date line upgrades: a resized comp is followed by Refresh controls in every repeating layer (compW, compH)", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api), E = context.GeoExpression, MA = context.GeoAttrs.MAP_ARRAY_ATTR;
+  context.GeoControlPanel.sync(o.map);
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.get = realGet; }
+  assert.equal(api.get(o.countries, MA + ".7"), 1080); assert.equal(api.get(o.countries, MA + ".8"), 1080);
+  assert.equal(api.get(o.regions, MA + "." + E.inputIndex(E.REGION_INPUTS, "compW")), 1080);
+  assert.equal(api.get(o.labels, MA + "." + E.inputIndex(E.VALUE_LABEL_INPUTS, "compH")), 1080);
+  assert.equal(api.hasAttribute(o.pin, MA + ".7"), false, "a pin gets no comp frame");
+});
+
+test("date line upgrades: a Controls sync scans the comp for an older map at most 9 times", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api);
+  let scans = 0;
+  const realScan = api.getCompLayers;
+  api.getCompLayers = function () { scans++; return realScan.apply(this, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.getCompLayers = realScan; }
+  assert.ok(scans <= 9, "comp scans on the first refresh of an older map: " + scans);
+});
+
+test("date line upgrades: a route visiting a place a whole turn apart stays unchained, and no holder is added", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, E = context.GeoExpression, A = context.GeoAttrs, CA = A.CAMERA_ARRAY_ATTR;
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = G.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  // the older record: London has one holder, so the route's last leg ends on the first one
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.legs[2].to = 0;
+  api.setUserData(r.groupId, "geoRoute", rec);
+  const o = { map: map, olds: {} };
+  const d = ageRoute(context, api, o, r.groupId);
+  const holders = api.getChildren(r.groupId).length;
+  context.GeoControlPanel.sync(map);
+  d.stops.forEach((s) => assert.equal(api.hasAttribute(s.position, CA + ".7"), false, s.name + " has no chainLon"));
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.ok(api.get(h, A.CAMERA_EXPR_ATTR).indexOf("_hs") < 0, "handle stays unchained")));
+  assert.equal(api.getChildren(r.groupId).length, holders, "no holder added");
+});
+
+test("date line upgrades: a route made on this version keeps its chained stops and handles, pinned or not", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, A = context.GeoAttrs, CA = A.CAMERA_ARRAY_ATTR;
+  const r = G.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId);
+  // a pinned stop: its dropped place and its chained longitude differ from the placed ones
+  api.set(d.stops[1].position, { [CA + ".5"]: -170, [CA + ".7"]: 190 });
+  const ids = d.stops.map((s) => s.position).concat(d.legs.reduce((a, l) => a.concat([l.startHandle, l.endHandle]), []));
+  const snap = () => JSON.stringify(ids.map((id) => [api.get(id, A.CAMERA_EXPR_ATTR), Array.from({ length: 27 }, (_, i) => api.get(id, CA + "." + i))]));
+  const before = snap();
+  context.GeoControlPanel.sync(map);
+  assert.equal(snap(), before, "a refresh changes nothing on a current route");
+});
