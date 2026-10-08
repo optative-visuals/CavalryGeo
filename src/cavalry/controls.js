@@ -284,7 +284,10 @@ var GeoControlPanel = (function () {
     });
     var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
     // The Night lights group (the top child of Day & night) drives its own opacity from the Night lights % input.
-    var nightGroup = (found.night || GeoScene.findNightLights(map))[0], lights = nightGroup && dn && api.getParent(nightGroup.groupId) === dn.groupId ? nightGroup.groupId : null;
+    // A Night lights group still hidden is mid-build (beginImageryBuild shows it once its drivers connect): it is not read.
+    var nightGroup = (found.night || GeoScene.findNightLights(map)).filter(function (im) {
+      return !(api.hasAttribute(im.groupId, "hidden") && api.get(im.groupId, "hidden"));
+    })[0], lights = nightGroup && dn && api.getParent(nightGroup.groupId) === dn.groupId ? nightGroup.groupId : null;
     model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
       helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), blurs: dn.blurs.filter(Boolean),
       blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel), nightLights: lights ? dnMember(lights, S.nightLights) : null } : null;

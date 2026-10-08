@@ -1422,9 +1422,10 @@ var GeoScene = (function () {
   // imagery from one findAllImagery scan, so the callers that have it don't scan the comp again.
   function nightLightsStatus(map, all) {
     var f = findDayNight(map), dayNight = !!f && f.layers.filter(Boolean).length === 4;
-    var day = all ? all.filter(function (i) { return !i.meta.night; }) : findImagery(map);
+    all = all || findAllImagery(map); // one comp scan, split by meta.night below
+    var day = all.filter(function (i) { return !i.meta.night; });
     var satellite = day.some(function (i) { return GeoSources.isSatellite(i.meta.sourceMeta); });
-    var night = all ? all.filter(function (i) { return !!i.meta.night; }) : findNightLights(map), wanted = dayNight && satellite;
+    var night = all.filter(function (i) { return !!i.meta.night; }), wanted = dayNight && satellite;
     return { dayNight: dayNight, satellite: satellite, night: night, wanted: wanted, orphaned: night.length > 0 && !wanted };
   }
 
@@ -2770,6 +2771,7 @@ var GeoScene = (function () {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, lights = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
     helpers.forEach(function (h, i) {
       if (!h || !layerThere(h)) return;
+      if (!api.hasAttribute(h, CA + ".2")) return; // not a camera-driven helper: left alone, no slot added on every sync
       if (!api.hasAttribute(h, lights)) {
         api.addDynamic(h, CA, "double");
         try { api.renameAttribute(h, lights, "lights"); } catch (e) { /* display name only */ }

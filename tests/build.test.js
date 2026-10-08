@@ -12517,3 +12517,204 @@ test("night lights in the panel: Add day & night while a day build runs says nig
   runSeen(context, api);
   assert.match(context.statusLabel.getText(), /^Night lights added to Map /);
 });
+// ---- Night lights: final review fixes (wave 2) ----
+const nightLightsScans = (api, fn) => {
+  let n = 0; const real = api.getCompLayers;
+  api.getCompLayers = function () { n++; return real.apply(this, arguments); };
+  try { fn(); } finally { api.getCompLayers = real; }
+  return n;
+};
+
+test("nightLightsStatus: without the imagery given, one findAllImagery scan does the work of two", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const all = G.findAllImagery(map);
+  const allScans = nightLightsScans(api, () => G.findAllImagery(map));
+  const givenScans = nightLightsScans(api, () => G.nightLightsStatus(map, all));
+  const defaultScans = nightLightsScans(api, () => G.nightLightsStatus(map));
+  assert.equal(allScans, 1, "one comp scan for all the imagery");
+  assert.equal(defaultScans, givenScans + allScans, "the default reads the imagery with one scan, not two");
+  assert.deepEqual(plain(G.nightLightsStatus(map).night), plain(G.nightLightsStatus(map, all).night));
+  assert.equal(G.nightLightsStatus(map).satellite, true);
+});
+
+test("night lights in the panel: a day rebuild rebuilds the night lights: one Night lights group, the old one removed", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  runTimers(api);
+  const G = context.GeoScene, map = context.currentMap();
+  const first = G.findNightLights(map)[0].groupId;
+  context.GeoNet.cachedTile = (base) => base + ".jpg"; // the day tiles are in place
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  const seen = runSeen(context, api);
+  assert.ok(seen.some((s) => /^Building night lights/.test(s)), seen.join(" | "));
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map /);
+  const night = G.findNightLights(map);
+  assert.equal(night.length, 1, "exactly one Night lights group");
+  assert.notEqual(night[0].groupId, first);
+  assert.equal(api.layerExists(first), false, "the old Night lights group is replaced");
+  assert.ok(nightFootage(api, night[0].groupId).length > 0);
+});
+
+test("night lights in the panel: a bent day rebuild after a flat one ends with one bent night build and no flat night tiles", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  context.addDayNightBtn.onClick();
+  runTimers(api);
+  const G = context.GeoScene, map = context.currentMap();
+  const flat = G.findNightLights(map)[0];
+  assert.ok(nightFootage(api, flat.groupId).length > 0, "flat night tiles first");
+  G.setCamera(map.cameraId, { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 });
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runSeen(context, api);
+  const night = G.findNightLights(map);
+  assert.equal(night.length, 1, "one Night lights group");
+  assert.equal(api.layerExists(flat.groupId), false, "the flat night build is gone");
+  assert.equal(nightFootage(api, night[0].groupId).length, 0, "no flat night tiles");
+  assert.ok(bentParts(api, night[0]).ref, "one matted reference, built bent");
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map /);
+});
+
+test("night lights in Controls: a sync during a night build (the group still hidden) makes no Night lights % row", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context), E = context.GeoExpression, LIGHTS = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  job.step(0); // the group is made, hidden, and its first tile is in
+  const midBuild = G.findNightLights(map)[0];
+  assert.equal(api.get(midBuild.groupId, "hidden"), true, "the group is still hidden mid-build");
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(!promotedNames(api, r.components.time).includes("Day & night · Night lights %"), "no row for a half-built group");
+  rec.helpers.forEach((h) => assert.equal(api.getInConnection(h, LIGHTS), "", "no helper's lights driven"));
+  stepToEnd(job, 0);
+  assert.equal(G.findNightLights(map).length, 1);
+});
+
+test("night lights in the panel: a sync during a night build, then Cancel, leaves the helpers' lights undriven at 0", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  oneUnitPerTick(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg"; // the tiles are in place, so the build takes many steps
+  context.addDayNightBtn.onClick();
+  const timer = api._timers.filter((t) => t.active)[0];
+  for (let i = 0; i < 200 && context.statusLabel.getText().indexOf("Building night lights") < 0; i++) timer.callbacks.onTimeout();
+  timer.callbacks.onTimeout(); timer.callbacks.onTimeout(); // the group is made (hidden) and its first tiles are in
+  const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression, LIGHTS = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
+  assert.equal(G.findNightLights(map).length, 1, "the group is there mid-build");
+  context.GeoControlPanel.sync(map); // an action that syncs (Add pin, say)
+  context.cancelImageryBtn.onClick();
+  runTimers(api);
+  assert.match(context.statusLabel.getText(), /Cancelled — no night lights were built\./);
+  assert.equal(G.findNightLights(map).length, 0);
+  const rec = dnRec(api, G.findDayNight(map).groupId);
+  rec.helpers.forEach((h) => {
+    assert.equal(api.getInConnection(h, LIGHTS), "", "helper lets go of the Night lights % input");
+    assert.equal(api.get(h, LIGHTS), 0, "helper lights read 0");
+  });
+});
+
+test("night lights in the panel: a cancelled night build syncs the controls once", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  oneUnitPerTick(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg"; // the tiles are in place, so the build takes many steps
+  context.addDayNightBtn.onClick();
+  const timer = api._timers.filter((t) => t.active)[0];
+  for (let i = 0; i < 200 && context.statusLabel.getText().indexOf("Building night lights") < 0; i++) timer.callbacks.onTimeout();
+  timer.callbacks.onTimeout(); timer.callbacks.onTimeout();
+  const realSync = context.GeoControlPanel.sync;
+  let syncs = 0;
+  context.GeoControlPanel.sync = function () { syncs++; return realSync.apply(this, arguments); };
+  try {
+    context.cancelImageryBtn.onClick();
+    runTimers(api);
+  } finally { context.GeoControlPanel.sync = realSync; }
+  assert.equal(syncs, 1, "one sync when the cancelled night build ends");
+  assert.match(context.statusLabel.getText(), /^Cancelled — no night lights were built\./);
+});
+
+test("night lights in the panel: a night build that throws syncs the controls once and says why", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const realBegin = context.GeoScene.beginImageryBuild;
+  context.GeoScene.beginImageryBuild = function () {
+    const job = realBegin.apply(null, arguments);
+    let n = 0;
+    return { step: () => { if (++n > 2) throw new Error("Disk full."); return job.step(0); }, cancel: () => job.cancel() };
+  };
+  context.addDayNightBtn.onClick();
+  const realSync = context.GeoControlPanel.sync;
+  let syncs = 0;
+  context.GeoControlPanel.sync = function () { syncs++; return realSync.apply(this, arguments); };
+  try { runTimers(api); } finally { context.GeoControlPanel.sync = realSync; }
+  assert.match(context.statusLabel.getText(), /^Night lights didn't download: Disk full\. Build imagery or Refresh controls tries again\./);
+  assert.equal(syncs, 1, "one sync after the failure");
+});
+
+test("night lights in the panel: Add day & night after a night layer was deleted re-mattes every night tile", () => {
+  const { context, api } = buildSandbox();
+  const { map } = satellitePanelMap(context, api);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  context.addDayNightBtn.onClick();
+  runTimers(api);
+  const G = context.GeoScene, dn = G.findDayNight(map).groupId, before = dnRec(api, dn);
+  api.deleteLayer(before.layers[0]);
+  context.addDayNightBtn.onClick();
+  runSeen(context, api);
+  const after = dnRec(api, dn), night = G.findNightLights(map);
+  assert.equal(night.length, 1, "one Night lights group");
+  assert.ok(after.layers.every((id) => id && api.layerExists(id)), "the four night layers are there");
+  const tiles = nightFootage(api, night[0].groupId);
+  assert.ok(tiles.length > 0);
+  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), after.layers, "each night tile matted by all four layers"));
+});
+
+test("night lights in the panel: Add day & night while another map's night build runs says Refresh controls adds them", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  const eox = tileSource(context), G = context.GeoScene;
+  context.makeMap("Map 2", context.worldViewCamera(0));
+  const second = context.currentMap();
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.addDayNight(second, { dayOfYear: 80, utcTime: 12 });
+  G.buildImagery(second, eox, {}, G.planImagery(second, eox, {}));
+  context.GeoNet.cachedTile = () => null;
+  context.mapPicker.setValue(0); // "Map": its night build starts
+  captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  assert.equal(api._timers.some((t) => t.active), true, "a night build is running for Map");
+  context.mapPicker.setValue(1); // "Map 2": its night lights wait
+  context.addDayNightBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Day & night updated to .* Night lights will follow when the current imagery job ends — press Refresh controls then\.$/);
+  runSeen(context, api);
+  assert.equal(G.findNightLights(second).length, 0, "nothing added for Map 2 while Map's job runs");
+  context.mapPicker.setValue(1);
+  context.refreshControlsBtn.onClick();
+  runSeen(context, api);
+  assert.equal(G.findNightLights(second).length, 1, "Refresh controls adds them");
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map 2 /);
+});
+
+test("night lights in the panel: the day build's credit names the NASA credit when it chains night lights", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.GeoNet.cachedTile = () => null;
+  context.GeoScene.addDayNight(context.currentMap(), { dayOfYear: 80, utcTime: 12 });
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  const seen = runSeen(context, api);
+  assert.ok(seen.some((s) => /^Imagery built: .* Credit: .* · NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\) Adding night lights…$/.test(s)), seen.join(" | "));
+});

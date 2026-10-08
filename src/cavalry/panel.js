@@ -1279,7 +1279,8 @@ addDayNightBtn.onClick = guardAction(function () {
   say(message);
   // Night lights need Day & night over satellite imagery: added when wanted and missing, removed when no longer wanted.
   var st = GeoScene.nightLightsStatus(map);
-  if (st.wanted && !st.night.length) startNightLights(map, message);
+  // A restored night layer (r.restored) re-mattes the night tiles, so the night lights are rebuilt then too.
+  if (st.wanted && (!st.night.length || r.restored)) startNightLights(map, message);
   else if (st.orphaned) GeoScene.removeNightLights(map);
 });
 
@@ -1660,7 +1661,7 @@ var imagerySettings = GeoNet.loadSettings();
 // few layers it added, so steps of ~1 s of work keep pauses short without that fixed
 // cost dominating (80 ms steps built only ~0.6 tiles/s).
 var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1000;
-var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false };
+var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false, map: null };
 var sourcePicker = new ui.DropDown();
 GeoSources.list().forEach(function (s) { sourcePicker.addEntry(s.label); });
 var licenceLabel = GeoStyle.note("");
@@ -1733,14 +1734,17 @@ function stopImageryTimer() {
   imageryState.tick = null;
   imageryState.batch = null;
   imageryState.night = false;
+  imageryState.map = null;
 }
 function itemNoun(plan) { return plan.mode === "images" ? "images" : "tiles"; }
 function ImageryTimerCallbacks() {
   this.onTimeout = function () {
     try { if (imageryState.tick) imageryState.tick(); } catch (e) {
-      var night = imageryState.night, msg = e && e.message ? e.message : e;
+      var night = imageryState.night, nightMap = imageryState.map, msg = e && e.message ? e.message : e;
       stopImageryTimer(); resetImageryPlan();
-      say(night ? "Night lights didn't download: " + msg + " Build imagery or Refresh controls tries again." : "Error: " + msg);
+      // A failed night build may leave its hidden group behind: the controls are synced once more.
+      say(night ? "Night lights didn't download: " + msg + " Build imagery or Refresh controls tries again." + (nightMap ? syncControls(nightMap) : "")
+        : "Error: " + msg);
     }
     if (!imageryState.timer) followActiveComp(false, true); // the job just ended: catch up silently, so its result message stays
   };
@@ -1787,8 +1791,12 @@ function failLine(plan, text) {
 // download, so no dialog and no plan signature. While another imagery job runs, they wait for Refresh controls.
 function startNightLights(map, lead) {
   if (imageryState.timer) {
-    // Night lights already on their way, or a day build that will chain them when it ends.
-    say(imageryState.night ? lead : lead + " Night lights will follow when the current imagery job ends.");
+    // Only this map's job can bring its night lights: its night build already has them on their way, its day build chains them.
+    // Another map's job doesn't, so Refresh controls adds them.
+    var sameMap = !!imageryState.map && imageryState.map.groupId === map.groupId;
+    if (sameMap && imageryState.night) say(lead);
+    else if (sameMap) say(lead + " Night lights will follow when the current imagery job ends.");
+    else say(lead + " Night lights will follow when the current imagery job ends — press Refresh controls then.");
     return;
   }
   try {
@@ -1818,7 +1826,12 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     }
     stopImageryTimer();
     resetImageryPlan();
-    if (r.cancelled) { say(plan.night ? "Cancelled — no night lights were built." : "Cancelled — no imagery was built."); return; }
+    if (r.cancelled) {
+      // A cancelled night build may have left its hidden group behind: the controls are synced once more.
+      var cancelNote = plan.night ? syncControls(map) : "";
+      say((plan.night ? "Cancelled — no night lights were built." : "Cancelled — no imagery was built.") + cancelNote);
+      return;
+    }
     var b = r.result;
     if (plan.night) {
       var nightNote = syncControls(map);
@@ -1831,12 +1844,14 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     var st = GeoScene.nightLightsStatus(map), gone = "";
     if (st.orphaned) { GeoScene.removeNightLights(map); gone = " Night lights removed (they need satellite imagery)."; }
     var note = syncControls(map);
+    // Night lights follow every completed day build while they are wanted (a rebuild replaces them), so their credit goes in too.
+    var credit = [GeoSources.attribution(src, opts), st.wanted ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
     var text = "Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
-      " Credit: " + GeoSources.attribution(src, opts) + note + gone;
-    if (st.wanted && !st.night.length) {
+      " Credit: " + credit + note + gone;
+    if (st.wanted) {
       say(text + " Adding night lights…");
       startNightLights(map, text);
     } else say(text);
@@ -1851,6 +1866,7 @@ function refusedMessage(src, code) {
 
 function startImageryDownload(map, src, opts, plan) {
   imageryState.night = !!plan.night;
+  imageryState.map = map;
   var total = plan.missing.length;
   imageryProgress.setMaximum(Math.max(1, total));
   imageryProgress.setValue(0);
