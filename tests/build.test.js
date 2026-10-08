@@ -12035,3 +12035,24 @@ test("busy lock: a button or Enter pressed while an action runs is refused, Canc
   context.pinSearchBtn.onClick();
   assert.equal(runs, 4, "the lock cleared after the error");
 });
+
+test("busy lock: clicks Cavalry held back during a long action are dropped quietly when it ends", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const D = vm.runInContext("Date", context), realNow = D.now; let clock = 1000000; // the panel's own Date (it runs in a vm context)
+  D.now = () => clock;
+  try {
+    let runs = 0;
+    context.GeoNet.search = () => { runs++; clock += 2000; return [PARIS]; }; // a 2 s action
+    context.pinSearchField.setText("Paris");
+    context.pinSearchBtn.onClick();
+    const msg = context.statusLabel.getText();
+    context.pinSearchField.setText("Rome");
+    context.pinSearchBtn.onClick(); // a held-back click, delivered right after
+    assert.equal(runs, 1, "the held-back click didn't run");
+    assert.equal(context.statusLabel.getText(), msg, "and the action's message stays");
+    clock += 1000; // a fresh click a moment later works
+    context.pinSearchBtn.onClick();
+    assert.equal(runs, 2);
+  } finally { D.now = realNow; }
+});

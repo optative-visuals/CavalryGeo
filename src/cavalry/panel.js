@@ -52,17 +52,29 @@ function guard(fn) {
 // One action at a time: a button, an Enter that starts work or a preview click can pump Cavalry's events
 // (sayNow, the network waits), so a second press could otherwise run nested inside the first.
 var busy = false;
+// While a long action runs Cavalry is frozen and keeps the user's clicks; it delivers them all as soon as
+// the action ends, after the flag has cleared. So after an action that took a while, clicks arriving in
+// the next moment are those held-back ones and are dropped (quietly, keeping the action's message).
+var SETTLE_AFTER_MS = 300, SETTLE_FOR_MS = 700, settleUntil = 0;
 function refuseIfBusy() {
-  if (!busy) return false;
-  say("Still working on the last action…");
-  return true;
+  if (busy) { say("Still working on the last action…"); return true; }
+  return Date.now() < settleUntil;
+}
+// Runs fn as the one current action; afterwards opens the settle window when it was a long one.
+function runAsAction(fn) {
+  var started = Date.now();
+  busy = true;
+  try { fn(); } finally {
+    busy = false;
+    var ended = Date.now();
+    if (ended - started >= SETTLE_AFTER_MS) settleUntil = ended + SETTLE_FOR_MS;
+  }
 }
 // guard() for a commit (Enter) that starts work: refused while another action runs; the flag clears in a finally.
 function guardWork(fn) {
   return function () {
     if (refuseIfBusy()) return;
-    busy = true;
-    try { guard(fn)(); } finally { busy = false; }
+    runAsAction(guard(fn));
   };
 }
 // Wraps a button's click: guardWork() plus the selection restore and the redraw nudge. With keepSelection the
@@ -72,10 +84,8 @@ function guardAction(fn, keepSelection, allowNested) {
   return function () {
     if (!allowNested && refuseIfBusy()) return;
     var before = keepSelection ? null : currentSelection();
-    var wasBusy = busy;
-    if (!allowNested) busy = true;
-    try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); }
-    finally { if (!allowNested) busy = wasBusy; }
+    var run = function () { try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); } };
+    if (allowNested) run(); else runAsAction(run);
     keepGroupsCollapsed(before);
     nudgeRedraw();
   };
