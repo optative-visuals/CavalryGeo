@@ -127,16 +127,18 @@ adding street layers.
 - [ ] 19r. Night lights, flat: pan and zoom → the lights fade through the twilight with the terminator and do not show
       on the sunlit side. Zoom past 8 → the status line says NASA's data stops at zoom 8.
 - [ ] 19s. Night lights, globe and Equal Earth: without the Cavalry Geo Reproject plugin, Build stops and asks for it;
-      with it installed, the lights bend to the rim and oval with no ring outside them. Flight across the date line
-      (lon 170 to -170) → the lights stay continuous.
+      on a bent map without the plugin, Add day & night keeps its message and the status reads "Night lights didn't
+      download: …needs the Cavalry Geo Reproject plugin…". With it installed, the lights bend to the rim and oval with
+      no ring outside them. Flight across the date line (lon 170 to -170) → the lights stay continuous.
 - [ ] 19t. Vector map (Mapbox streets, Natural Earth only) or a custom tile link: no Night lights group is added and
       the classic darkening stays.
 - [ ] 19u. Time controls: **Night lights %** at 0 → the classic darkening only; at 50 → lights and darkening
       crossfade; at 100 → the night core shows only the lights. Set Twilight to 1 and check the edge at 100.
-- [ ] 19v. Rebuild imagery after changing the camera animation → the Night lights group is reused (downloaded tiles
-      are not fetched again) and the status line says so.
-- [ ] 19w. Delete the day imagery, then press **Refresh controls** → the Night lights group and its Night lights %
-      row are removed, and the status says so. Delete Day & night → the Night lights go with it.
+- [ ] 19v. Rebuild imagery after changing the camera animation → the Night lights are rebuilt to match the new imagery
+      (already-downloaded night tiles are reused and not fetched again; the status line says nothing extra about it).
+- [ ] 19w. Delete the day imagery, then press **Refresh controls** → the leftover Night lights group and its Night lights %
+      row are removed silently (the status gives only the usual "Controls updated" message). Delete Day & night → the
+      Night lights go with it.
 - [ ] 19x. Night lights tile failure (for example, unplug the network mid-build): the status says "Night lights didn't
       download" with the retry hint. Delete the Night lights group, press **Refresh controls** → the tiles download again.
 - [ ] 19y. Press **Cancel** during a night build → it stops like any imagery job; earlier imagery stays as it was.
