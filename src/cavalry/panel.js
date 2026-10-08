@@ -970,9 +970,9 @@ TAB_BUILDERS.push(function (tabs) {
     ])
   ]));
   layersTabs = GeoStyle.tabBar(LAYERS_PAGES, function (name) { showLayersPage(name); });
-  // No margins here: the page columns already carry theirs.
+  // Only a top margin, so the tab bar starts where every other page's first panel does.
   var layersColumn = new ui.VLayout();
-  layersColumn.setMargins(0, 0, 0, 0);
+  layersColumn.setMargins(0, 6, 0, 0); // the same 6 px top margin as every page column
   layersColumn.add(layersTabs.widget);
   layersColumn.add(layersPages.widget);
   tabs.add("Layers", layersColumn);
@@ -1381,9 +1381,9 @@ TAB_BUILDERS.push(function (tabs) {
     ])
   ]));
   labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
-  // No margins here: the page columns already carry theirs.
+  // Only a top margin, so the tab bar starts where every other page's first panel does.
   var labelColumn = new ui.VLayout();
-  labelColumn.setMargins(0, 0, 0, 0);
+  labelColumn.setMargins(0, 6, 0, 0); // the same 6 px top margin as every page column
   labelColumn.add(labelTabs.widget);
   labelColumn.add(labelPages.widget);
   tabs.add("Label", labelColumn);

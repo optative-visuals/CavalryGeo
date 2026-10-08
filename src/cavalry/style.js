@@ -174,7 +174,8 @@ var GeoStyle = (function () {
         if (background) {
           // An 8 px inset keeps the panels off the coloured page's edges.
           var inset = new ui.VLayout();
-          maybe(inset, "setMargins", PAGE_INSET, PAGE_INSET, PAGE_INSET, PAGE_INSET);
+          // Every page column starts with its own 6 px top margin, so the inset adds only the rest on top.
+          maybe(inset, "setMargins", PAGE_INSET, PAGE_INSET - 6, PAGE_INSET, PAGE_INSET);
           inset.add(layout);
           box.setLayout(inset);
           box.setBackgroundColor(background);
