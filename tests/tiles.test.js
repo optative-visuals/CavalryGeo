@@ -142,3 +142,14 @@ test("bentTileSet: a Mercator sample covers tileSet", () => {
   for (const t of flat.tiles) assert.ok(keys.has(`${t.z}/${t.x}/${t.y}`));
   assert.equal(bent.lo, flat.lo); assert.equal(bent.hi, flat.hi);
 });
+
+test("bentTileSet: a region spanning the whole world gives 2^L + 1 columns (the extra one is the wrapped copy, shift 1)", () => {
+  const full = () => ({ dlon0: -180, dlon1: 180, lat0: -60, lat1: 60 });
+  const set = T.bentTileSet([cam({ zoom: 2, lon: 0 })], 1920, 1080, 2, 2, full);
+  const level = set.tiles.filter((t) => t.z === 2);
+  const xs = Array.from(new Set(level.map((t) => t.x))).sort((a, b) => a - b);
+  const x0 = xs[0], n = Math.pow(2, 2);
+  assert.equal(xs.length, n + 1, "2^L + 1 columns");
+  assert.deepEqual(xs, Array.from({ length: n + 1 }, (_, i) => x0 + i), "consecutive, x0 .. x0 + 2^L");
+  assert.equal(x0, 0);
+});

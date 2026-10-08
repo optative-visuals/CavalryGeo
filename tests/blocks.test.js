@@ -97,3 +97,21 @@ test("reuseCovering keeps the missing rect's shift", () => {
   assert.equal(two.items.length, 2); assert.equal(two.reused, 2);
   assert.deepEqual(two.items.map((q) => q.shift || 0).sort(), [0, 1]);
 });
+
+test("reuseCovering: a saved rect already present in items (not added by reuse) is not listed twice", () => {
+  const big = { z: 4, x0: 0, y0: 0, x1: 7, y1: 7 }, a = { z: 4, x0: 1, y0: 1, x1: 1, y1: 1 };
+  const res = B.reuseCovering([a], [big], [a, big], 2000);
+  assert.deepEqual(res.items, [big]);
+  assert.equal(res.reused, 1);
+  assert.deepEqual(res.missing, []);
+});
+
+test("reuseCovering: two misses with the same non-zero shift share one replacement", () => {
+  const big = { z: 4, x0: 0, y0: 0, x1: 7, y1: 7 };
+  const a = { z: 4, x0: 1, y0: 1, x1: 1, y1: 1, shift: 1 }, b = { z: 4, x0: 3, y0: 3, x1: 3, y1: 3, shift: 1 };
+  const res = B.reuseCovering([a, b], [big], [a, b], 2000);
+  assert.equal(res.items.length, 1);
+  assert.equal(res.items[0].shift, 1);
+  assert.equal(B.rectKey(res.items[0]), B.rectKey(big));
+  assert.equal(res.reused, 2);
+});

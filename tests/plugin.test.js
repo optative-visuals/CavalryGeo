@@ -10,6 +10,8 @@ const dir = path.join(ROOT, "plugin", "CavalryGeo_plugin");
 const defs = JSON.parse(fs.readFileSync(path.join(dir, "definitions.json"), "utf8"))[0];
 const strs = JSON.parse(fs.readFileSync(path.join(dir, "strings.json"), "utf8"))[0];
 const sksl = fs.readFileSync(path.join(dir, "reproject.sksl"), "utf8");
+// The shader without its comments, so a commented-out uniform isn't counted.
+const skslCode = sksl.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\r\n]*/g, "");
 const OWN = { camLat: "double", camLon: "double", camZoom: "double", camRotation: "double", camProjection: "double", viewScale: "double", viewOffset: "double2" };
 
 test("definitions.json describes the reproject filter", () => {
@@ -25,7 +27,7 @@ test("definitions.json describes the reproject filter", () => {
 
 test("the shader uniforms and the own attributes match one to one", () => {
   const found = {};
-  for (const m of sksl.matchAll(/uniform\s+(float2|float)\s+(\w+)\s*;/g)) found[m[2]] = m[1] === "float" ? "double" : "double2";
+  for (const m of skslCode.matchAll(/uniform\s+(float2|float)\s+(\w+)\s*;/g)) found[m[2]] = m[1] === "float" ? "double" : "double2";
   assert.deepEqual(found, OWN);
 });
 

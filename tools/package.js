@@ -8,22 +8,22 @@ const { createZip } = require("./ziplib.js");
 
 function installText(version) {
   return [
-  "Cavalry Geo v" + version,
-  "",
-  "1. In Cavalry, choose Help > Show Scripts Folder.",
-  "2. Drag CavalryGeo.js and the CavalryGeo_assets folder into that folder (straight in,",
-  "   not inside another folder).",
-  "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.",
-  "3. Open Scripts > CavalryGeo. No restart needed.",
-  "4. Imagery on the globe or Equal Earth? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install. Nothing else needs it.",
-  "",
-  "Tested on Windows and macOS.",
-  "",
-  "Street data (c) OpenStreetMap contributors (ODbL). World data: Natural Earth (public domain).",
-  "Cavalry Geo is free software under the GNU GPL v3 or later (see LICENSE.txt); it comes with ABSOLUTELY NO WARRANTY.",
-  "Guide and source: https://github.com/optative-visuals/CavalryGeo",
-  ""
-].join("\r\n");
+    "Cavalry Geo v" + version,
+    "",
+    "1. In Cavalry, choose Help > Show Scripts Folder.",
+    "2. Drag CavalryGeo.js and the CavalryGeo_assets folder into that folder (straight in,",
+    "   not inside another folder).",
+    "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.",
+    "3. Open Scripts > CavalryGeo. No restart needed.",
+    "4. Imagery on the globe or Equal Earth? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install. Nothing else needs it.",
+    "",
+    "Tested on Windows and macOS.",
+    "",
+    "Street data (c) OpenStreetMap contributors (ODbL). World data: Natural Earth (public domain).",
+    "Cavalry Geo is free software under the GNU GPL v3 or later (see LICENSE.txt); it comes with ABSOLUTELY NO WARRANTY.",
+    "Guide and source: https://github.com/optative-visuals/CavalryGeo",
+    ""
+  ].join("\r\n");
 }
 
 function collect(dir, prefix, out) {
