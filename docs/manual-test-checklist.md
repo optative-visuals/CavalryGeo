@@ -170,9 +170,15 @@ adding street layers.
       a boxed text label, a dot on the tower and a line joining them; the status asks you to drag the
       label and key Draw % in Overlay controls. **Callout at coordinates** with Lat 48.8606, Lon 2.3376
       and text "Louvre" → "Callout 2: Louvre".
-- [ ] 19f. Drag the label to the left and right of the place → the line always leaves the side of the box
-      that faces the place. Switch **Callout 1 · Line style** between 1 (Elbow) and 0 (Straight) → the
-      line changes between a right-angled bend and a straight line.
+- [ ] 19f. Drag the label to the left and right of the place → the line always leaves the point of the box
+      nearest the place (**Anchor** 1, Auto). Switch **Callout 1 · Line style** between 1 (Elbow) and 0
+      (Straight) → the line changes between a right-angled bend and a straight line.
+- [ ] 19f2. Set **Callout 1 · Anchor** to 0 (Side) → the line leaves the middle of the side facing the place,
+      as before. Try 2 to 9 → the line joins the top-left, top, top-right, right, bottom-right, bottom,
+      bottom-left and left points of the box and stays there while you drag the label or move the camera;
+      from 3 and 7 the Elbow bends straight up or down, from the others sideways. Draw % still draws the
+      line on evenly. On a callout made before Anchor existed, **Refresh controls** adds the Anchor row at 0
+      and the line looks unchanged.
 - [ ] 19g. Key **Callout 1 · Draw %** from 0 to 100 → the line draws on from the label to the dot, evenly,
       in both styles.
 - [ ] 19h. Zoom and pan the camera → the label stays where it is on screen while the dot and line follow
@@ -443,6 +449,15 @@ adding street layers.
 - [ ] On all three previews, press the scroll wheel and drag up: it zooms in around the press point; drag down: it zooms out. A middle click with no drag changes nothing and picks nothing; left-drag still pans; a quick double middle-click doesn't jump a zoom level.
 - [ ] Moving the mouse over a preview with no button held changes nothing: no pan, no zoom, no flicker. Then middle-drag up and down: it really zooms (Cavalry only reports middle-button moves while hover events are on).
 - [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
+
+## Assets group, settings, redraw and comps
+
+- [ ] Build imagery on a map: its images sit in one Assets group "Cavalry Geo imagery · <map name>". Rename the map and build again: a new group is made and the old one is left alone. Refresh controls gathers older loose assets into the group.
+- [ ] Other actions (Add layers, Pin here and so on) feel no slower in a scene with many assets: only Refresh controls gathers imagery assets.
+- [ ] Settings: after updating, keys and saved styles are still there; they live in Cavalry's app-data folder (CavalryGeo/settings.json), and an old settings.json in CavalryGeo_assets is left behind untouched.
+- [ ] Press a panel button with a layer selected in the Scene Window: groups stay collapsed and the viewport redraws (no black viewport). Changing a dropdown or leaving a text box does not move the playhead or change the selection.
+- [ ] Callout here: the new callout's label is selected, ready to drag.
+- [ ] Following the comp: with maps in two compositions, switching comp changes the Map list, previews and Extract layers to that comp's maps ("Showing maps in <comp>."). During a bent imagery build the panel does not flicker between comps, and the build's result message is kept when it ends.
 
 ## Scene persistence and install
 

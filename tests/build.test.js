@@ -34,6 +34,7 @@ function makeFakeApi() {
   var comp = { startFrame: 0, endFrame: 9, playbackStart: 0, playbackEnd: 9 };   // like Cavalry: frameRange follows start / end, the play range does not
   var outFrames = {};  // layerId -> out frame (a layer made in a comp ending at 9 has out frame 10)
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
+  var assetGroups = {}, assetGroupCalls = []; // like Cavalry: asset groups live in the Assets window; assets and comps can be parented into them
   var timers = [];
   var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
   var userData = {};   // layerId -> { key: value }
@@ -104,7 +105,7 @@ function makeFakeApi() {
     setOutFrame: function (id, f) { outFrames[id] = f; },
     // A composition's top-level layers are listed only while it is the active comp.
     getChildren: function (parentId) { return comps[parentId] && parentId !== activeComp ? [] : (childOrder[parentId] || []).slice(); },
-    getNiceName: function (id) { return niceNames[id] || id; },
+    getNiceName: function (id) { return niceNames[id] || assetGroups[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
     setFrame: function (f) { frame = f; },
     getFrame: function () { return frame; },
@@ -119,7 +120,9 @@ function makeFakeApi() {
     deleteKeyframe: function (id, attr, f) { if (keyframes[id] && keyframes[id][attr]) delete keyframes[id][attr][f]; },
     // Assets and footage.
     loadAsset: function (path) { var id = "asset#" + (nextAsset++); assets[id] = path; return id; },
-    getAssetWindowLayers: function () { return Object.keys(assets); },
+    getAssetWindowLayers: function () { return Object.keys(assets).concat(Object.keys(assetGroups)); },
+    createAssetGroup: function (name) { var id = "assetGroup#" + (nextAsset++); assetGroups[id] = name; assetGroupCalls.push(name); return id; },
+    _assetGroupCalls: assetGroupCalls,
     getAssetFilePath: function (id) { return assets[id]; },
     // Like Cavalry, adding an asset to the comp selects the new footage layer.
     addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return addToComp(id); },
@@ -432,6 +435,8 @@ function makeFakeUi() {
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
+    // Like Cavalry: objects with onCompChanged / onSceneChanged (and more) are called back by the app.
+    addCallbackObject: function (o) { (this._callbackObjects = this._callbackObjects || []).push(o); },
     setBackgroundColor: function (c) { this._background = c; },
     _root: function () { return root; }
   };
@@ -650,7 +655,7 @@ test("Map tab: picking \"New map\" in the picker is not an error: it clears the 
   context.featureList.setModel([{ uuid: "g0", label: "France" }]);
   context.mapPicker.setValue(1);
   context.mapPicker.onValueChanged();
-  assert.equal(context.statusLabel.getText(), "New map: type a place and press Search to make it.");
+  assert.equal(context.statusLabel.getText(), "New map: type a place and press Search to make it, or press Create map here.");
   assert.deepEqual(plain(context.featureList._model), []);
   assert.equal(context.groupsLayer, null);
 });
@@ -914,7 +919,7 @@ test("Map tab: the frame-field boxes follow New map: hidden with no map, shown a
 
 test("Map tab: a note under the Fly row says what Fly here does, and hides with the row for New map", () => {
   const { context, ui } = buildSandbox();
-  assert.equal(context.flyNote.getText(), "(animates the camera to the map preview)");
+  assert.equal(context.flyNote.getText(), "(animates the camera to the preview's green frame)");
   assert.equal(context.flyNote._textColor, "#8a8a8a");
   const items = panelItems(context, context.sectionPages.pages[0]);
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
@@ -976,10 +981,12 @@ test("Map search box: a commit never creates a map; Search then makes it from th
   assert.equal(context.maps.length, 0, "no map made by Enter");
   assert.equal(context.statusLabel.getText(), "2 result(s). Press Search to make the map at the first one.");
   assert.equal(calls.length, 1);
+  context.resultPicker.setValue(2);
   context.searchBtn.onClick();
   assert.equal(calls.length, 1, "Search reused the results");
   assert.equal(context.maps.length, 1);
   assert.equal(context.currentMap().name, "Paris");
+  assert.equal(context.resultPicker.getValue(), 2, "the pick survived");
   assert.match(context.statusLabel.getText(), /^Created map "Paris" with countries and coastlines, centred on Paris\. 2 result\(s\)/);
   context.mapPicker.setValue(context.maps.length); // New map again
   context.mapPicker.onValueChanged();
@@ -999,7 +1006,9 @@ test("Map Search button: reuses the last results for the same text, searches aga
   assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
   context.resultPicker.setValue(2);
   mapSearch(context, "Paris");
-  assert.equal(context.resultPicker.getValue(), 1, "reusing still starts at the first result");
+  assert.equal(context.resultPicker.getValue(), 2, "reusing keeps the picked result");
+  mapSearch(context, "Rome");
+  assert.equal(context.resultPicker.getValue(), 1, "a fresh search picks the first result");
   const none = countingSearch(context, []);
   mapSearch(context, "Nowhere");
   mapSearch(context, "Nowhere");
@@ -1012,6 +1021,29 @@ test("Map search box: a failing search stays inside guard() on commit", () => {
   context.searchField.setText("Paris");
   assert.doesNotThrow(() => context.searchField.onValueCommitted());
   assert.match(context.statusLabel.getText(), /offline/);
+});
+
+test("a failing search on Enter is not repeated when the box loses focus right after, so the real error stays", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  let calls = 0, now = 1000000;
+  vm.runInContext("Date", context).now = () => now;
+  context.GeoNet.search = () => { calls++; throw new Error(calls === 1 ? "offline" : "Please wait a second between searches."); };
+  [["searchField"], ["pinSearchField"], ["routeSearchField"]].forEach(([name]) => {
+    calls = 0;
+    now += 10000;
+    context[name].setText("Paris");
+    context[name].onValueCommitted();
+    context[name].onValueCommitted(); // focus lost a moment later
+    assert.equal(calls, 1, name + ": the same text is not tried twice within 1.5 s");
+    assert.match(context.statusLabel.getText(), /offline/);
+    now += 1600;
+    context[name].onValueCommitted();
+    assert.equal(calls, 2, name + ": later it tries again");
+    context[name].setText("Rome");
+    context[name].onValueCommitted();
+    assert.equal(calls, 3, name + ": different text is never skipped");
+  });
 });
 
 [["Pins", "pinSearchField", "pinSearchBtn", "pinResultPicker", "pinResults"],
@@ -1029,6 +1061,9 @@ test("Map search box: a failing search stays inside guard() on commit", () => {
     assert.equal(calls.length, 1, "same text: nothing");
     context[btnName].onClick();
     assert.equal(calls.length, 1, "the button after a commit with the same text reuses the results");
+    context[pickerName].setValue(1);
+    context[btnName].onClick();
+    assert.equal(context[pickerName].getValue(), 1, "reusing keeps the picked result");
     assert.equal(context[resultsName].length, 2);
     assert.match(context.statusLabel.getText(), /^2 result\(s\)\. Pick one, then /);
     field.setText("Rome");
@@ -2138,11 +2173,11 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.ok(conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"));
   ["position", "scale", "opacity"].forEach((a) => assert.ok(conns.some((c) => c[2] === level && c[3] === a), a));
   assert.equal(context.GeoScene.findImagery(map).length, 1);
-  assert.equal(api.getAssetWindowLayers().length, 48);
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48);
   const again = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(context.GeoScene.findImagery(map).length, 1, "old imagery deleted");
   assert.equal(api.layerExists(r.groupId), false);
-  assert.equal(api.getAssetWindowLayers().length, 48, "assets reused");
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48, "assets reused");
   assert.ok(api.layerExists(again.groupId));
 });
 
@@ -3334,7 +3369,7 @@ test("Imagery tab: first press plans, second press downloads in timer steps then
   context.buildImageryBtn.onClick(); // a new plan must not keep showing the last build's 100%
   assert.equal(context.imageryProgress._value, 0);
   assert.ok(api.getCompLayers(false).some((id) => String(api.getNiceName(id)).startsWith("Imagery: ")));
-  const settings = JSON.parse(api._files["C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json"]);
+  const settings = JSON.parse(api._files[SETTINGS_FILE]);
   assert.equal(settings.source, "custom");
 });
 
@@ -3796,7 +3831,7 @@ test("Imagery tab: missing and rejected keys", () => {
 
 // ---- Update check -------------------------------------------------------------------
 const UPDATE_DIR = "C:/fake/AppData/Scripts/CavalryGeo_assets";
-const SETTINGS = UPDATE_DIR + "/settings.json";
+const SETTINGS = "C:/fake/AppData/CavalryGeo/settings.json";
 const REPLY = UPDATE_DIR + "/cache/downloads/latest-release.json";
 const NEWER = "Cavalry Geo v0.5.0 is available (you have v0.4.1). Download: https://github.com/optative-visuals/CavalryGeo/releases/latest";
 function readSettings(api) { return JSON.parse(api._files[SETTINGS] || "{}"); }
@@ -4351,7 +4386,7 @@ test("Pins preview: a click fills Lat / Lon, sets the ring, and puts the looked-
   const lat = context.latField.getValue(), lon = context.lonField.getValue();
   assert.equal(Math.round(lat * 1e4) / 1e4, lat, "4 decimals");
   assert.equal(context.labelText.getText(), "Gare du Nord");
-  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
   lookupGives(context, "Gare de l'Est");
   clickAt(context.pinsPreview, 120, 70);
   assert.equal(context.labelText.getText(), "Gare de l'Est", "an earlier click's name is replaced");
@@ -4368,7 +4403,7 @@ test("Pins preview: a failed lookup says the coordinates and clears a stale look
   lookupGives(context, null);
   clickAt(context.pinsPreview, 140, 80);
   assert.equal(context.labelText.getText(), "");
-  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
 });
 
 test("Pins preview: Pin at coordinates after a click pins the looked-up name there, and the previews redraw with it", () => {
@@ -4425,7 +4460,7 @@ test("Routes preview: a click during a lookup is ignored with a status, so stops
     return "C";
   };
   clickAt(context.routesPreview, 100, 60);
-  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.equal(nestedStatus, "Still working on the last action…");
   assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A"], "only the first click was added");
   assert.equal(context.statusLabel.getText(), "Added stop 1: A.");
   context.GeoNet.reverse = () => "B";
@@ -4441,7 +4476,7 @@ test("Pins preview: a click during a lookup is ignored, so spot, ring and name a
     return "Second";
   };
   clickAt(context.pinsPreview, 100, 60);
-  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.equal(nestedStatus, "Still working on the last action…");
   const v = context.pinsPreview._view(), want = context.GeoPreview.fromPx(v, 100, v.height - 60); // the Label previews are y-up
   assert.ok(Math.abs(context.lonField.getValue() - want.lon) < 1e-3 && Math.abs(context.latField.getValue() - want.lat) < 1e-3, "Lat / Lon are the first click's");
   assert.equal(context.labelText.getText(), "First");
@@ -4449,7 +4484,7 @@ test("Pins preview: a click during a lookup is ignored, so spot, ring and name a
   const rings = ellipseCmds(strokes(context.pinsPreview._draw, "#ffffff"));
   assert.equal(rings.length, 1);
   assert.ok(Math.abs(rings[0][1] - 100) < 0.5, "the ring is at the first click");
-  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
 });
 
 test("Previews follow the map: picking a map centres the Label previews on its camera; Create route redraws them", () => {
@@ -5486,6 +5521,26 @@ test("the window, each tab's page and its panels get lighter layer by layer", ()
   assert.deepEqual(context.sectionPages.widget._items[0]._radius, [6, 6, 6, 6], "Cavalry's own 6 px corners");
 });
 
+test("Map tab: without ui.Container the panel has no insets, so the preview takes the tab bar's whole width", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  installNe(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  context.sectionTabs.widget.geometry = () => ({ x: 0, y: 0, width: 500, height: 24 });
+  ui.onResize();
+  assert.equal(plain(context.preview._draw._size)[0], 500);
+});
+
+test("preview.setWidth never goes below the Draw's 120 px minimum", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  context.preview.setWidth(60);
+  assert.equal(plain(context.preview._draw._size)[0], 120);
+  assert.equal(context.preview._draw._minWidth, 120);
+  context.preview.setWidth(10);
+  assert.equal(plain(context.preview._draw._size)[0], 120, "still not laid out: unchanged");
+});
+
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   context.sectionTabs.widget._width = 500;
@@ -5507,7 +5562,8 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
 });
 
 // ---- Map tab: Style section ----
-const SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
+const SETTINGS_FILE = "C:/fake/AppData/CavalryGeo/settings.json"; // outside the Scripts folder, so an update can't wipe it
+const OLD_SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
 function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
 function pickStyle(context, name) {
   const i = context.mapStylePicker._entries.indexOf(name);
@@ -5581,6 +5637,19 @@ test("Map tab Style: Apply restyles the picked map and says so", () => {
   context.applyStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Applied Blueprint to Map.");
   assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
+});
+
+test("Map tab: the previews show the picked map's own colours, not the Style picker's", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  pickStyle(context, "Blueprint");
+  context.applyStyleBtn.onClick();
+  pickStyle(context, "Light"); // only previews Light
+  assert.equal(context.preview._draw._background, "#cfe3ec");
+  context.refreshMaps(); // e.g. after switching compositions
+  assert.equal(context.preview._draw._background, "#123a6b", "the map's Blueprint ocean");
+  context.mapPicker.setValue(context.maps.length); context.mapPicker.onValueChanged(); // New map
+  assert.equal(context.preview._draw._background, "#cfe3ec", "New map shows the picked style");
 });
 
 test("Map tab Style: Apply reports colours it left alone", () => {
@@ -7013,6 +7082,61 @@ test("Extract Find box: the Find button always runs, and the text it ran counts 
   context.featureQuery.setText("Louvre");
   context.featureQuery.onValueCommitted();
   assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
+});
+
+test("Extract Find box: the first Enter on a blank box lists every named feature", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, [""], "blank runs Find the first time");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1, "then the same blank does nothing");
+});
+
+test("Extract Find box: switching layer (or map) forgets the last text, so the same text runs again", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli");
+  context.featureQuery.onValueCommitted();
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1);
+  context.mapPicker.onValueChanged();
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2, "the same text runs again after a map switch");
+});
+
+test("Extract Find box: a failed Find is not remembered, so Enter with the same text tries again", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  let fail = true;
+  const real = context.GeoScene.readLayerData;
+  context.GeoScene.readLayerData = (id) => { if (fail) throw new Error("unreadable"); return real(id); };
+  context.featureQuery.setText("Rivoli");
+  context.featureQuery.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /unreadable/);
+  fail = false;
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli"], "the retry ran Find");
+  assert.equal(context.statusLabel.getText(), "1 match(es). Select some, then Extract.");
+});
+
+test("Data link box: a failed load is not remembered, so Enter with the same link tries again", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  let fail = true;
+  const real = context.GeoNet.fetchCsv;
+  context.GeoNet.fetchCsv = (url) => { if (fail) { fetched.push(url); throw new Error("offline"); } return real(url); };
+  context.dataLinkField.setText("https://example.com/a.csv");
+  context.dataLinkField.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /offline/);
+  fail = false;
+  context.dataLinkField.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /^1 rows, /);
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 2, "now it is remembered");
 });
 
 function findFrance(context) {
@@ -8854,9 +8978,9 @@ test("Highlight selected: when every feature fails the first error is shown and 
 
 // ---- Start here tips ---------------------------------------------------------
 const TIPS_LINES = [
-  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "1. Make a map: type a place in Search and press Search, or pick \"New map\" and press Create map here.",
   "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
-  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "3. Mark places: the Label tab adds pins, labels and routes. On Routes, click the preview to add a stop.",
   "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
   "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
 ];
@@ -9245,10 +9369,10 @@ test("Streets note says to add one street layer at a time", () => {
   const { context, ui } = buildSandbox();
   const texts = [];
   walkUi(context.sectionPages.pages[1], (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
-  assert.ok(texts.includes("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."), texts.join(" | "));
+  assert.ok(texts.includes("Downloads the area the camera shows. Add one street layer at a time. Boxes untick once their layer is added."), texts.join(" | "));
 });
 
-test("Add layers: a street box unticks once its layer is added; World boxes stay ticked", () => {
+test("Add layers: every box unticks once its layer is added, so a repeated click can't add it twice", () => {
   const { context } = buildSandbox({ setup: installNe });
   const map = streetsSetup(context, {});
   context.checks.roads.setValue(true);
@@ -9257,7 +9381,7 @@ test("Add layers: a street box unticks once its layer is added; World boxes stay
   const cats = context.GeoScene.findMapLayers(map).map((l) => l.meta.category);
   assert.ok(cats.includes("roads") && cats.includes("countries"), context.statusLabel.getText());
   assert.equal(context.checks.roads.getValue(), false, "Roads unticked");
-  assert.equal(context.checks.countries.getValue(), true, "Countries stays ticked");
+  assert.equal(context.checks.countries.getValue(), false, "Countries unticked too");
 });
 
 test("Add layers: a street layer that came back empty stays ticked", () => {
@@ -9644,6 +9768,71 @@ test("callouts: the user's selection is put back after a successful build too", 
   assert.deepEqual(plain(api.getSelection()), keep);
 });
 
+// ---- Callout anchor ----
+test("callouts: a new callout's edge, bend and draw helpers start on Auto (anchor 1), appended after the older inputs", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const rec = coRec(api, G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"));
+  [rec.edge, rec.bend].forEach((h) => { assert.equal(api.get(h, "array.8"), 1); assert.equal(api.hasAttribute(h, "array.9"), false); assert.equal(api.getCustomAttributeName(h, "array.8"), "anchor"); });
+  rec.draws.forEach((d, i) => {
+    assert.equal(api.get(d, "array.8"), 100, "draw stays at 8"); assert.equal(api.get(d, "array.9"), i, "index stays at 9");
+    assert.equal(api.get(d, "array.10"), 1); assert.equal(api.getCustomAttributeName(d, "array.10"), "anchor");
+  });
+  assert.equal(E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor"), 10);
+});
+
+test("callouts in Controls: the Anchor row sits after Line style and drives the anchor of the edge, bend and both draw helpers", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  const r = context.GeoControlPanel.sync(map), slots = slotsOf(api, r.valuesId);
+  const names = plain(promotedNames(api, r.components.overlay)), label = "Callout 1 · Anchor (0 side · 1 auto · 2-9 corners and edges)";
+  assert.equal(names.indexOf(label), names.indexOf("Callout 1 · Line style (0 straight · 1 elbow)") + 1);
+  const from = r.valuesId + "." + slots["callout:" + g + ":anchor"];
+  assert.ok(slots["callout:" + g + ":anchor"] !== undefined);
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), from, h));
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.10"), from, d));
+  assert.deepEqual(plain(api._overrides[r.valuesId][slots["callout:" + g + ":anchor"]]), { hardMin: 0, hardMax: 9, step: 1 });
+});
+
+// A callout as an earlier version made it: no anchor input, the old script.
+function makeOldCallout(api, context, rec) {
+  const meta = (c) => ({ camera: rec.camera, category: c });
+  [rec.edge, rec.bend].forEach((h) => { api.set(h, { "array.8": undefined }); });
+  rec.draws.forEach((d) => { api.set(d, { "array.10": undefined }); });
+  api.set(rec.edge, { expression: "/*GEO_META " + JSON.stringify(meta("calloutEdge")) + " GEO_META*/ old" });
+  api.set(rec.bend, { expression: "/*GEO_META " + JSON.stringify(meta("calloutBend")) + " GEO_META*/ old" });
+  rec.draws.forEach((d) => api.set(d, { expression: "/*GEO_META " + JSON.stringify(meta("calloutDraw")) + " GEO_META*/ old" }));
+}
+
+test("callouts: Refresh controls gives an older callout the anchor input at 0 (Side) and the new scripts; a second refresh changes nothing", () => {
+  const { context, api } = buildSandbox();
+  const map = calloutMap(context), G = context.GeoScene, E = context.GeoExpression;
+  const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
+  makeOldCallout(api, context, rec);
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.hasAttribute(h, "array.8"), false));
+  const r = context.GeoControlPanel.sync(map);
+  const meta = (c) => ({ camera: map.cameraId, category: c });
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.get(h, "array.8"), 0, "Side"));
+  rec.draws.forEach((d, i) => { assert.equal(api.get(d, "array.10"), 0); assert.equal(api.get(d, "array.8"), 100); assert.equal(api.get(d, "array.9"), i); });
+  assert.equal(api.get(rec.edge, "expression"), E.calloutEdgeExpression(meta("calloutEdge")));
+  assert.equal(api.get(rec.bend, "expression"), E.calloutBendExpression(meta("calloutBend")));
+  rec.draws.forEach((d) => assert.equal(api.get(d, "expression"), E.calloutDrawExpression(meta("calloutDraw"))));
+  // the Anchor row reaches the upgraded helpers (starting from Side)
+  const slots = slotsOf(api, r.valuesId), from = r.valuesId + "." + slots["callout:" + g + ":anchor"];
+  [rec.edge, rec.bend].forEach((h) => assert.equal(api.getInConnection(h, "array.8"), from));
+  rec.draws.forEach((d) => assert.equal(api.getInConnection(d, "array.10"), from));
+  // a second refresh writes nothing to the helpers
+  const writes = [], realSet = api.set, realAdd = api.addDynamic;
+  const helpers = [rec.edge, rec.bend].concat(rec.draws);
+  api.set = function (id) { if (helpers.indexOf(id) >= 0) writes.push(id); return realSet.apply(api, arguments); };
+  api.addDynamic = function (id) { writes.push(id); return realAdd.apply(api, arguments); };
+  const again = context.GeoControlPanel.sync(map);
+  api.set = realSet; api.addDynamic = realAdd;
+  assert.deepEqual(writes, []);
+  assert.deepEqual(plain(slotsOf(api, again.valuesId)), plain(slots));
+});
+
 // ---- Callouts in Controls ----
 test("callouts in Controls: a callout's rows land in Overlay controls with its text as notes; Draw % drives both draw helpers", () => {
   const { context, api } = buildSandbox();
@@ -9651,7 +9840,7 @@ test("callouts in Controls: a callout's rows land in Overlay controls with its t
   const g = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris"), rec = coRec(api, g);
   const r = context.GeoControlPanel.sync(map);
   const names = plain(promotedNames(api, r.components.overlay));
-  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
+  const wanted = ["Draw %", "Line style (0 straight · 1 elbow)", "Anchor (0 side · 1 auto · 2-9 corners and edges)", "Line colour", "Line width", "Dot size", "Text colour", "Text size", "Box colour", "Hide box"].map((n) => "Callout 1 · " + n);
   assert.deepEqual(names.filter((n) => /^Callout 1 · /.test(n)), wanted);
   const list = api._promoted(r.components.overlay), at = names.indexOf("Callout 1 · Draw %");
   assert.equal(api.get(r.components.overlay, "promotedAttributes." + at + ".notes"), "Paris");
@@ -9698,11 +9887,11 @@ test("callouts: Callout here makes the callout for the picked place and says how
   mapSearch(context, "Paris");
   context.calloutHereBtn.onClick();
   assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 1: Paris"));
-  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
   context.labelText.setText("The capital");
   context.calloutHereBtn.onClick();
   assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 2: The capital"));
-  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
 });
 
 test("callouts: Callout here with no search says where to search; a failed Controls update keeps the callout", () => {
@@ -9715,7 +9904,7 @@ test("callouts: Callout here with no search says where to search; a failed Contr
   context.GeoControlPanel.sync = () => { throw new Error("boom"); };
   context.calloutHereBtn.onClick();
   assert.equal(context.GeoScene.findCallouts(context.currentMap()).length, 1);
-  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Overlay controls\. Its controls couldn't be updated: boom\./);
+  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls. Its controls couldn't be updated: boom\./);
 });
 
 test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordinate name unless text is typed", () => {
@@ -9728,7 +9917,7 @@ test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordin
   const rec = plain(api.getUserDataKey(found[0].groupId, "geoCallout"));
   assert.equal(rec.lat, 48.8566); assert.equal(rec.lon, 2.3522);
   assert.equal(api.getNiceName(found[0].groupId), "Callout 1: 48.8566, 2.3522");
-  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
   context.labelText.setText("Home");
   context.calloutCoordBtn.onClick();
   assert.equal(api.getNiceName(context.GeoScene.findCallouts(map)[0].groupId), "Callout 2: Home");
@@ -11226,6 +11415,20 @@ test("GeoStyle.tip sets the tooltip on a widget and on a toggle's widget, and is
   assert.equal(l._toolTip, undefined);
 });
 
+test("GeoStyle.tip wraps long tooltips after every 7th word and leaves short ones on one line", () => {
+  const { context, ui } = buildSandbox();
+  const S = context.GeoStyle;
+  const b = new ui.Button("Go");
+  S.tip(b, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen");
+  assert.equal(b._toolTip, "one two three four five six seven\neight nine ten eleven twelve thirteen fourteen\nfifteen");
+  S.tip(b, "one two three four five six seven eight nine");
+  assert.equal(b._toolTip, "one two three four five six seven eight nine", "under 10 words: one line");
+  S.tip(b, "one two three four five six seven eight nine ten");
+  assert.equal(b._toolTip, "one two three four five six seven\neight nine ten");
+  const T = context.GeoTips;
+  T.keys().forEach((k) => assert.ok(T.text(k).indexOf("\n") < 0, k + " is a single-line source string"));
+});
+
 test("GeoTips.text returns plain strings, throws for unknown keys, and no text contains <", () => {
   const { context } = buildSandbox();
   const T = context.GeoTips;
@@ -11292,7 +11495,569 @@ test("hover help: every control on every page has a plain tooltip, and every Geo
   const texts = keys.map((k) => context.GeoTips.text(k));
   assert.equal(new Set(texts).size, texts.length, "no two keys share a text");
   keys.forEach((k, i) => {
-    const users = controls.filter((w) => w._toolTip === texts[i]);
+    const wrapped = texts[i].split(" ").length < 10 ? texts[i] : texts[i].split(" ").reduce((acc, word, n) => acc + (n === 0 ? "" : n % 7 === 0 ? "\n" : " ") + word, "");
+    const users = controls.filter((w) => w._toolTip === wrapped);
     assert.equal(users.length, 1, k + " is used by " + users.length + " control(s)");
   });
+});
+
+// ---- Imagery Assets group (one per map) ----------------------------------------------
+function assetIds(api) { return api.getAssetWindowLayers(false).filter((id) => api.getLayerType(id) === "asset"); }
+function assetGroupsNamed(api, name) { return api.getAssetWindowLayers(false).filter((id) => api.getLayerType(id) === "assetGroup" && api.getNiceName(id) === name); }
+
+test("Imagery group: a flat build files its assets into one group named for the map", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  const name = "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId);
+  const groups = assetGroupsNamed(api, name);
+  assert.equal(groups.length, 1);
+  const assets = assetIds(api);
+  assert.equal(assets.length, 48);
+  assets.forEach((id) => assert.equal(api.getParent(id), groups[0]));
+});
+
+test("Imagery group: a bent build files its assets and the Imagery source comp", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  const name = "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId);
+  const groups = assetGroupsNamed(api, name);
+  assert.equal(groups.length, 1);
+  assert.ok(assetIds(api).length > 0);
+  assetIds(api).forEach((id) => assert.equal(api.getParent(id), groups[0]));
+  const im = context.GeoScene.findImagery(map)[0];
+  assert.equal(api.getParent(im.meta.sourceComp), groups[0]);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("Imagery group: a second build reuses the group and makes no duplicate", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api._assetGroupCalls.length, 1);
+  assert.equal(assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId)).length, 1);
+});
+
+test("Imagery group: an asset the user already put in a group of their own stays there", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const path = context.GeoNet.cachedTile(context.GeoScene.itemBase(plan, plan.items[0]));
+  const mine = api.createAssetGroup("Mine");
+  const asset = api.loadAsset(path, false);
+  api.parent(asset, mine);
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api.getParent(asset), mine);
+  const group = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
+  assert.equal(assetIds(api).filter((id) => api.getParent(id) === group).length, 47);
+});
+
+test("Imagery group: nothing is deleted, and an older Cavalry without asset groups still builds", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const deleted = [];
+  const realDelete = api.deleteLayer.bind(api);
+  api.deleteLayer = (id) => { deleted.push(id); return realDelete(id); };
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  context.GeoScene.buildImagery(map, src, {}, plan); // the rebuild deletes the old imagery layers, never assets
+  assert.equal(deleted.filter((id) => /^asset/.test(id)).length, 0);
+  assert.equal(assetIds(api).length, 48);
+  const old = imageryFixture();
+  delete old.api.createAssetGroup;
+  const r = old.context.GeoScene.buildImagery(old.map, old.src, {}, old.plan);
+  assert.equal(r.tiles, 48);
+});
+
+test("Imagery group: Refresh controls gathers older top-level assets and bent source comps into the group", () => {
+  const flat = imageryFixture();
+  flat.context.GeoScene.buildImagery(flat.map, flat.src, {}, flat.plan);
+  assetIds(flat.api).forEach((id) => flat.api.unParent(id)); // as a map built before the group existed
+  assert.equal(flat.api.getParent(assetIds(flat.api)[0]), "");
+  flat.context.GeoControlPanel.sync(flat.map, { gatherImagery: true });
+  const fg = assetGroupsNamed(flat.api, "Cavalry Geo imagery \u00b7 " + flat.api.getNiceName(flat.map.groupId));
+  assert.equal(fg.length, 1);
+  assetIds(flat.api).forEach((id) => assert.equal(flat.api.getParent(id), fg[0]));
+  flat.context.GeoControlPanel.sync(flat.map, { gatherImagery: true });
+  assert.equal(flat.api._assetGroupCalls.length, 1, "a second refresh makes no new group");
+
+  const { context, api, map, src } = bentFixture();
+  context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const im = context.GeoScene.findImagery(map)[0];
+  api.unParent(im.meta.sourceComp);
+  assetIds(api).forEach((id) => api.unParent(id));
+  context.GeoControlPanel.sync(map, { gatherImagery: true });
+  const g = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
+  assert.equal(api.getParent(im.meta.sourceComp), g);
+  assetIds(api).forEach((id) => assert.equal(api.getParent(id), g));
+});
+
+test("settings: the panel reads the old settings.json on first open, copies it to AppData, and never logs keys", () => {
+  const logged = [];
+  const spy = { log: (...a) => logged.push(a.join(" ")), warn: (...a) => logged.push(a.join(" ")), error: (...a) => logged.push(a.join(" ")) };
+  const { context, api } = buildSandbox({ globals: { console: spy }, setup: (a) => { a._files[OLD_SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono", maptilerKey: "SECRET-KEY-123" }); } });
+  assert.equal(context.GeoNet.loadSettings().mapStyle, "Mono");
+  assert.equal(JSON.parse(api._files[SETTINGS_FILE]).maptilerKey, "SECRET-KEY-123");
+  assert.equal(JSON.parse(api._files[OLD_SETTINGS_FILE]).maptilerKey, "SECRET-KEY-123", "the old file stays");
+  context.GeoNet.updateSettings({ mapStyle: "Dark" });
+  assert.equal(logged.filter((l) => l.indexOf("SECRET-KEY-123") >= 0).length, 0);
+});
+
+// ---- guard(): selection and redraw after a panel action ---------------------------------
+function nestedLayer(api) {
+  const group = api.create("group", "G"), child = api.create("group", "Child");
+  api.parent(child, group);
+  return { group, child };
+}
+
+test("guard: an action that leaves a nested layer selected gets the old selection back", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  context.guardAction(() => { api.select([child]); })();
+  assert.deepEqual(api.getSelection(), [group]);
+});
+
+test("guard: a top-level selection made on purpose stays", () => {
+  const { context, api } = buildSandbox();
+  const { group } = nestedLayer(api);
+  const other = api.create("group", "Top");
+  api.select([group]);
+  context.guardAction(() => { api.select([other]); })();
+  assert.deepEqual(api.getSelection(), [other]);
+});
+
+test("guard: a selection that did not change is left alone, and an error still reaches the status line", () => {
+  const { context, api } = buildSandbox();
+  const { child } = nestedLayer(api);
+  api.select([child]); // the user's own nested selection
+  let selects = 0;
+  const real = api.select.bind(api);
+  api.select = (ids) => { selects++; return real(ids); };
+  context.guardAction(() => { throw new Error("boom"); })();
+  assert.equal(selects, 0);
+  assert.deepEqual(api.getSelection(), [child]);
+  assert.match(context.statusLabel.getText(), /^Error: boom$/);
+});
+
+test("guard: an error that left a nested layer selected still restores the selection", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  context.guardAction(() => { api.select([child]); throw new Error("late"); })();
+  assert.deepEqual(api.getSelection(), [group]);
+  assert.match(context.statusLabel.getText(), /late/);
+});
+
+test("guard: an older Cavalry without getParent or select never breaks the action", () => {
+  const { context, api } = buildSandbox();
+  delete api.getParent; delete api.select; delete api.setFrame;
+  let ran = 0;
+  context.guardAction(() => { ran++; })();
+  assert.equal(ran, 1);
+  assert.equal(context.statusLabel.getText(), "Ready.");
+});
+
+test("guard: nudges a redraw with the current frame once per action, also after an error", () => {
+  const { context, api } = buildSandbox();
+  api.setFrame(7);
+  const calls = [];
+  const real = api.setFrame.bind(api);
+  api.setFrame = (f) => { calls.push(f); return real(f); };
+  context.guardAction(() => {})();
+  assert.deepEqual(calls, [7]);
+  context.guardAction(() => { throw new Error("x"); })();
+  assert.deepEqual(calls, [7, 7]);
+  api.setFrame = () => { throw new Error("no redraw"); };
+  context.guardAction(() => {})(); // a failing nudge is ignored
+  assert.equal(context.statusLabel.getText().indexOf("no redraw"), -1);
+});
+
+test("Imagery boxes: key, token, style, link and credit are saved when committed, without Build imagery", () => {
+  const { context } = buildSandbox();
+  const boxes = { maptilerKeyField: "maptilerKey", mapboxKeyField: "mapboxKey", styleField: "style", customUrlField: "customUrl", customAttrField: "customAttribution" };
+  Object.keys(boxes).forEach((name) => {
+    context[name].setText(" value-" + name + " ");
+    context[name].onValueCommitted();
+    assert.equal(plain(context.GeoNet.loadSettings())[boxes[name]], "value-" + name, name + " was saved, trimmed");
+  });
+});
+
+// ---- Error handling (tidy-up) ------------------------------------------------------
+function bakeTwo(context, api) {
+  const G = context.GeoScene, map = controlsMap(context);
+  const mk = (n) => G.createMapLayer(map, n, { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  const a = mk("A"), b = mk("B");
+  api.select([a, b]);
+  return [a, b];
+}
+
+test("Bake: one layer failing does not undo the others; the status counts the baked ones and gives the first error", () => {
+  const { context, api } = buildSandbox();
+  const [a, b] = bakeTwo(context, api), real = context.GeoScene.bake;
+  context.GeoScene.bake = (id) => { if (id === b) throw new Error("boom"); return real(id); };
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Couldn't bake 1: boom\./);
+  context.GeoScene.bake = () => { throw new Error("boom"); };
+  api.select([a, b]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: boom", "nothing baked: the error itself");
+});
+
+test("Bake: a failure while recognising route parts carries on and says so", () => {
+  const { context, api } = buildSandbox();
+  const [a] = bakeTwo(context, api);
+  context.GeoScene.findRoutes = () => { throw new Error("odd route"); };
+  api.select([a]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\)/);
+  assert.match(context.statusLabel.getText(), / Couldn't check for route parts: odd route\./);
+});
+
+test("Bake: only furniture selected together with highlight parts names what else was skipped", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const map = findFrance(context), G = context.GeoScene;
+  context.highlightBtn.onClick();
+  const h = G.findHighlights(map)[0], sb = G.addScaleBar(map);
+  api.select([sb]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked.");
+  api.select([sb, h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked. Highlights can't be baked either.");
+});
+
+test("Extract selected: one feature failing does not undo the others; the status gives the count and the first error", () => {
+  const { context } = buildSandbox();
+  findFrance(context);
+  context.featureList.getSelection = () => ["g0", "g0"];
+  const real = context.GeoScene.extract;
+  let n = 0;
+  context.GeoScene.extract = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  context.extractBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Extracted 1 feature layer\(s\)\. They follow the camera;/);
+  assert.match(context.statusLabel.getText(), / Couldn't extract 1: boom\./);
+  context.GeoScene.extract = () => { throw new Error("boom"); };
+  context.extractBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: boom");
+});
+
+test("Add layers: the large-area and heavy-layers questions go through the question helper, which copes with no dialog", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.GeoUtil.checkArea = () => ({ areaKm2: 5000, needsConfirm: true, refuse: false });
+  let downloads = 0;
+  context.GeoNet.osmLayer = () => { downloads++; return context.GeoCodec.encodeLayer({ kind: "line", features: [] }); };
+  context.checks.roads.setValue(true);
+  context.addLayersBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Error: The camera shows about 5000 km², a large area to download\./);
+  assert.equal(downloads, 0, "nothing downloaded without a way to ask");
+  const asked = withModal(ui, false);
+  context.addLayersBtn.onClick();
+  assert.equal(asked[0].title, "Large area");
+  assert.equal(context.statusLabel.getText(), "Cancelled. Zoom the camera in, or choose Main features only.");
+  assert.equal(downloads, 0);
+  // Heavy layers: asked when a dialog exists, simply added when none does.
+  context.GeoUtil.checkArea = () => ({ areaKm2: 1, needsConfirm: false, refuse: false });
+  context.checks.roads.setValue(false);
+  context.checks.countries.setValue(true);
+  context.GeoUtil.LIMITS.SCENE_WARN_BYTES = 1;
+  context.addLayersBtn.onClick();
+  assert.equal(asked[asked.length - 1].title, "Heavy layers");
+  assert.equal(context.statusLabel.getText(), "Cancelled. Nothing was added.");
+  delete ui.Modal;
+  context.addLayersBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Added \d+ layer\(s\)/);
+});
+
+test("Imagery pickers: a throwing source change is caught, and refilling the style list does not overwrite the style box", () => {
+  const { context } = buildSandbox();
+  context.styleField.setText("mine");
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  // Like a Cavalry that reports a pick whenever the list is refilled.
+  const clear = sp.clear, add = sp.addEntry;
+  sp.clear = function () { clear.call(sp); sp.onValueChanged(); };
+  sp.addEntry = function (e) { add.call(sp, e); sp.onValueChanged(); };
+  context.sourcePicker.setValue(ids.findIndex((id) => (context.GeoSources.list().find((s) => s.id === id).suggestions || []).length > 0));
+  context.sourcePicker.onValueChanged();
+  assert.ok(sp._entries.length > 0, "the style list was refilled");
+  assert.equal(context.styleField.getText(), "mine");
+  sp.clear = clear; sp.addEntry = add;
+  sp.setValue(1);
+  sp.onValueChanged();
+  assert.equal(context.styleField.getText(), sp._entries[1], "a real pick still fills the box");
+  context.licenceLabel.setText = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => context.sourcePicker.onValueChanged());
+  assert.equal(context.statusLabel.getText(), "Error: boom");
+  assert.doesNotThrow(() => { context.GeoSources.list = () => { throw new Error("bad"); }; sp.onValueChanged(); });
+});
+
+// ---- The panel follows the active composition -------------------------------------------
+const CAM0 = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+function follower(ui) { assert.equal(ui._callbackObjects.length, 1, "one callback object is registered"); return ui._callbackObjects[0]; }
+function pickerNames(context) { return plain(context.mapPicker._entries); }
+// A second composition holding one map called `name` (it stays the active comp, like after a comp switch).
+function otherComp(context, api, compName, mapName) {
+  const comp = api.createComp(compName);
+  if (mapName) context.GeoScene.createMap(mapName, CAM0);
+  return comp;
+}
+
+test("comp follow: the panel registers one callback object (once) when Cavalry has addCallbackObject", () => {
+  const { ui } = buildSandbox();
+  assert.equal(typeof follower(ui).onCompChanged, "function");
+  assert.equal(typeof follower(ui).onSceneChanged, "function");
+  const api = makeFakeApi(), ui2 = makeFakeUi();
+  delete ui2.addCallbackObject;
+  assert.doesNotThrow(() => vm.runInContext(buildPanel(), vm.createContext({ api: api, ui: ui2, cavalry: makeFakeCavalry(), console: console })), "an older Cavalry without it still opens");
+});
+
+test("comp follow: switching comp lists that comp's maps, and switching back lists the first comp's again", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Other", "Elsewhere");
+  assert.deepEqual(pickerNames(context), ["Map", "New map"], "nothing changes until Cavalry says so");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"]);
+  assert.equal(context.currentMap().name, "Elsewhere");
+  assert.equal(context.statusLabel.getText(), "Showing maps in Other.");
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  assert.equal(context.currentMap().name, "Map");
+});
+
+test("comp follow: a comp with no maps shows New map and an empty Extract list; the Extract layers follow the comp", () => {
+  const { context, api, ui } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene;
+  G.createMapLayer(map, "Map: Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, G.layerStyle(map, "countries"), {});
+  context.refreshLayersBtn.onClick();
+  assert.equal(context.layerPicker._entries.length, 1);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Empty", null);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["New map"]);
+  assert.equal(context.newMapSelected(), true);
+  assert.equal(context.layerPicker._entries.length, 0, "no stale layers of another comp's map");
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.equal(context.layerPicker._entries.length, 1);
+});
+
+test("comp follow: the picked map stays picked when it is still in the comp (a scene refresh), else the first map", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  context.makeMap("Second", context.worldViewCamera(0));
+  assert.equal(context.currentMap().name, "Second");
+  follower(ui).onSceneChanged();
+  assert.equal(context.currentMap().name, "Second", "kept");
+  assert.equal(context.statusLabel.getText(), "Showing maps in " + api.getNiceName(api.getActiveComp()) + ".");
+  otherComp(context, api, "Other", "Elsewhere");
+  follower(ui).onCompChanged();
+  assert.equal(context.currentMap().name, "Elsewhere", "not in the new comp: its first map");
+});
+
+test("comp follow: the same comp again does nothing; onSceneChanged always refreshes", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  let n = 0;
+  const real = context.refreshMaps;
+  context.refreshMaps = function () { n++; return real.apply(this, arguments); };
+  follower(ui).onCompChanged();
+  assert.equal(n, 0, "same comp");
+  follower(ui).onSceneChanged();
+  assert.equal(n, 1, "a loaded scene may hold different maps in a comp with the same id");
+});
+
+test("comp follow: comp switches made by an imagery build are ignored, and the panel catches up once the job ends", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  const first = api.getActiveComp();
+  // A job is running: its timer and tick are set, as in a real download or build.
+  const fakeTimer = { stop() {} };
+  context.imageryState.timer = fakeTimer;
+  context.imageryState.job = { cancel() { return true; } };
+  context.statusLabel.setText("untouched");
+  otherComp(context, api, "Another comp", "Elsewhere");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"], "nothing refreshed during the job");
+  assert.equal(context.statusLabel.getText(), "untouched");
+  // The job ends on a timer tick while the user is in the other comp: one refresh then.
+  context.imageryState.tick = function () { context.stopImageryTimer(); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"]);
+  // A job that ends with the user back in the comp it started in refreshes nothing.
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  let n = 0;
+  const real = context.refreshMaps;
+  context.refreshMaps = function () { n++; return real.apply(this, arguments); };
+  context.imageryState.timer = fakeTimer; context.imageryState.job = {};
+  context.imageryState.tick = function () { context.stopImageryTimer(); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.equal(n, 0);
+});
+
+test("comp follow: an Imagery source comp is never shown, even with no job running", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  const first = api.getActiveComp();
+  otherComp(context, api, "Imagery source: EOX · Map", "Not a map you work in");
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+  api.setActiveComp(first);
+  follower(ui).onCompChanged();
+  assert.deepEqual(pickerNames(context), ["Map", "New map"]);
+});
+
+test("comp follow: a failure inside the callback never escapes", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  otherComp(context, api, "Other", "Elsewhere");
+  context.refreshMaps = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => follower(ui).onCompChanged());
+  assert.doesNotThrow(() => follower(ui).onSceneChanged());
+});
+
+// ---- Fix round: sync cost, guard scope, callout selection, quiet catch-up ---------------------
+test("sync: a normal action's sync does not scan the Assets window; Refresh controls does", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.currentMap();
+  let scans = 0;
+  ["getAssetWindowLayers", "getAssetFilePath"].forEach((n) => { const real = api[n]; api[n] = function () { scans++; return real.apply(this, arguments); }; });
+  context.GeoControlPanel.sync(map);
+  context.addScaleBarBtn.onClick();
+  assert.equal(scans, 0, "no asset scan for ordinary actions");
+  let gathered = 0;
+  const real = context.GeoScene.prepareImagery;
+  context.GeoScene.prepareImagery = function () { gathered++; return real.apply(this, arguments); };
+  context.refreshControlsBtn.onClick();
+  assert.equal(gathered, 1, "the Refresh controls button gathers");
+});
+
+test("guard: pickers, text commits and plain guard() do not nudge the frame or touch the selection; a button does", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  let frames = 0;
+  const real = api.setFrame.bind(api);
+  api.setFrame = (f) => { frames++; return real(f); };
+  context.guard(() => { api.select([child]); })();
+  assert.equal(frames, 0);
+  assert.deepEqual(api.getSelection(), [child], "plain guard leaves the selection");
+  context.mapPicker.onValueChanged();
+  context.searchField.setText("");
+  context.searchField.onValueCommitted();
+  assert.equal(frames, 0);
+  context.refreshMapsBtn.onClick();
+  assert.equal(frames, 1, "a button click nudges");
+});
+
+test("callouts: the new callout's label stays selected after Callout here / at coordinates", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const outside = api.create("group", "Outside");
+  api.select([outside]);
+  context.latField.setValue(10); context.lonField.setValue(20);
+  context.calloutCoordBtn.onClick();
+  const g = context.GeoScene.findCallouts(context.currentMap())[0].groupId, rec = plain(api.getUserDataKey(g, "geoCallout"));
+  assert.deepEqual(plain(api.getSelection()), [rec.label]);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  api.select([outside]);
+  context.calloutHereBtn.onClick();
+  const labels = context.GeoScene.findCallouts(context.currentMap()).map((c) => plain(api.getUserDataKey(c.groupId, "geoCallout")).label);
+  assert.equal(labels.length, 2);
+  const sel = plain(api.getSelection());
+  assert.ok(sel.length === 1 && labels.indexOf(sel[0]) >= 0 && sel[0] !== rec.label, "the second callout's label");
+});
+
+test("guard: layers of the old selection that no longer exist are not selected again; none left selects nothing", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api), gone = api.create("group", "Gone");
+  api.select([group, gone]);
+  context.guardAction(() => { api.select([child]); api.deleteLayer(gone); })();
+  assert.deepEqual(plain(api.getSelection()), [group], "the one that is left");
+  const lone = api.create("group", "Lone");
+  api.select([lone]);
+  context.guardAction(() => { api.select([child]); api.deleteLayer(lone); })();
+  assert.deepEqual(plain(api.getSelection()), [], "nothing left: nothing selected");
+  assert.equal(context.statusLabel.getText(), "Ready.");
+});
+
+test("comp follow: the catch-up when a job ends is silent, so the build's result message stays", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  context.imageryState.timer = { stop() {} };
+  context.imageryState.job = {};
+  otherComp(context, api, "Other", "Elsewhere");
+  context.imageryState.tick = function () { context.stopImageryTimer(); context.say("Imagery built: 4 tiles."); };
+  new context.ImageryTimerCallbacks().onTimeout();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"], "caught up");
+  assert.equal(context.statusLabel.getText(), "Imagery built: 4 tiles.");
+});
+
+test("busy lock: a button or Enter pressed while an action runs is refused, Cancel is not, and the lock clears after an error", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const seen = {};
+  let runs = 0;
+  context.GeoNet.search = () => {
+    runs++;
+    if (runs === 1) {
+      context.routeSearchField.setText("Rome");
+      context.routeSearchBtn.onClick();
+      seen.button = context.statusLabel.getText();
+      context.searchField.setText("Oslo");
+      context.searchField.onValueCommitted();
+      seen.enter = context.statusLabel.getText();
+      context.cancelImageryBtn.onClick();
+      seen.cancel = context.statusLabel.getText();
+    }
+    if (runs === 3) throw new Error("offline");
+    return [PARIS];
+  };
+  context.pinSearchField.setText("Paris");
+  context.pinSearchBtn.onClick();
+  assert.equal(runs, 1, "nothing nested ran a search");
+  assert.equal(seen.button, "Still working on the last action…");
+  assert.equal(seen.enter, "Still working on the last action…");
+  assert.equal(seen.cancel, "Error: Nothing is downloading or building.", "Cancel ran");
+  context.pinSearchField.setText("Rome");
+  context.pinSearchBtn.onClick(); // runs === 2: works again
+  assert.equal(runs, 2);
+  context.pinSearchField.setText("Oslo");
+  context.pinSearchBtn.onClick(); // throws inside
+  assert.match(context.statusLabel.getText(), /offline/);
+  context.pinSearchField.setText("Bern");
+  context.pinSearchBtn.onClick();
+  assert.equal(runs, 4, "the lock cleared after the error");
+});
+
+test("busy lock: clicks Cavalry held back during a long action are dropped quietly when it ends", () => {
+  const { context } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  const D = vm.runInContext("Date", context), realNow = D.now; let clock = 1000000; // the panel's own Date (it runs in a vm context)
+  D.now = () => clock;
+  try {
+    let runs = 0;
+    context.GeoNet.search = () => { runs++; clock += 2000; return [PARIS]; }; // a 2 s action
+    context.pinSearchField.setText("Paris");
+    context.pinSearchBtn.onClick();
+    const msg = context.statusLabel.getText();
+    context.pinSearchField.setText("Rome");
+    context.pinSearchBtn.onClick(); // a held-back click, delivered right after
+    assert.equal(runs, 1, "the held-back click didn't run");
+    assert.equal(context.statusLabel.getText(), msg, "and the action's message stays");
+    clock += 2500; // a fresh click once the quiet window (as long as the action, at least 1.5 s) has passed works
+    context.pinSearchBtn.onClick();
+    assert.equal(runs, 2);
+  } finally { D.now = realNow; }
+});
+
+test("the panel never calls api.processEvents (running the user's clicks inside an action hung Cavalry)", () => {
+  const src = buildPanel();
+  assert.equal(/api\.processEvents\s*\(/.test(src), false);
 });

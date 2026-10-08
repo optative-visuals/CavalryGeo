@@ -34,11 +34,13 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   called **Map 1**, **Map 2** and so on: the lowest number not already used by another map. Maps you already have are never renamed. The name and projection fields only show
   while **New map** is picked. New maps start with **Countries** and **Coastlines** (and the
   **Ocean** layer) already added; add more on **Layers**.
+- **Following your composition:** the panel shows the maps of the composition you are working in. Switch to another composition (or open another scene) and the Map list, previews and Extract list follow, so an edit never lands on a map in a different composition. While imagery is being built the panel stays where it is.
 - **Ocean:** new maps include an **Ocean** layer, the dark water behind the land. Restyle or delete it
   like any layer. The default colours match the preview.
 - **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
   the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
-  the map at the first one (it reuses those results, so nothing is searched twice).
+  the map at the result you picked (the first unless you chose another; it reuses those results, so
+  nothing is searched twice, and Search keeps your pick when the text is unchanged).
   Enter also runs **Find** in the Extract panel (Layers → Extract) and **Load** in the Data link box, when
   the text changed since the last time.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
@@ -85,7 +87,7 @@ The **Style** section at the bottom of the Map tab colours a whole map in one go
 
 - **Pick a style** — Dark (the original look), Light, Blueprint, Vintage, Mono or Neon night. The preview shows its colours, and the next map you make uses it.
 - **Apply to map** — restyles the map picked at the top of the tab. Colours shared in the map's Controls change there; a colour you animated or connected to something else is left alone (the status line says how many).
-- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo_assets/settings.json` in the Scripts folder. When you update, merge the new CavalryGeo_assets folder into yours rather than replacing it, or your saved styles go with it (on a Mac, hold Option while dragging and choose Merge). **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
+- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo/settings.json` in Cavalry's app-data folder (on Windows, `AppData/Roaming/Cavalry/CavalryGeo`), outside the Scripts folder, so updating never wipes your saved styles or keys. Settings from an older version are copied there the first time the panel opens. **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
 
 Each map remembers its style, so pins, routes, labels and layers you add later match it.
 
@@ -144,8 +146,8 @@ panel, which also holds **Clear download cache**).
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
-  the camera's current view — zoom in before adding them. Add one street layer at a time: once a
-  street layer is added, its box unticks by itself. (If nothing was found for a layer, or the add
+  the camera's current view — zoom in before adding them. Add one street layer at a time. Once a
+  layer is added (world or street), its box unticks by itself, so pressing Add layers again can't add it twice. (If nothing was found for a layer, or the add
   was cancelled or failed, the box stays ticked so you can try again.)
 - Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
   minor features, and keyframe it for a "map filling in" effect.
@@ -175,7 +177,12 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 - **Sources:** **EOX Sentinel‑2** (free for non‑commercial use) and **NASA Blue Marble** (public
   domain) work straight away; **MapTiler** and **Mapbox** need your own free key; **Custom tile
   link** takes any `{z}/{x}/{y}` address. Keys stay on your computer
-  (`CavalryGeo_assets/settings.json`), never in the scene.
+  (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
+- **Assets window:** each map's imagery images (and, on the globe and Equal Earth, its
+  "Imagery source" composition) are filed in one group in the Assets window,
+  **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
+  map's older imagery into its group too. The group is named after the map, so renaming the map
+  starts a new group (the old one stays as it is). Anything you put in a group of your own stays there.
 - **Building:** animate the camera first, then press **Build imagery**. It works out how many
   images (or tiles) the animation needs and asks once, showing the count and download size —
   **Yes** downloads them and builds the imagery at the bottom of the map with a progress bar;
@@ -281,7 +288,7 @@ can't be baked: Bake skips them.
   **Pin here** or **Label here**, or place them at exact coordinates.
 - **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom, or press the scroll wheel and drag up / down to zoom around the point you pressed.
 - Labels hide automatically when their place turns to the far side of a globe.
-- **Callouts.** **Callout here** (or **Callout at coordinates**) makes a numbered group, "Callout 1: Paris": a text label in a box, a dot on the place, and a line joining them. The label stays put on screen while the line follows the place as the camera moves, so you can drag the label anywhere you like; the line leaves the side of the box that faces the place. The label starts a little above and to the right of the place. The type of line is set under **Line style** in the map's Overlay controls (**Elbow** or **Straight**), and **Draw %** draws the line on: key it from 0 to 100. The box is the text's own **Background**: set its padding and corner radius on the text layer, and its colour or hide it with **Box colour** and **Hide box** (the box layer sits just below the label and follows it); **Hide box** hides only the box, so the line still ends at the spot where the hidden box's edge would be. A callout expects the map group itself to stay as it is: don't move, rotate or scale it. To frame the map differently, move the camera instead. The line and dot fade out when the place turns to the far side of a globe. Map styles recolour a callout (its box takes a slightly lighter shade of the ocean colour, so it stands out from the water), and Bake skips callouts, since they are already ordinary Cavalry layers.
+- **Callouts.** **Callout here** (or **Callout at coordinates**) makes a numbered group, "Callout 1: Paris": a text label in a box, a dot on the place, and a line joining them. The label stays put on screen while the line follows the place as the camera moves, so you can drag the label anywhere you like. The label starts a little above and to the right of the place. The type of line is set under **Line style** in the map's Overlay controls (**Elbow** or **Straight**). **Anchor** chooses where the line meets the box: **1 (Auto)**, the default for a new callout, joins the point of the box nearest the place (one of its four corners or four edge midpoints) and switches points as the place moves with the camera; **0 (Side)** leaves the middle of the side that faces the place, as callouts did before Anchor existed (a callout made by an earlier version is set to 0 when you press **Refresh controls**, so it looks the same); **2 to 9** fix the point: 2 top-left, 3 top, 4 top-right, 5 right, 6 bottom-right, 7 bottom, 8 bottom-left, 9 left. An **Elbow** bends horizontally outward from a side or a corner, and vertically outward from the middle of the top or bottom edge. **Draw %** draws the line on: key it from 0 to 100. The box is the text's own **Background**: set its padding and corner radius on the text layer, and its colour or hide it with **Box colour** and **Hide box** (the box layer sits just below the label and follows it); **Hide box** hides only the box, so the line still ends at the spot where the hidden box's edge would be. A callout expects the map group itself to stay as it is: don't move, rotate or scale it. To frame the map differently, move the camera instead. The line and dot fade out when the place turns to the far side of a globe. Map styles recolour a callout (its box takes a slightly lighter shade of the ocean colour, so it stands out from the water), and Bake skips callouts, since they are already ordinary Cavalry layers.
 
 ## Label: routes
 
@@ -374,7 +381,7 @@ can't be baked: Bake skips them.
 - **Updates:** once a day, opening the panel asks GitHub (in the background) whether a newer
   version is out. If one is, the status line and Cavalry's console say so, with the download
   link, each time the panel opens until you update. To switch it off, add
-  `"checkForUpdates": false` to `CavalryGeo_assets/settings.json`.
+  `"checkForUpdates": false` to `CavalryGeo/settings.json` in Cavalry's app-data folder.
 - Place search and street downloads use OpenStreetMap's Nominatim and Overpass services under
   their fair‑use policies: keep searches occasional and don't script bulk requests.
 

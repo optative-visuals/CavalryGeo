@@ -396,12 +396,39 @@ test("markEmptyTile/isEmptyTile round-trip", () => {
 
 test("settings round-trip and tolerate a broken file", () => {
   const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:/fake/AppData";
   const net = loadNetWith(fakeApi);
   assert.deepEqual(plainObj(net.loadSettings()), {});
   net.saveSettings({ source: "maptiler", maptilerKey: "K" });
   assert.deepEqual(plainObj(net.loadSettings()), { source: "maptiler", maptilerKey: "K" });
-  fakeApi.writeToFile("C:/fake/CavalryGeo_assets/settings.json", "{broken");
+  fakeApi.writeToFile("C:/fake/AppData/CavalryGeo/settings.json", "{broken");
   assert.deepEqual(plainObj(net.loadSettings()), {});
+});
+
+test("settings live outside the scripts folder (AppData/CavalryGeo), and their folder is made", () => {
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:\\fake\\AppData";
+  const made = [];
+  fakeApi.makeFolder = (p) => { made.push(p); };
+  const net = loadNetWith(fakeApi);
+  net.updateSettings({ source: "maptiler" });
+  assert.equal(fakeApi._files["C:/fake/AppData/CavalryGeo/settings.json"], JSON.stringify({ source: "maptiler" }, null, 2));
+  assert.equal(fakeApi._files["C:/fake/CavalryGeo_assets/settings.json"], undefined);
+  assert.ok(made.indexOf("C:/fake/AppData/CavalryGeo") >= 0);
+});
+
+test("settings: an old settings.json is copied to the new place once, and the old file is left alone", () => {
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:/fake/AppData";
+  const OLD = "C:/fake/CavalryGeo_assets/settings.json", NEW = "C:/fake/AppData/CavalryGeo/settings.json";
+  fakeApi._files[OLD] = JSON.stringify({ maptilerKey: "K1", mapStyle: "Mono" });
+  const net = loadNetWith(fakeApi);
+  assert.deepEqual(plainObj(net.loadSettings()), { maptilerKey: "K1", mapStyle: "Mono" });
+  assert.equal(fakeApi._files[NEW], fakeApi._files[OLD], "copied");
+  net.updateSettings({ mapStyle: "Dark" });
+  fakeApi._files[OLD] = JSON.stringify({ maptilerKey: "other" });
+  assert.deepEqual(plainObj(net.loadSettings()), { maptilerKey: "K1", mapStyle: "Dark" }, "the new file wins; the old one is not copied again");
+  assert.equal(fakeApi._files[OLD], JSON.stringify({ maptilerKey: "other" }), "the old file is untouched");
 });
 
 test("reverse: a failed or empty lookup gives null and never throws", () => {

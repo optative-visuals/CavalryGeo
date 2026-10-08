@@ -277,7 +277,7 @@ var GeoControlPanel = (function () {
     // Callouts: values go on the helper scripts' inputs, so those members carry their link state; a missing member is left out.
     model.callouts = GeoScene.findCallouts(map).map(function (c) {
       var member = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
-      return { id: c.groupId, number: c.number, text: c.text, label: c.label, box: c.box, dot: member(c.dot, S.calloutDot), bend: member(c.bend, S.calloutBend),
+      return { id: c.groupId, number: c.number, text: c.text, label: c.label, box: c.box, dot: member(c.dot, S.calloutDot), bend: member(c.bend, S.calloutBend), edge: member(c.edge, S.calloutEdge),
         lines: [c.line1, c.line2].filter(Boolean).map(function (id) { return member(id, S.calloutLine); }),
         draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
     });
@@ -455,7 +455,9 @@ var GeoControlPanel = (function () {
     });
   }
 
-  function sync(map) {
+  // options.gatherImagery (the Refresh controls button only) also files older imagery assets into the map's
+  // Assets group; that scans every asset, so the many other actions that sync skip it.
+  function sync(map, options) {
     requireApis();
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
     // Routes are numbered and given their draw helpers first, from the lists and Scene Window
@@ -465,6 +467,8 @@ var GeoControlPanel = (function () {
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
+    // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
+    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {

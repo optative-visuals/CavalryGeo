@@ -948,6 +948,63 @@ var GeoScene = (function () {
     return byPath;
   }
 
+  // Each map's imagery assets (and its bent "Imagery source" comps) are filed in one Assets-window
+  // group, "Cavalry Geo imagery · <map>". Only top-level items are moved (one the user put in a
+  // group of their own stays there), nothing is ever deleted, and every call is guarded so an older
+  // Cavalry, or a failed move, never stops a build.
+  var IMAGERY_GROUP_PREFIX = "Cavalry Geo imagery · ";
+  function findAssetGroup(name) {
+    if (typeof api.getAssetWindowLayers !== "function" || typeof api.getLayerType !== "function") return null;
+    for (var pass = 0; pass < 2; pass++) {
+      var ids = [];
+      try { ids = api.getAssetWindowLayers(pass === 0) || []; } catch (e) { ids = []; }
+      for (var i = 0; i < ids.length; i++) {
+        try { if (String(api.getLayerType(ids[i])) === "assetGroup" && String(api.getNiceName(ids[i])) === name) return ids[i]; } catch (e) { /* not a group */ }
+      }
+    }
+    return null;
+  }
+  // The map's imagery asset group (made when missing), or null when this Cavalry can't group assets.
+  function imageryAssetGroup(map) {
+    try {
+      if (typeof api.createAssetGroup !== "function" || typeof api.parent !== "function" || typeof api.getParent !== "function") return null;
+      var name = IMAGERY_GROUP_PREFIX + api.getNiceName(map.groupId);
+      return findAssetGroup(name) || api.createAssetGroup(name);
+    } catch (e) { return null; }
+  }
+  // Moves the top-level ones among ids into group; returns how many moved.
+  function fileInAssetGroup(ids, group) {
+    var moved = 0;
+    if (!group) return moved;
+    ids.forEach(function (id) {
+      try {
+        if (String(api.getParent(id)) !== "") return;
+        api.parent(id, group);
+        moved++;
+      } catch (e) { /* stays where it is */ }
+    });
+    return moved;
+  }
+  // The Controls refresh: gathers this map's older imagery into its group - the assets whose files
+  // are under the cache folders of the map's imagery (by cache key) and its bent source comps.
+  function prepareImagery(map, imagery) {
+    var wanted = [], byPath = null, ids = [], prefixes = [];
+    (imagery || findImagery(map)).forEach(function (im) {
+      if (im.meta && im.meta.bent && im.meta.sourceComp && layerThere(im.meta.sourceComp)) wanted.push(im.meta.sourceComp);
+      if (im.meta && im.meta.cacheKey) prefixes = prefixes.concat(GeoNet.cachePrefixes(im.meta.cacheKey));
+    });
+    if (prefixes.length) {
+      byPath = existingAssets();
+      Object.keys(byPath).forEach(function (path) {
+        for (var i = 0; i < prefixes.length; i++) if (path.indexOf(prefixes[i]) === 0) { ids.push(byPath[path]); return; }
+      });
+    }
+    wanted = wanted.concat(ids);
+    var loose = wanted.filter(function (id) { try { return typeof api.getParent === "function" && String(api.getParent(id)) === ""; } catch (e) { return false; } });
+    if (!loose.length) return 0;
+    return fileInAssetGroup(loose, imageryAssetGroup(map));
+  }
+
   // camCount: how many camera inputs to connect (default all five); the rest keep their
   // default values (bent level drivers: lat, lon and zoom only, rotation and projection held 0).
   function imageryDriver(map, parentId, name, expr, targetId, targetAttr, camCount) {
@@ -1105,7 +1162,12 @@ var GeoScene = (function () {
     var previous = findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
     var bent = !!plan.bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
-    var sourceComp = null, view = null, mask = null, filter = null;
+    var sourceComp = null, view = null, mask = null, filter = null, assetGroup = false;
+    // The map's imagery asset group, found or made on first use (false until then; null when unavailable).
+    function fileAway(ids) {
+      if (assetGroup === false) assetGroup = imageryAssetGroup(map);
+      fileInAssetGroup(ids, assetGroup);
+    }
     // A bent rect is placed at its unwrapped x (east or west by whole worlds); flat rects as they are.
     function placed(r) { return bent ? GeoBlocks.placedRect(r) : r; }
     // Only items with a downloaded file are built, low level to high so higher levels land
@@ -1138,6 +1200,10 @@ var GeoScene = (function () {
         var key = f.path.replace(/\\/g, "/");
         if (!assetByPath[key]) assetByPath[key] = api.loadAsset(f.path, false);
       });
+      // Reused assets are filed too (the move skips the ones already in a group).
+      var seen = {}, ids = [];
+      queue.forEach(function (f) { var a = assetByPath[f.path.replace(/\\/g, "/")]; if (a && !seen[a]) { seen[a] = true; ids.push(a); } });
+      fileAway(ids);
     }
 
     function startOuter() {
@@ -1163,6 +1229,7 @@ var GeoScene = (function () {
       createSourceComp("Imagery source: " + label + " · " + api.getNiceName(map.groupId), mapComp, function (c) { sourceComp = c; });
       meta.bent = true;
       meta.sourceComp = sourceComp;
+      fileAway([sourceComp]);
       withSourceComp(function () {
         view = api.create("group", VIEW_NAME);
         api.set(view, identityTransform());
@@ -1190,7 +1257,8 @@ var GeoScene = (function () {
 
     function addTile(f) {
       var key = f.path.replace(/\\/g, "/");
-      var asset = assetByPath[key] || (assetByPath[key] = api.loadAsset(f.path, false));
+      var asset = assetByPath[key];
+      if (!asset) { asset = assetByPath[key] = api.loadAsset(f.path, false); fileAway([asset]); }
       var ids = api.addAssetToComp(asset), id = Array.isArray(ids) ? ids[0] : ids;
       // Palette PNGs load with a zero resolution and draw nothing: drop them.
       var res = null;
@@ -2149,11 +2217,31 @@ var GeoScene = (function () {
       return !!rec && typeof rec === "object" && rec.camera === map.cameraId;
     });
   }
+  // A callout made before the anchor: its edge, bend and draw helpers gain the Anchor input at 0 (Side, so the
+  // line stays exactly where it was) and the current script. Compares first, so a second refresh writes nothing.
+  function upgradeCalloutAnchors(m) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    var helpers = [[m.edge, E.CALLOUT_GEOM_INPUTS, E.calloutEdgeExpression], [m.bend, E.CALLOUT_GEOM_INPUTS, E.calloutBendExpression]];
+    (m.draws || []).forEach(function (id) { helpers.push([id, E.CALLOUT_DRAW_INPUTS, E.calloutDrawExpression]); });
+    helpers.forEach(function (h) {
+      if (!h[0] || !layerThere(h[0])) return;
+      try {
+        var at = CA + "." + E.inputIndex(h[1], "anchor");
+        if (!api.hasAttribute(h[0], at)) extendInputs(h[0], CA, h[1], { anchor: 0 });
+        if (!api.hasAttribute(h[0], at)) return;
+        var now = readExpr(h[0], A.CAMERA_EXPR_ATTR), meta = E.readTag(now, "GEO_META");
+        if (!meta) return;
+        var fresh = h[2](meta);
+        if (now !== fresh) setOne(h[0], A.CAMERA_EXPR_ATTR, fresh);
+      } catch (e) { /* the next Controls refresh tries this helper again */ }
+    });
+  }
   // Gives every callout a lasting number (a duplicated group copies its number and takes the next free one).
   // A copied group's record is pointed at its own members (nothing is written while it already is).
   function prepareCallouts(map) {
     var groups = calloutGroups(map);
     numberGroups(groups, CALLOUT_NUMBER_KEY, "Callout");
+    groups.forEach(function (g) { upgradeCalloutAnchors(calloutMembers(g, userData(g, CALLOUT_KEY) || {})); });
     if (typeof api.setUserData !== "function") return;
     groups.forEach(function (g) {
       var rec = userData(g, CALLOUT_KEY) || {}, m = calloutMembers(g, rec), fixed = {}, changed = false;
@@ -3022,7 +3110,7 @@ var GeoScene = (function () {
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
-    addDayNight: addDayNight, prepareDayNight: prepareDayNight, findDayNight: findDayNight, dayNightParts: dayNightParts,
+    addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, findDayNight: findDayNight, dayNightParts: dayNightParts,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };

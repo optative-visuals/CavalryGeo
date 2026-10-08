@@ -83,10 +83,19 @@ var GeoStyle = (function () {
     else maybe(label, "setMinimumWidth", LABEL_WIDTH);
     return label;
   }
-  // A hover tooltip. A GeoStyle toggle keeps its button in .widget.
+  // Tooltip text broken onto a new line after every 7th word (a short text, under 10 words, stays on one line).
+  var TIP_WORDS = 7;
+  function wrapTip(text) {
+    var words = String(text).split(" ");
+    if (words.length < 10) return text;
+    var lines = [];
+    for (var i = 0; i < words.length; i += TIP_WORDS) lines.push(words.slice(i, i + TIP_WORDS).join(" "));
+    return lines.join("\n");
+  }
+  // A hover tooltip (wrapped, see wrapTip). A GeoStyle toggle keeps its button in .widget.
   function tip(widget, text) {
     if (!widget) return widget;
-    maybe(widget.widget ? widget.widget : widget, "setToolTip", text);
+    maybe(widget.widget ? widget.widget : widget, "setToolTip", wrapTip(text));
     return widget;
   }
   function note(text) {
@@ -241,6 +250,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, hasContainer: hasContainer, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

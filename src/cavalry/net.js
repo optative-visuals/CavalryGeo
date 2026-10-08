@@ -155,7 +155,7 @@ var GeoNet = (function () {
     var out = {};
     (names || []).forEach(function (name) {
       var hit = cached("geocode|" + name, function () {
-        while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+        while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
         lastSearch = Date.now();
         var r = get(NOMINATIM, GeoSearch.path(name));
         if (r.status !== 200) throw new Error("Place lookup failed for \"" + name + "\" (status " + r.status + "). Try again."); // never cache a failure
@@ -175,7 +175,7 @@ var GeoNet = (function () {
   function reverse(lat, lon, zoom) {
     try {
       if (Date.now() < reverseOfflineUntil) return null;
-      while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+      while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
       lastSearch = Date.now();
       var r = get(NOMINATIM, GeoSearch.reversePath(lat, lon, zoom), 1);
       if (r.status === -1) reverseOfflineUntil = Date.now() + REVERSE_BACKOFF_MS;
@@ -241,6 +241,8 @@ var GeoNet = (function () {
   // ---- Imagery tiles and panel settings --------------------------------------
   function tileBase(cacheKey, z, x, y) { return assetsDir() + "/cache/tiles/" + cacheKey + "/" + z + "/" + x + "/" + y; }
   function imageBase(cacheKey, r) { return imagesDir() + "/" + cacheKey + "/" + r.z + "/" + r.x0 + "_" + r.y0 + "_" + r.x1 + "_" + r.y1; }
+  // The folders (with a trailing slash) holding the files of the imagery with this cache key.
+  function cachePrefixes(cacheKey) { return [assetsDir() + "/cache/tiles/" + cacheKey + "/", imagesDir() + "/" + cacheKey + "/"]; }
   function cachedTile(base) {
     var exts = ["jpg", "png"];
     for (var i = 0; i < exts.length; i++) if (api.filePathExists(base + "." + exts[i])) return base + "." + exts[i];
@@ -285,11 +287,24 @@ var GeoNet = (function () {
     return { status: -1 };
   }
 
-  function settingsFile() { return assetsDir() + "/settings.json"; }
+  // settings.json lives in Cavalry's app-data folder (CavalryGeo/settings.json), outside the Scripts
+  // folder, so replacing CavalryGeo_assets when updating never wipes it.
+  function oldSettingsFile() { return assetsDir() + "/settings.json"; }
+  function settingsDir() {
+    return String(api.getAppDataFolder()).replace(/\\/g, "/") + "/CavalryGeo";
+  }
+  function settingsFile() { return settingsDir() + "/settings.json"; }
   function plainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
   function readSettingsRaw() {
-    var f = settingsFile();
-    if (!api.filePathExists(f)) return null;
+    var f = settingsFile(), old = oldSettingsFile();
+    if (!api.filePathExists(f)) {
+      // First read in the new place: the old file's content is copied over (the old file stays).
+      if (f === old || !api.filePathExists(old)) return null;
+      var text;
+      try { text = String(api.readFromFile(old)); } catch (e) { return null; }
+      try { ensureDir(settingsDir()); api.writeToFile(f, text, true); } catch (e) { /* read again from the old file next time */ }
+      return text;
+    }
     try { return String(api.readFromFile(f)); } catch (e) { return null; }
   }
   function parseSettings(raw) {
@@ -299,14 +314,14 @@ var GeoNet = (function () {
     var raw = readSettingsRaw();
     return (raw === null ? null : parseSettings(raw)) || {};
   }
-  function saveSettings(obj) { ensureDir(assetsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
+  function saveSettings(obj) { ensureDir(settingsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
   // Merges patch's keys into settings.json, keeping every other key.
   function updateSettings(patch) {
     var raw = readSettingsRaw(), s = raw === null ? {} : parseSettings(raw);
     if (!s) {
       // The file is there but unreadable: keep a copy before it is replaced.
       s = {};
-      if (raw !== null && raw !== "") { try { ensureDir(assetsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
+      if (raw !== null && raw !== "") { try { ensureDir(settingsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
     }
     Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
     saveSettings(s);
@@ -315,7 +330,7 @@ var GeoNet = (function () {
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
-    tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
+    tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
 })();

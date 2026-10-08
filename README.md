@@ -57,14 +57,15 @@ editable shape. The panel tells you when a new version is out.
    **CavalryGeo_assets** folder straight into it.
 3. Open **Scripts → CavalryGeo**. No restart needed.
 
-Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one. On a Mac, hold Option while dragging and choose Merge: Replace would delete your settings (keys, saved styles) and downloads.
+Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.
 Tested with Cavalry on Windows and macOS.
 
 ## Quick start
 
 1. Open the panel in a new scene. On **Map**, type a place — say `Paris` — and press **Search**.
    That makes a map centred on Paris.
-2. On **Layers**, turn on **Countries** and **Coastlines** and press **Add layers**.
+2. New maps start with **Countries** and **Coastlines**. To add more, go to **Layers**, turn on
+   **Lakes** or **Rivers** and press **Add layers**.
 3. With the playhead at the start, pick **World view** in the place list on **Map** and press
    **Jump here**, then pick Paris again and press **Fly here**. The camera now flies from the
    world into Paris between the **From** and **To** frames (change them to time the flight).

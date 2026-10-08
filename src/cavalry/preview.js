@@ -1,5 +1,7 @@
-// The Map tab's preview: a ui.Draw showing a flat Web Mercator map (GeoPreview does the maths)
-// with a fixed green frame in the middle. Dragging only updates the view; a 40 ms timer redraws
+// The map preview, used by the Map, Pins and Routes pages: a ui.Draw showing a flat Web Mercator map
+// (GeoPreview does the maths). The Map page's also has a fixed green frame in the middle and dims what
+// is outside it; Pins and Routes turn the frame and dim off (opts.frame, opts.dim) and take clicks
+// instead. Dragging only updates the view; a 40 ms timer redraws
 // the latest state while something changed (or only on release, if Cavalry draws too slowly).
 // Land is one fill path plus one border path per redraw; detail follows the zoom (one level
 // lower while dragging), and 50m data is read the first time it's needed.
@@ -8,6 +10,7 @@ var GeoPreviewPanel = (function () {
   var CAMERA = "#e6e6e6", DOT = "#33CE70", RING = "#000000", NAME = "#ffffff", OTHER_NAME = "#a6a6a6";
   var PILL = "#000000a6", GLYPH = "#e6e6e6"; // the zoom readout and − / + drawn inside the map
   var SPOT = "#ffffff", DRAFT = "#1F8F4E";
+  var MIN_WIDTH = 120; // the narrowest the Draw can be
   var TICK_MS = 40, SETTLE_MS = 150, DOT_HIT = 6, MIN_LAKE_PX = 6, SAME_PLACE_KM = 5, STREET_POINTS = 15000;
   var HINT = "Drag to move · middle-drag, double-click or + / − to zoom";
 
@@ -239,12 +242,13 @@ var GeoPreviewPanel = (function () {
     p.setWidth = guarded(function (px) {
       px = Math.round(px);
       if (!(px >= 16)) return; // not laid out yet (width 0): keep the current view
+      px = Math.max(px, MIN_WIDTH); // the Draw never goes narrower than its own minimum width, so the view must not either
       if (sized && Math.abs(px - view.width) < 2) return;
       var cam = p.frameCamera(), c = comp();
       view = GeoPreview.viewForCamera(cam, c.width, c.height, px, Math.round(px * 9 / 16));
       draw.setSize(view.width, view.height);
       // Cavalry's setSize also locks the minimum size; re-apply a small minimum width (so the panel can shrink) and the real height (so the map isn't squeezed).
-      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
+      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(MIN_WIDTH);
       if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       sized = true;
       changed();
@@ -279,7 +283,7 @@ var GeoPreviewPanel = (function () {
       p._draw = draw;
       // Cavalry's Draw won't get narrower than its setSize unless a small minimum is set,
       // and then the panel couldn't shrink back either.
-      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(120);
+      if (typeof draw.setMinimumWidth === "function") draw.setMinimumWidth(MIN_WIDTH);
       if (typeof draw.setMinimumHeight === "function") draw.setMinimumHeight(view.height);
       draw.setSize(view.width, view.height);
       draw.setBackgroundColor(colors.water);

@@ -22,6 +22,8 @@ var GeoControls = (function () {
     buildings: "Buildings", water: "Water", parks: "Parks", roads: "Roads", railways: "Railways" };
   var SB = function (n) { return IN + E.inputIndex(E.SCALE_BAR_INPUTS, n); }, NA = function (n) { return IN + E.inputIndex(E.NORTH_ARROW_INPUTS, n); };
   var CO_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "draw"), CO_STYLE = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "style");
+  // The anchor sits at a different index in the edge / bend helpers and in the draw helpers (it is appended to each list).
+  var CO_ANCHOR = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "anchor"), CO_ANCHOR_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor");
   var N_DAY = IN + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear"), N_TIME = IN + E.inputIndex(E.NIGHT_INPUTS, "utcTime");
   var NH_NIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night"), NH_TWILIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight");
   var TL = function (n) { return IN + E.inputIndex(E.TIME_LABEL_INPUTS, n); };
@@ -36,7 +38,7 @@ var GeoControls = (function () {
     dup: ["hidden", "generator.calculateRotations"], marker: [FILL], travellerScale: ["array.0"], draw: ["array.0"],
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
-    calloutDraw: [CO_DRAW, CO_STYLE], calloutBend: [CO_STYLE], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
+    calloutDraw: [CO_DRAW, CO_STYLE, CO_ANCHOR_DRAW], calloutBend: [CO_STYLE, CO_ANCHOR], calloutEdge: [CO_ANCHOR], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
     nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
   };
   var SEP = " · ";
@@ -189,6 +191,12 @@ var GeoControls = (function () {
       if (c.bend) styleTargets.push({ m: c.bend, attr: CO_STYLE });
       draws.forEach(function (d) { styleTargets.push({ m: d, attr: CO_STYLE }); });
       valueTargets(k + "style", "double", n + "Line style (0 straight · 1 elbow)", styleTargets, choice(1));
+      // Where the line meets the box, on the edge, bend and both draw helpers (their inputs sit at different indices).
+      var anchorTargets = [];
+      if (c.edge) anchorTargets.push({ m: c.edge, attr: CO_ANCHOR });
+      if (c.bend) anchorTargets.push({ m: c.bend, attr: CO_ANCHOR });
+      draws.forEach(function (d) { anchorTargets.push({ m: d, attr: CO_ANCHOR_DRAW }); });
+      valueTargets(k + "anchor", "double", n + "Anchor (0 side · 1 auto · 2-9 corners and edges)", anchorTargets, choice(9));
       if (lines.length) {
         value(k + "color", "color", n + "Line colour", lines, STROKE);
         value(k + "width", "double", n + "Line width", lines, WIDTH);
@@ -289,7 +297,7 @@ var GeoControls = (function () {
     (model.highlights || []).forEach(function (h) { add(h.id); add(h.shape); add(h.osc); add(h.blur); });
     (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
-    (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
+    (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); add(c.edge); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var dn = model.dayNight;
     if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label]).forEach(add); }
     var fu = model.furniture || {};

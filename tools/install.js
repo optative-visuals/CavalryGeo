@@ -7,6 +7,7 @@ if (!process.env.APPDATA) throw new Error("APPDATA is not set; this installer ta
 const scripts = path.join(process.env.APPDATA, "Cavalry", "Scripts");
 if (!fs.existsSync(scripts)) throw new Error("Cavalry Scripts folder not found: " + scripts);
 fs.copyFileSync(path.join(ROOT, "dist", "CavalryGeo.js"), path.join(scripts, "CavalryGeo.js"));
-copyDirSync(path.join(ROOT, "dist", "CavalryGeo_assets", "ne"), path.join(scripts, "CavalryGeo_assets", "ne"));
-copyDirSync(path.join(ROOT, "dist", "CavalryGeo_assets", "icons"), path.join(scripts, "CavalryGeo_assets", "icons"));
+// The whole assets folder, so nothing new in it has to be listed here. (The plugin is not copied: it is
+// installed by dragging dist/CavalryGeo_plugin into Cavalry.)
+copyDirSync(path.join(ROOT, "dist", "CavalryGeo_assets"), path.join(scripts, "CavalryGeo_assets"));
 console.log("Installed to " + scripts);
