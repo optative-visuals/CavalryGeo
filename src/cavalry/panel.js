@@ -196,9 +196,18 @@ function refreshStylePicker(name) {
     mapStylePicker.setValue(sel);
   } finally { refreshingStyles = false; }
 }
-function previewStyle() {
-  var colors = GeoStyles.previewColors(pickedStyle());
+function previewStyle() { setPreviewColors(GeoStyles.previewColors(pickedStyle())); }
+function setPreviewColors(colors) {
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setColors(colors); });
+}
+// The previews take the picked map's own colours (ocean, land, borders as they are on the canvas);
+// with "New map" picked, or when they can't be read, the Style picker's colours.
+function previewMapColors() {
+  var colors = null;
+  if (!newMapSelected()) {
+    try { colors = GeoStyles.previewColors(GeoScene.readMapStyle(maps[mapPicker.getValue()], "On the canvas")); } catch (e) { colors = null; }
+  }
+  if (colors && colors.water && colors.land && colors.border) setPreviewColors(colors); else previewStyle();
 }
 (function () {
   var s = {};
@@ -224,12 +233,14 @@ function previewFollowPicked() {
 function previewShowMap() {
   var labelOnes = [pinsPreview, routesPreview].filter(function (p) { return p && p.available(); });
   if (newMapSelected()) {
+    previewStyle();
     if (preview.available()) preview.setCurrentCamera(null);
     labelOnes.forEach(function (p) { p.setCurrentCamera(null); p.showCamera(worldViewCamera(0), "world"); });
     refreshPreviews();
     return;
   }
   var cam = GeoScene.readCamera(maps[mapPicker.getValue()].cameraId);
+  previewMapColors();
   if (preview.available()) { preview.setCurrentCamera(cam); preview.showCamera(cam, "camera"); }
   labelOnes.forEach(function (p) { p.setCurrentCamera(cam); p.showCamera(cam, "camera"); });
   refreshPreviews();

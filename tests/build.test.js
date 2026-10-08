@@ -5632,6 +5632,19 @@ test("Map tab Style: Apply restyles the picked map and says so", () => {
   assert.equal(api.get(oceanOf(api, map), "material.materialColor"), "#123a6b");
 });
 
+test("Map tab: the previews show the picked map's own colours, not the Style picker's", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  pickStyle(context, "Blueprint");
+  context.applyStyleBtn.onClick();
+  pickStyle(context, "Light"); // only previews Light
+  assert.equal(context.preview._draw._background, "#cfe3ec");
+  context.refreshMaps(); // e.g. after switching compositions
+  assert.equal(context.preview._draw._background, "#123a6b", "the map's Blueprint ocean");
+  context.mapPicker.setValue(context.maps.length); context.mapPicker.onValueChanged(); // New map
+  assert.equal(context.preview._draw._background, "#cfe3ec", "New map shows the picked style");
+});
+
 test("Map tab Style: Apply reports colours it left alone", () => {
   const { context, api } = buildSandbox();
   createWorldMap(context);
