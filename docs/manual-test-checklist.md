@@ -345,7 +345,7 @@ Night filter is checked here.
 
 ## Imagery and Fly here
 
-- [ ] 40. Web Mercator map of Europe → Imagery tab → EOX → Build imagery → one press opens a
+- [ ] 40. Web Mercator map of Europe (with the Cavalry Geo plugin installed) → Imagery tab → EOX → Build imagery → one press opens a
       "Build imagery" question with the plan ("N images needed (M tiles' worth, …)", size, and any
       slower / limited-detail note) ending "Download and build now?"; the button still reads
       "Build imagery" → **No** → "Nothing downloaded.", nothing downloads → Build imagery again →
@@ -390,9 +390,9 @@ Night filter is checked here.
 - [ ] 46b. Same on Equal Earth → imagery fills the outline, lining up with the borders.
 - [ ] 46c. Date line: a flight from longitude 170 to −170 (globe and Equal Earth) → Build imagery →
       imagery is continuous across the date line, no seam or gap.
-- [ ] 46d. Without the plugin installed, Build imagery on the globe → stops with "Imagery on the globe and
-      Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder…"; nothing
-      is downloaded or built. A Web Mercator build still works with no plugin.
+- [ ] 46d. Without the plugin installed, Build imagery on the globe, on Equal Earth or on Web Mercator → stops with
+      "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the
+      Cavalry window once, then press Build imagery again."; nothing is downloaded or built.
 - [ ] 46e. Rebuild flat ↔ bent: build on Web Mercator, switch the map to the globe and build again → the
       flat group is replaced by the bent one; and back → the bent group and its composition are replaced.
 - [ ] 47. Cancel during a download → "Download cancelled. Files still downloading in the
@@ -405,6 +405,18 @@ Night filter is checked here.
 - [ ] 48. Add attribution → an "Imagery credit" line appears above the OSM credit; Clear download cache →
       built imagery still shows; Clear imagery tiles → asks for a second press (and refuses while
       downloading or building); confirm → tiles and downloaded images are removed and re-download on the next Build.
+
+## Date line
+
+Imagery needs the Cavalry Geo plugin (drag the CavalryGeo_plugin folder in once). Use a flat (Web Mercator) map unless a step says otherwise.
+
+- [ ] DL1. Live check 1: New map, Web Mercator. Build imagery (EOX) and night lights (Day & night over the imagery), add a pin on Tokyo and one on Los Angeles, and make a route Tokyo → Los Angeles. Animate the camera from Tokyo to Los Angeles over the Pacific, past the date line. Play it → land, coastlines, borders, imagery and night lights run across the date line with no edge and no seam. Each pin and the route appear once, and the route takes the short way over the Pacific.
+- [ ] DL2. Live check 2: on a flat map with world layers, imagery and a pin, zoom the camera out to 0, then 1, then 2 (frame wider than the world at 1080p). The world repeats side by side, imagery included. The pin and its label appear once, on the copy nearest the camera.
+- [ ] DL3. Live check 3: play flat imagery built by this version (through the Reproject filter) and an older flat build made from footage layers (a v0.9 or v1 map not yet rebuilt). Playback is about as smooth as the old footage layers, on a normal shot and on a wide shot (zoom 0 to 2).
+- [ ] DL4. Live check 4: open a v0.9 or v1 flat map with vector layers, pins and imagery. Press Refresh controls → the vector layers and pins are upgraded (values, keys and Controls rows kept), and the note says: "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps." Before rebuilding, the imagery stops at the date line. Press Build imagery → the imagery now wraps across it.
+- [ ] DL5. Round the world: a route Tokyo → Los Angeles → London → Tokyo. Each leg takes the short way, the route is drawn once, nearest the camera, and the last leg closes the short way back to Tokyo. Draw on % (0 to 100) draws the whole route, and a traveller still moves along it.
+- [ ] DL6. Pin here on a stop past the date line: make a route with a stop near 179°E, drag the stop across the date line to about 179°W, and press Pin here. The stop stays on that spot of the map as the camera moves. If the stop's longitude is keyed, its keys still move it across the date line and the route follows.
+- [ ] DL7. Highlights on Russia and on Fiji with the map centred on longitude 180: each highlight is one piece, not split at the date line, and appears once.
 
 ## Map controls
 

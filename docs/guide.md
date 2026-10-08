@@ -145,6 +145,7 @@ panel, which also holds **Clear download cache**).
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
+- **Date line.** On the flat map, vector layers (world categories, streets, data maps) carry on past the date line. Zoomed right out, the frame wider than the world, they repeat side by side.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
   the camera's current view — zoom in before adding them. Add one street layer at a time. Once a
   layer is added (world or street), its box unticks by itself, so pressing Add layers again can't add it twice. (If nothing was found for a layer, or the add
@@ -158,7 +159,7 @@ panel, which also holds **Clear download cache**).
 
 - **Day & night.** The **Day & night** panel on **Layers → Overlays** (above Map furniture) shades the night side of the Earth for any date and time. Type a day and pick a month, give the **UTC time** in hours (0 to 24, decimals allowed: 14.5 is 14:30), and press **Add day & night**. The boxes start at today's date and the current time in UTC. Day & night needs the Cavalry Geo plugin on every projection, flat included. Without it nothing is built, and the status line says: "Day & night needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Add day & night again." With the plugin installed, the overlay is a group called "Day & night" holding one layer called "Night". The Night layer is a plain rectangle the size of the composition, with the **Cavalry Geo Night** filter on it, and the filter works out the night for every pixel. It follows the camera on all three projections. On the flat map the shadow keeps going past the date line, so places on the far side are covered too. On Equal Earth it stays inside the oval and follows its curved edges. On the globe you see just the night on the side facing you: its edge runs along the rim of the globe, and a view of the sunlit side shows no night at all. The twilight is a realistic curve: it darkens fast just past the edge of the night, about two thirds of the way by 6° below the horizon and nearly all of it by 12°, and reaches full Night opacity at 18°. It stops cleanly at the Earth's edge. A map has one overlay: press the button again to set its date and time (it also adds the time label if you ticked it and it is missing, and remakes the Night layer if you deleted it). An overlay made by version 0.9 or earlier (with four night layers, blurs and a mask) is upgraded in place by **Refresh controls**, or by pressing **Add day & night** again, when the plugin is installed. The date, time, Night colour, Night opacity and Twilight carry over, and the Time controls rows keep their values and keys. Keys you put directly on an old night layer's own settings, rather than on the Time controls rows, are not carried over. Without the plugin an older overlay is left exactly as it is, and keeps working. Refresh controls says: "This Day & night was made by an older version of Cavalry Geo, so it is left as it is. Install the Cavalry Geo plugin (drag the CavalryGeo_plugin folder from the download into the Cavalry window once), then press Refresh controls to upgrade it."
 
-- **Night lights.** Over satellite imagery (EOX, NASA, MapTiler satellite or hybrid, Mapbox satellite), the Day & night overlay also gets night lights: NASA Black Marble 2016 city lights on the night side, shown through the twilight so they fade in and out with the edge of the night. Nothing to press: they are added automatically by Add day & night, Build imagery or Refresh controls, whichever comes second. Rebuilding imagery rebuilds the night lights to match the new imagery (already-downloaded night tiles are reused). Vector maps, street styles and custom tile links keep the classic darkening. The lights sit in the Day & night group as a group called "Night lights" at the top: one reference to a separate composition, named "Imagery source: NASA Black Marble" followed by the map's name, matted by the one Night layer so they follow the terminator (on every projection). On Equal Earth and the globe they need the Cavalry Geo Reproject plugin, like other bent imagery. NASA's night data goes to zoom 8 (country and region level), so close-ups look softer, and the status line says so. In Time controls, **Night lights %** (0 to 100) crossfades the lights with the classic darkening; at 100 the core of the night goes to full strength, so it shows only the lights. Deleting the Night layer removes the night lights on the next Refresh controls; Add day & night remakes the Night layer and the night lights rebuild from the cache. Deleting Day & night removes the night lights with it. After you delete the day imagery, Refresh controls removes leftover night lights and their Night lights % row. If some night tiles failed to download, delete the Night lights group and press Refresh controls to try again. **Cancel** stops a night download or build like any other imagery job.
+- **Night lights.** Over satellite imagery (EOX, NASA, MapTiler satellite or hybrid, Mapbox satellite), the Day & night overlay also gets night lights: NASA Black Marble 2016 city lights on the night side, shown through the twilight so they fade in and out with the edge of the night. Nothing to press: they are added automatically by Add day & night, Build imagery or Refresh controls, whichever comes second. Rebuilding imagery rebuilds the night lights to match the new imagery (already-downloaded night tiles are reused). Night lights built by an earlier version keep working and are replaced on the next imagery rebuild. Vector maps, street styles and custom tile links keep the classic darkening. The lights sit in the Day & night group as a group called "Night lights" at the top: one reference to a separate composition, named "Imagery source: NASA Black Marble" followed by the map's name, matted by the one Night layer so they follow the terminator (on every projection). On every projection they need the Cavalry Geo Reproject plugin, like other imagery. NASA's night data goes to zoom 8 (country and region level), so close-ups look softer, and the status line says so. In Time controls, **Night lights %** (0 to 100) crossfades the lights with the classic darkening; at 100 the core of the night goes to full strength, so it shows only the lights. Deleting the Night layer removes the night lights on the next Refresh controls; Add day & night remakes the Night layer and the night lights rebuild from the cache. Deleting Day & night removes the night lights with it. After you delete the day imagery, Refresh controls removes leftover night lights and their Night lights % row. If some night tiles failed to download, delete the Night lights group and press Refresh controls to try again. **Cancel** stops a night download or build like any other imagery job.
 
 - **Keying the date and time.** Open the map's **Time controls** and animate **Day of year (1–365)** and **UTC time (0 to 24)** to run the shadow across the map; they drive the Night layer and the time label together. The same component has **Night colour**, **Night opacity**, **Twilight** and **Hide**. Night opacity (0 to 100) sets how dark the night is. Twilight is a slider from 0 to 1: 0 gives a hard edge, 1 gives the full soft band, and values in between narrow the band.
 
@@ -180,7 +181,7 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
   domain) work straight away; **MapTiler** and **Mapbox** need your own free key; **Custom tile
   link** takes any `{z}/{x}/{y}` address. Keys stay on your computer
   (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
-- **Assets window:** each map's imagery images (and, on the globe and Equal Earth, its
+- **Assets window:** each map's imagery images (and its
   "Imagery source" composition) are filed in one group in the Assets window,
   **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
   map's older imagery into its group too. The group is named after the map, so renaming the map
@@ -211,22 +212,23 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 - **Clear imagery tiles** (press twice to confirm) deletes the downloaded imagery; built imagery
   shows missing images until you rebuild.
 
-### Imagery on the globe and Equal Earth
+### Imagery on every projection
 
-Web Mercator is the only projection the images come in, so on Equal Earth and the globe Cavalry
-Geo bends them to fit the map. Build imagery notices this on its own — you don't pick anything.
+Web Mercator is the only projection the images come in, so Cavalry
+Geo bends them to fit the map on every projection, flat included. Build imagery notices this on its own — you don't pick anything.
 
 - **Install the plugin once:** the download has a folder called `CavalryGeo_plugin`. Drag it into
-  the Cavalry window and confirm the install. Without it, Build imagery stops and tells you to do
-  this; press Build imagery again afterwards. A flight that stays on Web Mercator builds as before
-  and never needs the plugin.
+  the Cavalry window and confirm the install. Imagery needs it on every projection, flat included.
+  Without it, Build imagery stops and says: "Imagery needs the Cavalry Geo plugin: drag the
+  CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery
+  again."
 - **What you get:** a group called `Imagery: <source>` in the map, holding one layer, `Imagery
   source`, that is bent by the **Cavalry Geo Reproject** filter. It shows a composition named
   `Imagery source: <source> · <map name>`, which appears in Assets. Leave it there — building
   again replaces it.
 - **Poles:** the images stop at about 85° north and south, so the last row is stretched out to
   fill the caps.
-- **Date line:** flights across the date line work on the globe and Equal Earth. Flat Web Mercator imagery doesn't wrap around the date line, as before.
+- **Date line:** on the flat map, imagery carries on past the date line, so a flight across the Pacific shows no edge. Zoomed right out, the imagery repeats side by side, like the rest of the world. Imagery built by an earlier version stops at the date line until you press **Build imagery** again to rebuild it so it wraps; **Refresh controls** says so.
 - **Same as before:** the same sources, limits, saved-image reuse and Cancel. Building a flat and a
   bent version of the same source replaces the other one.
 
@@ -241,7 +243,7 @@ Streets panel on Layers → Add.)
 - **Bake:** select a map layer in the Scene Window and press **Bake** to turn it into a plain
   editable shape at the current frame. Baked shapes stop following the camera. The legs and stops
   of a new-style route are already ordinary Cavalry shapes, so Bake skips them (it still bakes the
-  legs of routes made by earlier versions). Highlights and callouts are skipped too.
+  legs of routes made by earlier versions). Highlights and callouts are skipped too. On a wide shot on the flat map, Bake keeps the copies of a world layer that are on screen, so the baked shapes repeat too.
 
 ### Highlights
 
@@ -290,6 +292,7 @@ can't be baked: Bake skips them.
   **Pin here** or **Label here**, or place them at exact coordinates.
 - **Preview.** The preview under the search shows the picked map with its pins, labels and routes. Click it to set a spot: Lat and Lon are filled in, a white ring marks the spot, and the place's name is looked up and put in the text box (unless you typed your own). Then press **Pin at coordinates** or **Label at coordinates**. Drag to move; − / + zoom, or press the scroll wheel and drag up / down to zoom around the point you pressed.
 - Labels hide automatically when their place turns to the far side of a globe.
+- **Date line.** On the flat map, pins, labels, callouts and highlights appear once, on the copy of the world nearest the camera, so a pin at 179°E and one at 179°W sit side by side over the Pacific. On very wide shots one can hop to the other side of the frame when the camera is about half a world away from it. A highlight stays in one piece, even across the date line (Russia and Fiji, for example).
 - **Callouts.** **Callout here** (or **Callout at coordinates**) makes a numbered group, "Callout 1: Paris": a text label in a box, a dot on the place, and a line joining them. The label stays put on screen while the line follows the place as the camera moves, so you can drag the label anywhere you like. The label starts a little above and to the right of the place. The type of line is set under **Line style** in the map's Overlay controls (**Elbow** or **Straight**). **Anchor** chooses where the line meets the box: **1 (Auto)**, the default for a new callout, joins the point of the box nearest the place (one of its four corners or four edge midpoints) and switches points as the place moves with the camera; **0 (Side)** leaves the middle of the side that faces the place, as callouts did before Anchor existed (a callout made by an earlier version is set to 0 when you press **Refresh controls**, so it looks the same); **2 to 9** fix the point: 2 top-left, 3 top, 4 top-right, 5 right, 6 bottom-right, 7 bottom, 8 bottom-left, 9 left. An **Elbow** bends horizontally outward from a side or a corner, and vertically outward from the middle of the top or bottom edge. **Draw %** draws the line on: key it from 0 to 100. The box is the text's own **Background**: set its padding and corner radius on the text layer, and its colour or hide it with **Box colour** and **Hide box** (the box layer sits just below the label and follows it); **Hide box** hides only the box, so the line still ends at the spot where the hidden box's edge would be. A callout expects the map group itself to stay as it is: don't move, rotate or scale it. To frame the map differently, move the camera instead. The line and dot fade out when the place turns to the far side of a globe. Map styles recolour a callout (its box takes a slightly lighter shade of the ocean colour, so it stands out from the water), and Bake skips callouts, since they are already ordinary Cavalry layers.
 
 ## Label: routes
@@ -321,7 +324,7 @@ can't be baked: Bake skips them.
   earlier version get the Shape setting when you press **Refresh controls**. Very long legs (a
   third of the world or more) are a close fit rather than exact and can sit noticeably off the
   true path, from tens up to a couple of hundred pixels on a world-sized view. Legs that cross the
-  date line on the flat map and Equal Earth draw as a plain arc.
+  date line take the short way across it, and on the flat map and Equal Earth draw as a plain arc.
 - The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
   once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
   Controls: their values live on the route's handle helpers (inside its "Route helpers" group),
@@ -357,8 +360,8 @@ can't be baked: Bake skips them.
   rather than a bow. Routes made by the very first versions (script-drawn legs) keep working as
   before, without the cut-off.
 - On Web Mercator, a leg passing very close to a pole flattens along the edge of the map, as
-  Mercator itself does. On flat maps, a leg crossing the date line runs off the side of the frame
-  rather than wrapping round.
+  Mercator itself does. On flat maps, a leg crossing the date line takes the short way across
+  the Pacific. A route is drawn once, on the copy of the world nearest the camera, and a round-the-world route closes the short way too.
 
 ## Data
 
@@ -393,7 +396,7 @@ can't be baked: Bake skips them.
 - Street downloads use Web Mercator maths for the camera's view, whatever projection the map
   shows. The download cache grows as you work in new areas (high-detail world data is 10–40 MB per
   category).
-- Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin installed once, and
+- Imagery needs the Cavalry Geo Reproject plugin installed once, on every projection, and
   the area beyond about 85° latitude is stretched. Equal Earth imagery is exact up to about zoom 15
   (Equal Earth shows the whole world, so deeper zooms lose precision). Check each
   imagery provider's licence for your use (EOX and MapTiler's free plan are non‑commercial).
@@ -401,3 +404,6 @@ can't be baked: Bake skips them.
   default font, and private sheets can't be read.
 - Data layers show Detail and Point Radius inputs they don't use, and the legend's numbers always
   use the compact format.
+- On very wide flat shots, a pin, label, callout or route can hop to the other side of the frame when the camera is about half a world away from it.
+- Routes made by older Cavalry versions without the modern scripting features (the old-style route fallback) keep their old behaviour, so a leg crossing the date line runs off the side of the frame.
+- Flat imagery built by an earlier version stops at the date line until you press Build imagery again.

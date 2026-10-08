@@ -25,8 +25,8 @@ from OpenStreetMap — on a flat map, a spinning globe, or zoomed into a street.
 ### Satellite imagery and camera flights
 Put real satellite imagery under your map that stays sharp as the camera zooms. **Fly here**
 animates a smooth zoom‑out, travel and zoom‑in between places, from the whole world down to a
-city. Imagery works on Web Mercator, Equal Earth and the globe (the last two need the
-bundled Cavalry Geo Reproject plugin, installed once by dragging it into Cavalry).
+city. Imagery works on Web Mercator, Equal Earth and the globe. It needs the
+bundled Cavalry Geo Reproject plugin on every projection, installed once by dragging it into Cavalry.
 
 ![The end of a camera flight into Paris, over satellite imagery](docs/images/flight.jpg)
 
@@ -59,7 +59,7 @@ editable shape. The panel tells you when a new version is out.
    **CavalryGeo_assets** folder straight into it.
 3. Open **Scripts → CavalryGeo**. No restart needed.
 4. Drag the **CavalryGeo_plugin** folder into the Cavalry window once (needed for Day & night, and for
-   imagery on the globe and Equal Earth).
+   imagery on any projection).
 
 Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.
 Tested with Cavalry on Windows and macOS.

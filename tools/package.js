@@ -15,7 +15,7 @@ function installText(version) {
     "   not inside another folder).",
     "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.",
     "3. Open Scripts > CavalryGeo. No restart needed.",
-    "4. Imagery on the globe or Equal Earth, or Day & night? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install.",
+    "4. Imagery on any projection, or Day & night? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install.",
     "",
     "Tested on Windows and macOS.",
     "",
