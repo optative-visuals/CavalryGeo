@@ -11161,7 +11161,7 @@ test("GeoStyle.panel is a shaded rounded box with the exact look, items in order
   assert.ok(!S.isPanel(a));
   assert.equal(p._background, "#484848");
   assert.deepEqual(plain(p._border), ["#515151", 1]);
-  assert.deepEqual(plain(p._radius), [0, 0, 0, 0], "the page's 6 px corners minus its 8 px inset, never below 0");
+  assert.deepEqual(plain(p._radius), [6, 6, 6, 6]);
   const v = p._layout;
   assert.ok(v instanceof ui.VLayout);
   assert.deepEqual(plain(v._margins), [9, 8, 9, 10]);
