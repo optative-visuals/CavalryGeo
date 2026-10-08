@@ -3246,6 +3246,13 @@ var GeoScene = (function () {
     });
   }
 
+  // A route's group, new or older style: it carries the route's data (or is named as one). A group the user made is not one,
+  // so a pin or label the user moved into it still sits on the copy nearest the camera.
+  function isRouteGroup(g) {
+    if (!g) return false;
+    if (api.hasUserDataKey(g, ROUTE_KEY) || api.hasUserDataKey(g, ROUTE_NUMBER_KEY) || api.hasUserDataKey(g, ROUTE_TRAVEL_KEY)) return true;
+    return ROUTE_PREFIX.test(String(api.getNiceName(g)));
+  }
   // The data layers that repeat on a flat map: each display's inputs and its expression builder (null for the rest).
   function dataFrame(display) {
     var E = GeoExpression;
@@ -3267,7 +3274,8 @@ var GeoScene = (function () {
       var c = l.meta.category, df = c === "data" ? dataFrame(l.meta.display) : null;
       try {
         if (c === "pin" || c === "label") {
-          if (l.nearest || api.getParent(l.id) !== map.groupId) return;
+          var pinParent = api.getParent(l.id);
+          if (l.nearest || (pinParent !== map.groupId && isRouteGroup(pinParent))) return;
           var pointData = readLayerData(l.id);
           setOne(l.id, EX, E.mapLayerExpression(RT, pointData, l.meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: true }));
         } else if (c === "highlight") {
@@ -3289,12 +3297,14 @@ var GeoScene = (function () {
     });
     (drivers || []).forEach(function (d) {
       try {
-        // A label on a route's stop (in the route's group) keeps its place: only the map's own labels are nearest.
-        if (api.getParent(d.driver) !== map.groupId) return;
-        var now = readExpr(d.driver, A.CAMERA_EXPR_ATTR), meta = E.readTag(now, "GEO_META");
+        // A label on a route's stop (in the route's group) keeps its place; the others are nearest.
+        var driverParent = api.getParent(d.driver);
+        if (driverParent !== map.groupId && isRouteGroup(driverParent)) return;
+        var now = readExpr(d.driver, A.CAMERA_EXPR_ATTR);
+        if (now.indexOf("GeoRuntime.projectNearest(") >= 0) return;
+        var meta = E.readTag(now, "GEO_META");
         if (!meta) return;
-        var fresh = E.labelDriverExpression(RT, meta, A.DRIVER_RETURN, { nearest: true });
-        if (now !== fresh) setOne(d.driver, A.CAMERA_EXPR_ATTR, fresh);
+        setOne(d.driver, A.CAMERA_EXPR_ATTR, E.labelDriverExpression(RT, meta, A.DRIVER_RETURN, { nearest: true }));
       } catch (e) { /* the next Controls refresh tries this driver again */ }
     });
   }

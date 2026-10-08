@@ -14359,3 +14359,69 @@ test("date line upgrades: a route made on this version keeps its chained stops a
   context.GeoControlPanel.sync(map);
   assert.equal(snap(), before, "a refresh changes nothing on a current route");
 });
+
+// A keyed stop longitude (the animation drives labelLon) moves its stop on a flat map, on the copy its chain picks.
+function keyedStopCheck(context, api, d, cam0) {
+  const GP = require("../src/core/projection.js");
+  const at = (lon, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, 35.7, o); return o; };
+  const near = (a, b, msg) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), msg + ": " + a + " is not " + b);
+  const tk = d.stops[0], cam180 = { ...cam0, lon: 180 };
+  api.setFrame(0);
+  near(evalRouteAt(api, d, cam0).pos[0], at(-220.3, cam0), "static Tokyo at camera 0");
+  api.keyframe(tk.position, 0, { "array.5": 139.7 });
+  api.keyframe(tk.position, 10, { "array.5": 150 });
+  near(evalRouteAt(api, d, cam0).pos[0], at(-220.3, cam0), "keyed at frame 0");
+  api.setFrame(10);
+  near(evalRouteAt(api, d, cam0).pos[0], at(-210, cam0), "keyed at frame 10 moves with the key on the chained copy");
+  near(evalRouteAt(api, d, cam180).pos[0], at(150, cam180), "at camera 180 the keyed place itself");
+  // The handles follow the keyed end too: the same as a route whose Tokyo is set to 150 without the key.
+  const keyed = evalRouteAt(api, d, cam0);
+  api.deleteKeyframe(tk.position, "array.5", 0); api.deleteKeyframe(tk.position, "array.5", 10);
+  api.set(tk.position, { "array.5": 150 });
+  const fixed = evalRouteAt(api, d, cam0);
+  assert.deepEqual(keyed.legs.map((l) => [l.start, l.end]), fixed.legs.map((l) => [l.start, l.end]), "handles follow the keyed stop");
+  api.setFrame(0);
+}
+
+test("routes: a keyed stop longitude moves its stop on a flat map, on the copy its chain picks", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  keyedStopCheck(context, api, routeData(api, r.groupId), { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+});
+
+test("routes: an upgraded older route's keyed stop moves on a flat map too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = ageRoute(context, api, { map: map, olds: {} }, r.groupId);
+  assert.equal(api.hasAttribute(d.stops[0].position, "array.7"), false, "aged");
+  context.GeoScene.prepareRoutes(map);
+  assert.equal(api.hasAttribute(d.stops[0].position, "array.7"), true, "upgraded");
+  keyedStopCheck(context, api, routeData(api, r.groupId), { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+});
+
+test("date line upgrades: a pin or label the user moved into their own group gets the nearest copy; an old route's stop does not", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, A = context.GeoAttrs, EX = A.MAP_EXPR_ATTR;
+  const mine = api.create("group", "My places");
+  api.parent(mine, map.groupId);
+  const olds = {};
+  const moved = G.addPin(map, "Lyon", 4.8, 45.7);
+  api.parent(moved, mine);
+  dlAge(api, olds, moved, A.MAP_ARRAY_ATTR, EX, 7);
+  G.createLabel(map, "Nice", 7.3, 43.7);
+  const driver = api.getCompLayers().filter((id) => api.getNiceName(id) === "Nice position")[0];
+  api.parent(driver, mine);
+  dlAge(api, olds, driver, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  const oldGroup = api.create("group", "Route 3: Old way");
+  api.parent(oldGroup, map.groupId);
+  const stop = G.addPin(map, "Stop", 0, 0, oldGroup, false);
+  dlAge(api, olds, stop, A.MAP_ARRAY_ATTR, EX, 7);
+  context.GeoControlPanel.sync(map);
+  assert.ok(api.get(moved, EX).indexOf(", nearest: true") >= 0, "a pin in the user's group is nearest");
+  assert.ok(api.get(driver, A.CAMERA_EXPR_ATTR).indexOf("GeoRuntime.projectNearest(") >= 0, "a label in the user's group is nearest");
+  assert.equal(api.get(stop, EX), olds[stop], "an old route's stop is left as it is");
+});

@@ -772,3 +772,20 @@ test("route handle expression: chained stops on flat maps use their chained long
   assert.equal(H("refLon"), 26);
   assert.equal(H("aChainLon"), 24);
 });
+
+test("route stop driver: a keyed labelLon folds onto the copy its chain picks, so the animation still moves the place (flat)", () => {
+  const GP = require("../src/core/projection.js");
+  const src = buildRuntimeSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const at = (lon, lat, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, lat, o); return o; };
+  const near = (a, b) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), a + " is not " + b);
+  const expr = E.routeStopDriverExpression(src, { camera: "c", category: "stopDriver" }, "array");
+  // Tokyo chained to 139.69 and keyed to labelLon 150: the chain picks the copy, the route's shift is -360 from camera 0.
+  const cam0 = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 0, 2, 0, 0, 150, 35.68, 139.69, 190.725]), at(-210, 35.68, cam0));
+  // Camera at 180: no shift, so the keyed place itself.
+  const cam180 = { lat: 10, lon: 180, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 180, 2, 0, 0, 150, 35.68, 139.69, 190.725]), at(150, 35.68, cam180));
+  // A static stop (labelLon = chain) is unchanged: -220.31 from camera 0.
+  near(run(expr, [10, 0, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(-220.31, 35.68, cam0));
+});

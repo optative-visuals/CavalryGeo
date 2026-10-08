@@ -198,13 +198,14 @@ var GeoExpression = (function () {
   }
 
   // opts.chained (new-style routes): on a flat map the great circle runs between the chained longitudes (aChainLon,
-  // bChainLon) moved by the route's shift from refLon, the same copy the stops are drawn on. Other maps use aLon / bLon.
+  // bChainLon) moved by the route's shift from refLon, the same copy the stops are drawn on. Each end's aLon / bLon (a
+  // keyed stop moves it) is folded onto the copy nearest its chain, so the animation still drives the place. Other maps use aLon / bLon.
   function routeHandleExpression(curveSrc, meta, which, opts) {
     if (which !== "start" && which !== "end") throw new Error("Unknown handle: " + which);
     var chained = !!(opts && opts.chained);
     var pre = chained ? "var _hf = Math.round(_i19) <= 0;\n" +
       "var _hs = _hf ? GeoProjection.nearestLon(_i26, _i16) - _i26 : 0;\n" +
-      "var _ha = _hf ? _i24 + _hs : _i20, _hb = _hf ? _i25 + _hs : _i22;\n" : "";
+      "var _ha = _hf ? GeoProjection.nearestLon(_i20, _i24) + _hs : _i20, _hb = _hf ? GeoProjection.nearestLon(_i22, _i25) + _hs : _i22;\n" : "";
     var aLon = chained ? "_ha" : "_i20", bLon = chained ? "_hb" : "_i22";
     return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) + pre +
       "(_i11 ? [_i12, _i13] : (_i14 >= 0.5 ? GeoCurve.greatCircleHandles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], " +
@@ -213,12 +214,13 @@ var GeoExpression = (function () {
   }
 
   // A new-style route's stop driver: on a flat map the stop moves by the route's shift (the copy nearest the camera,
-  // from refLon), so every stop of the route moves together. Globe and Equal Earth project labelLon.
+  // from refLon), so every stop of the route moves together. labelLon (which a keyed stop animates) is folded onto the copy
+  // nearest its chain, so the chain only picks the copy. Globe and Equal Earth project labelLon.
   function routeStopDriverExpression(runtimeSrc, meta, returnForm) {
     var ret = RETURN_FORMS[returnForm];
     if (!ret) throw new Error("Unknown driver return form: " + returnForm);
     return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(ROUTE_STOP_INPUTS) +
-      "var _sx = Math.round(_i4) <= 0 ? _i7 + GeoProjection.nearestLon(_i8, _i1) - _i8 : _i5;\n" +
+      "var _sx = Math.round(_i4) <= 0 ? GeoProjection.nearestLon(_i5, _i7) + GeoProjection.nearestLon(_i8, _i1) - _i8 : _i5;\n" +
       "var _p = GeoRuntime.projectPoint(_sx, _i6, " + CAM + ");\n" + ret + "\n";
   }
 
