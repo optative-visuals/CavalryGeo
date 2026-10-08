@@ -1272,7 +1272,7 @@ addDayNightBtn.onClick = guardAction(function () {
   var message;
   if (r.created) message = "Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map);
   else {
-    var note = r.restored ? " Its missing night layers were made again." : "";
+    var note = r.restored ? (r.version === 2 ? " Its missing parts were made again." : " Its missing night layers were made again.") : "";
     if (r.kept && r.kept.length) note += " It kept your animated " + r.kept.join(" and ") + ".";
     message = "Day & night updated to " + when + "." + note + syncControls(map);
   }
