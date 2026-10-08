@@ -12179,6 +12179,13 @@ test("the panel never calls api.processEvents (running the user's clicks inside 
 const nightMattes = (api, id) => api._connections.filter((c) => c[2] === id && /^trackMattes\.\d+$/.test(c[3])).map((c) => c[0]);
 const nightFootage = (api, groupId) => api.getChildren(groupId).filter((id) => /^z -?\d+$/.test(String(api.getNiceName(id))))
   .reduce((a, lg) => a.concat(api.getChildren(lg)), []);
+// The tiles of a Night lights group: a flat build pre-comps them under View in its source comp (the group
+// holds one "Imagery source" reference); a bent build's tiles are read the same way.
+const nightTiles = (api, groupId) => {
+  const ref = api.getChildren(groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  if (!ref) return nightFootage(api, groupId);
+  return inComp(api, api.getCompFromReference(ref), () => nightFootage(api, api.getCompLayers(false).find((id) => api.getNiceName(id) === "View")));
+};
 function nightFixture(zoom) {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, zoom || 4);
@@ -12212,26 +12219,73 @@ test("nightLightsStatus: wanted only with satellite day imagery and Day & night"
   assert.equal(G.nightLightsStatus(noDn).dayNight, false);
 });
 
-test("night lights: a flat build makes a Night lights group at the top of Day & night, each tile matted by the four night layers", () => {
+test("night lights: a flat build makes a Night lights group at the top of Day & night, holding one matted reference to its source comp", () => {
   const { context, api, map, dn, rec } = nightFixture(4);
   const G = context.GeoScene;
   const day = tileSource(context);
+  api.set("comp#1", { endFrame: 50, startFrame: 2, fps: 24 });
   const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   const r = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.equal(api.getNiceName(r.groupId), "Night lights");
   assert.equal(api.getParent(r.groupId), dn);
   assert.equal(api.getChildren(dn)[0], r.groupId, "top child of Day & night");
   assert.equal(r.night, true);
-  const tiles = nightFootage(api, r.groupId);
-  assert.equal(tiles.length, r.tiles);
-  assert.ok(tiles.length > 0);
-  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), rec.layers));
+  // One composition reference, matted by the four night layers, with no reproject filter.
+  const kids = api.getChildren(r.groupId);
+  const refs = kids.filter((id) => api.getNiceName(id) === "Imagery source");
+  assert.equal(refs.length, 1, "one Imagery source reference");
+  assert.deepEqual(nightMattes(api, refs[0]), rec.layers);
+  assert.equal(api._connections.filter((c) => c[2] === refs[0] && /^filters\.\d+$/.test(c[3])).length, 0, "no filter on the reference");
+  assert.equal(api.getCompFromReference(refs[0]), G.findNightLights(map)[0].meta.sourceComp);
+  // The four night layers are matted on the reference only; no footage in the map comp has a matte.
   assert.deepEqual(plain(G.findImagery(map).map((i) => i.groupId)), [d.groupId], "day imagery only");
   assert.ok(api.layerExists(d.groupId), "day imagery untouched");
+  // The source comp: the map comp's size, frame range and frame rate, and View -> level groups -> tiles.
   const night = G.findNightLights(map);
   assert.deepEqual(plain(night.map((i) => i.groupId)), [r.groupId]);
   assert.equal(night[0].meta.night, true);
   assert.equal(night[0].meta.category, "imagery");
+  assert.ok(!night[0].meta.bent, "flat, not bent");
+  const comp = night[0].meta.sourceComp;
+  assert.equal(api.getNiceName(comp), "Imagery source: NASA Black Marble · World");
+  assert.deepEqual(plain(api.get(comp, "resolution")), plain(api.get("comp#1", "resolution")), "the map comp's resolution");
+  assert.deepEqual(plain(api.get(comp, "frameRange")), { x: 2, y: 50 });
+  assert.equal(api.get(comp, "fps"), 24);
+  const top = inComp(api, comp, () => api.getCompLayers(false));
+  const view = top.find((id) => api.getNiceName(id) === "View");
+  assert.ok(view, "a View group in the source comp");
+  assert.equal(top.filter((id) => api.getNiceName(id) === "View mask").length, 0, "no View mask");
+  const tiles = inComp(api, comp, () => nightFootage(api, view));
+  assert.equal(tiles.length, r.tiles);
+  assert.ok(tiles.length > 0);
+  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles are not matted"));
+  // The rotation driver is tagged in the map comp (in Night lights) and turns View.
+  assert.equal(api.getParent(night[0].driverId), r.groupId);
+  assert.ok(api._connections.some((c) => c[0] === night[0].driverId && c[2] === view && c[3] === "rotation.z"), "rotation driver -> View rotation.z");
+});
+
+test("night lights: a flat night build's source comp is filed in the map's imagery asset group", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const comp = G.findNightLights(map)[0].meta.sourceComp;
+  const groups = assetGroupsNamed(api, "Cavalry Geo imagery · " + api.getNiceName(map.groupId));
+  assert.equal(groups.length, 1);
+  assert.equal(api.getParent(comp), groups[0]);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("night lights: a flat night build's source comp is deleted when the night lights are removed", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(compIds(api).length, 1);
+  api.deleteLayer(d.groupId);
+  assert.equal(G.prepareNightLights(map).removed, 1);
+  assert.deepEqual(compIds(api), [], "the night source comp is gone");
+  assert.equal(api.getActiveComp(), "comp#1");
 });
 
 test("night lights: a bent build makes one matted reference in Night lights, with its own source comp", () => {
@@ -12258,9 +12312,12 @@ test("night lights: a rebuild replaces the Night lights group, and a day rebuild
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   const first = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const firstComp = G.findNightLights(map)[0].meta.sourceComp;
   const again = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.equal(api.layerExists(first.groupId), false, "old Night lights removed");
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "one Night lights group");
+  assert.deepEqual(compIds(api), [G.findNightLights(map)[0].meta.sourceComp], "the old night source comp is deleted");
+  assert.notEqual(G.findNightLights(map)[0].meta.sourceComp, firstComp);
   const dayAgain = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "night lights kept by a day rebuild");
   assert.ok(api.layerExists(again.groupId));
@@ -12278,6 +12335,67 @@ test("night lights: a night build without Day & night throws the message and lea
     (e) => e.message === "Night lights need a Day & night overlay — press Add day & night first.");
   assert.deepEqual(api.getChildren(map.groupId), kidsBefore);
   assert.equal(G.findNightLights(map).length, 0);
+});
+
+test("night lights: cancelling a flat night build discards its group and its source comp, and shows the four layers", () => {
+  const { context, api, map, dn, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  job.step(0); job.step(0);
+  assert.equal(compIds(api).length, 1, "the source comp exists mid-build");
+  assert.equal(job.cancel(), true);
+  const steps = stepToEnd(job, 0, () => assert.equal(api.getActiveComp(), "comp#1"));
+  assert.equal(steps[steps.length - 1].cancelled, true);
+  assert.deepEqual(compIds(api), [], "the source comp is deleted");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
+  rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown after cancel"));
+});
+
+test("night lights: a throw after the flat source comp exists deletes it and the group, and leaves the map comp active", () => {
+  const { context, api, map, dn } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const before = api.getCompLayers(false).slice().sort();
+  api.createCompReference = function () { throw new Error("no reference"); };
+  const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.throws(() => job.step(0), /no reference/);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.deepEqual(compIds(api), [], "the new source comp is deleted");
+  assert.deepEqual(api.getCompLayers(false).slice().sort(), before, "nothing left in the map comp");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
+});
+
+test("night lights: a throw in the middle of a flat night build deletes the group and its source comp", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  let calls = 0;
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
+  const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  job.step(0); job.step(0);
+  assert.throws(() => job.step(0), /boom/);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.deepEqual(compIds(api), []);
+  assert.equal(G.findNightLights(map).length, 0);
+});
+
+test("night lights: extendComp lengthens a flat night source comp too, and the map comp is active again", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  api.set("comp#1", { endFrame: 9, startFrame: 0 });
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const comp = G.findNightLights(map)[0].meta.sourceComp;
+  const inner = inComp(api, comp, () => api.create("group", "Tile"));
+  const ext = G.extendComp(20);
+  assert.equal(ext.oldEnd, 9);
+  assert.equal(api.getActiveComp(), "comp#1");
+  assert.equal(api.get(comp, "endFrame"), 20, "the source comp reaches the new end");
+  assert.equal(api.getOutFrame(inner), 21, "its layers were extended");
 });
 
 // Cavalry hides a layer when it becomes a track matte, so the build sets the four night layers visible again
@@ -12637,7 +12755,7 @@ test("night lights in the panel: a day rebuild rebuilds the night lights: one Ni
   assert.equal(night.length, 1, "exactly one Night lights group");
   assert.notEqual(night[0].groupId, first);
   assert.equal(api.layerExists(first), false, "the old Night lights group is replaced");
-  assert.ok(nightFootage(api, night[0].groupId).length > 0);
+  assert.ok(nightTiles(api, night[0].groupId).length > 0);
 });
 
 test("night lights in the panel: a bent day rebuild after a flat one ends with one bent night build and no flat night tiles", () => {
@@ -12648,7 +12766,7 @@ test("night lights in the panel: a bent day rebuild after a flat one ends with o
   runTimers(api);
   const G = context.GeoScene, map = context.currentMap();
   const flat = G.findNightLights(map)[0];
-  assert.ok(nightFootage(api, flat.groupId).length > 0, "flat night tiles first");
+  assert.ok(nightTiles(api, flat.groupId).length > 0, "flat night tiles first");
   G.setCamera(map.cameraId, { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 2 });
   context.sourcePicker.setValue(0); // EOX
   context.buildImageryBtn.onClick();
@@ -12754,9 +12872,11 @@ test("night lights in the panel: Add day & night after a night layer was deleted
   const after = dnRec(api, dn), night = G.findNightLights(map);
   assert.equal(night.length, 1, "one Night lights group");
   assert.ok(after.layers.every((id) => id && api.layerExists(id)), "the four night layers are there");
-  const tiles = nightFootage(api, night[0].groupId);
+  const ref = api.getChildren(night[0].groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  assert.deepEqual(nightMattes(api, ref), after.layers, "the reference matted by all four layers");
+  const tiles = nightTiles(api, night[0].groupId);
   assert.ok(tiles.length > 0);
-  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), after.layers, "each night tile matted by all four layers"));
+  tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles not matted"));
 });
 
 test("night lights in the panel: Add day & night while another map's night build runs says Refresh controls adds them", () => {
