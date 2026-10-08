@@ -180,7 +180,8 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 - **Assets window:** each map's imagery images (and, on the globe and Equal Earth, its
   "Imagery source" composition) are filed in one group in the Assets window,
   **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
-  map's older imagery into its group too. Anything you put in a group of your own stays there.
+  map's older imagery into its group too. The group is named after the map, so renaming the map
+  starts a new group (the old one stays as it is). Anything you put in a group of your own stays there.
 - **Building:** animate the camera first, then press **Build imagery**. It works out how many
   images (or tiles) the animation needs and asks once, showing the count and download size —
   **Yes** downloads them and builds the imagery at the bottom of the map with a progress bar;

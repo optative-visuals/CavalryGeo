@@ -450,6 +450,15 @@ adding street layers.
 - [ ] Moving the mouse over a preview with no button held changes nothing: no pan, no zoom, no flicker. Then middle-drag up and down: it really zooms (Cavalry only reports middle-button moves while hover events are on).
 - [ ] Picking another map recentres the Label previews on its camera; Pin here on dragged stops moves them in the previews after switching tabs.
 
+## Assets group, settings, redraw and comps
+
+- [ ] Build imagery on a map: its images sit in one Assets group "Cavalry Geo imagery · <map name>". Rename the map and build again: a new group is made and the old one is left alone. Refresh controls gathers older loose assets into the group.
+- [ ] Other actions (Add layers, Pin here and so on) feel no slower in a scene with many assets: only Refresh controls gathers imagery assets.
+- [ ] Settings: after updating, keys and saved styles are still there; they live in Cavalry's app-data folder (CavalryGeo/settings.json), and an old settings.json in CavalryGeo_assets is left behind untouched.
+- [ ] Press a panel button with a layer selected in the Scene Window: groups stay collapsed and the viewport redraws (no black viewport). Changing a dropdown or leaving a text box does not move the playhead or change the selection.
+- [ ] Callout here: the new callout's label is selected, ready to drag.
+- [ ] Following the comp: with maps in two compositions, switching comp changes the Map list, previews and Extract layers to that comp's maps ("Showing maps in <comp>."). During a bent imagery build the panel does not flicker between comps, and the build's result message is kept when it ends.
+
 ## Scene persistence and install
 
 - [ ] 20. Save the scene, close Cavalry, reopen the `.cv` → maps still render and
