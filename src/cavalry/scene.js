@@ -1188,7 +1188,6 @@ var GeoScene = (function () {
     // night layers). Checked before anything is made, so a refused build leaves nothing behind.
     var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
-    var mattes = night ? nightMattes(dayNight) : [];
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
     // precomp: flat night lights, built in a source comp like bent imagery but with no filter and no
@@ -1229,10 +1228,12 @@ var GeoScene = (function () {
 
     // Night lights: the reference to the source comp (bent or pre-comped flat) is matted by the four night
     // layers, so it shows only where they are dark. Nothing happens for day imagery (mattes is empty).
-    function matte(id) { mattes.forEach(function (m) { api.connect(m, "id", id, "trackMattes"); }); }
+    // Read each time: a Controls sync during the build may upgrade the overlay (its Night rectangle replaces the four layers).
+    function currentMattes() { return night ? nightMattes(findDayNight(map)) : []; }
+    function matte(id) { currentMattes().forEach(function (m) { api.connect(m, "id", id, "trackMattes"); }); }
     // Cavalry hides a layer when it becomes a matte, so the four night layers are shown again once the build
     // is done with them (completed, cancelled or failed). The Night mask is not one of them and stays hidden.
-    function showMattes() { mattes.forEach(function (m) { if (layerThere(m)) setHidden(m, false); }); }
+    function showMattes() { currentMattes().forEach(function (m) { if (layerThere(m)) setHidden(m, false); }); }
 
     // Measured in Cavalry: any step that loads an asset is followed by a ~3.6 s rescan of
     // all assets, however many it loaded, so every tile's asset is loaded in the first step.
@@ -2962,13 +2963,75 @@ var GeoScene = (function () {
     return out;
   }
 
+  // What a layer's attribute reads from: the Controls value that drives it (its own attribute), else the layer's.
+  function drivenSource(map, id, attr) { var d = drivenBy(map, { layer: id, attr: attr }); return d.src ? { id: d.src, attr: d.attr } : { id: id, attr: attr }; }
+  // Version 1 to version 2, with the plugin installed (Refresh controls, or Add day & night on an older overlay). The old
+  // settings are read first (a Controls value that drives one counts, and its keys stay on it); the Night rectangle and its
+  // filter are built in the same group; the night lights' mattes move to the rectangle, which is shown again (Cavalry hides a
+  // matte); the version 2 record is written; then the old parts are deleted. A failure before the record deletes what was made
+  // and leaves the old overlay as it was. given: { dayOfYear, utcTime } from Add day & night (null: the old values stay); the
+  // given times are also set on the old settings' sources, so the Controls rows carry them. Returns { groupId, night, filter, label }.
+  function upgradeDayNight(map, f, given, kept) {
+    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, today = utcToday(), made = [], g = f.groupId;
+    given = given || {}; kept = kept || {};
+    function track(id) { made.push(id); return id; }
+    track.made = made;
+    var live = f.layers.filter(function (id) { return id && layerThere(id); })[0] || null;
+    var hel = f.helpers.filter(function (id) { return id && layerThere(id); })[0] || null;
+    var helperValue = function (name, dflt) { return hel ? readDayNightValue(map, hel, CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, name), dflt) : dflt; };
+    try {
+      var day = given.dayOfYear != null ? given.dayOfYear : live ? Math.round(readDayNightTime(map, live, E.NIGHT_INPUTS, "dayOfYear", today.dayOfYear)) : today.dayOfYear;
+      var time = given.utcTime != null ? given.utcTime : live ? readDayNightTime(map, live, E.NIGHT_INPUTS, "utcTime", today.utcTime) : today.utcTime;
+      var colourFrom = live ? drivenSource(map, live, A.FILL_COLOR_ATTR) : null;
+      var colour = (colourFrom && readColour(colourFrom.id, colourFrom.attr, null)) || GeoStyles.nightColour(styleOf(map));
+      var rect = makeNightRect(map, g, colour, track), filt = makeNightFilter(map, g, rect, day, time, track);
+      api.set(filt, { nightOpacity: helperValue("night", 55), twilight: helperValue("twilight", 1), lights: helperValue("lights", 0) });
+      // Night lights: the references the old layers matte get the rectangle instead, which is shown again.
+      var refs = [];
+      f.layers.forEach(function (L) {
+        if (!L || !layerThere(L)) return;
+        var outs = [];
+        try { outs = api.getOutConnections(L, "id") || []; } catch (e) { outs = []; }
+        outs.forEach(function (c) {
+          var s = String(c), at = s.indexOf(".trackMattes.");
+          if (at > 0 && refs.indexOf(s.slice(0, at)) < 0) refs.push(s.slice(0, at));
+        });
+      });
+      refs.forEach(function (r) { if (layerThere(r)) api.connect(rect, "id", r, "trackMattes"); });
+      setHidden(rect, false);
+      if (given.dayOfYear != null || given.utcTime != null) {
+        f.layers.forEach(function (id) { if (id && layerThere(id)) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
+      }
+      var old = userData(g, DAYNIGHT_KEY) || {}, fixed = {};
+      Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
+      delete fixed.layers; delete fixed.helpers; delete fixed.blurs; delete fixed.blurHelper; delete fixed.mask;
+      fixed.version = 2; fixed.night = rect; fixed.filter = filt; fixed.label = f.label || null;
+      api.setUserData(g, DAYNIGHT_KEY, fixed);
+    } catch (e) {
+      made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
+      throw e;
+    }
+    // The old parts go: the blurs, the layers, the helper blur and the mask, then the helpers group they sat in. Each is
+    // deleted on its own, so one that can't be deleted is left in place without undoing the upgrade.
+    var oldParts = [].concat(f.blurs || [], f.layers || [], f.helpers || [], [f.blurHelper, f.mask]), holders = [];
+    oldParts.forEach(function (id) {
+      if (!id || !layerThere(id)) return;
+      var p = api.getParent(id);
+      if (p && p !== g && holders.indexOf(p) < 0) holders.push(p);
+    });
+    oldParts.concat(holders).forEach(function (id) { if (id) { try { deleteIfThere(id); } catch (e) { /* left in place */ } } });
+    return { groupId: g, night: rect, filter: filt, label: f.label || null };
+  }
+
   // The Controls refresh: an overlay made before the blur gets its blurs and helper; one that has them
-  // is left as it is. What was made is deleted again if the work fails.
+  // is left as it is. What was made is deleted again if the work fails. With the Cavalry Geo Night type an
+  // older overlay is upgraded to version 2 instead ({ upgraded: true }).
   function prepareDayNight(map) {
-    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return;
+    if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return { upgraded: false };
     var f = findDayNight(map);
-    if (!f) return;
-    if (f.version === 2) { fitNightRect(f.night); return; }
+    if (!f) return { upgraded: false };
+    if (f.version === 2) { fitNightRect(f.night); return { upgraded: false }; }
+    if (nightAvailable()) { upgradeDayNight(map, f, null, null); return { upgraded: true }; }
     var made = [];
     function track(id) { made.push(id); return id; }
     try {
@@ -2986,6 +3049,7 @@ var GeoScene = (function () {
       made.slice().reverse().forEach(function (id) { try { if (layerThere(id)) api.deleteLayer(id); } catch (e2) { /* already gone */ } });
       throw e;
     }
+    return { upgraded: false };
   }
 
   // True when id was made by this call (track keeps the list).
@@ -3015,6 +3079,11 @@ var GeoScene = (function () {
     try {
       try { strays = strayTimeLabels(map, found ? found.label : null); } catch (es) { strays = []; }
       var colour = GeoStyles.nightColour(styleOf(map)), day, time, label, k;
+      // An older overlay (version 1) is upgraded first; the time is then set on its Night rectangle and filter below.
+      if (found && found.version === 1) {
+        var up = upgradeDayNight(map, found, given, kept);
+        found = { version: 2, groupId: up.groupId, night: up.night, filter: up.filter, label: up.label };
+      }
       if (found && found.version === 2) {
         day = given.dayOfYear != null ? given.dayOfYear : found.filter ? Math.round(readDayNightValue(map, found.filter, "dayOfYear", today.dayOfYear)) : today.dayOfYear;
         time = given.utcTime != null ? given.utcTime : found.filter ? readDayNightValue(map, found.filter, "utcTime", today.utcTime) : today.utcTime;
