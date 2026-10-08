@@ -1947,7 +1947,7 @@ test("planImagery for EOX plans large images: one per 8x8 block, cropped", () =>
   const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {});
   assert.equal(plan.mode, "images");
   assert.equal(plan.tiles.length, 48);
-  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForTiles(plan.tiles)));
+  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForWrappedTiles(plan.tiles)));
   assert.ok(plan.items.length >= 2 && plan.items.length <= 4, String(plan.items.length));
   assert.equal(plan.missing.length, plan.items.length);
   assert.equal(context.GeoScene.itemBase(plan, plan.items[0]),
@@ -1960,7 +1960,7 @@ test("planImagery caps image plans by image count and by tiles' worth", () => {
   fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
   const map = imageryMap(context, api, 4);
   const asked = [];
-  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) {
     asked.push(maxZoom);
     const hi = Math.min(maxZoom, 10), tiles = [];
     for (let L = 4; L <= hi; L++) for (let i = 0; i < 400; i++) tiles.push({ z: L, x: i % 20, y: Math.floor(i / 20) });
@@ -1983,7 +1983,7 @@ test("planImagery names the tiles' worth limit, counted as the images' own tiles
   const map = imageryMap(context, api, 4);
   const tiles = [];
   for (let i = 0; i < 1200; i++) tiles.push({ z: 6, x: (i % 25) * 2, y: Math.floor(i / 25) });
-  context.GeoTiles.tileSet = function () { return { tiles, lo: 6, hi: 6, frames: 1 }; };
+  context.GeoTiles.bentTileSet = function () { return { tiles, lo: 6, hi: 6, frames: 1 }; };
   const worth = context.GeoBlocks.totalTiles(context.GeoBlocks.blocksForTiles(tiles));
   assert.ok(tiles.length < 2000 && worth > 2000, String(worth));
   assert.throws(() => context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {}),
@@ -2114,20 +2114,20 @@ test("planImagery refuses a plan over the tile cap with the updated message (F1)
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4);
   const src = tileSource(context);
-  const realTileSet = context.GeoTiles.tileSet;
-  context.GeoTiles.tileSet = function () {
+  const realTileSet = context.GeoTiles.bentTileSet;
+  context.GeoTiles.bentTileSet = function () {
     var tiles = [];
     for (var i = 0; i < 301; i++) tiles.push({ z: 4, x: i, y: 0 });
     return { tiles: tiles, lo: 4, hi: 4, frames: 1 };
   };
   assert.throws(() => context.GeoScene.planImagery(map, src, {}),
     /Too many tiles \(301\) — end the flight at a lower zoom or use a smaller composition\.$/);
-  context.GeoTiles.tileSet = realTileSet;
+  context.GeoTiles.bentTileSet = realTileSet;
 });
 
 // A fake tile set: levels 4..min(maxZoom, 10), perLevel tiles each. Records each maxZoom asked for.
 function fakeLevelTileSet(context, perLevel, asked) {
-  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) {
     asked.push(maxZoom);
     var hi = Math.min(maxZoom, 10), tiles = [];
     for (var L = 4; L <= hi; L++) for (var i = 0; i < perLevel; i++) tiles.push({ z: L, x: i, y: 0 });
@@ -2197,11 +2197,11 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
   const kids = api.getChildren(map.groupId);
   assert.equal(kids[kids.length - 2], r.groupId, "imagery at the back of the map group, above the Ocean");
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.ok(level);
   assert.equal(api.getChildren(level).length, 48);
   const conns = api._connections.map((c) => Array.from(c));
-  assert.ok(conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"));
+  assert.ok(!conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"), "a bent build turns its View, not the group: no rotation driver on the group");
   ["position", "scale", "opacity"].forEach((a) => assert.ok(conns.some((c) => c[2] === level && c[3] === a), a));
   assert.equal(context.GeoScene.findImagery(map).length, 1);
   assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48);
@@ -2221,7 +2221,7 @@ test("buildImagery uses only the levels that actually have files for the opacity
   assert.deepEqual([plan.lo, plan.hi], [4, 5]);
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(r.levels, 1, "level 5 has no files and is skipped");
-  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  const driver = imageryChild(api, r.groupId, "Imagery driver: z 4 opacity");
   assert.ok(driver);
   const expr = String(api.get(driver, "expression"));
   assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
@@ -2238,7 +2238,7 @@ test("512-px sources are placed at half scale; tiles without files are skipped",
   const plan = context.GeoScene.planImagery(map, src, { key: "K", style: "streets-v2" });
   const r = context.GeoScene.buildImagery(map, src, { key: "K", style: "streets-v2" }, plan);
   assert.equal(r.tiles, 24);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   const tile = api.getChildren(level)[0];
   assert.equal(api.get(tile, "scale.x"), 0.5 * 260 / 256);
 });
@@ -2252,7 +2252,7 @@ test("buildImagery scales every tile by 260/256 (times 0.5 for 512px sources) to
   context.GeoNet.cachedTile = (base) => base + ".jpg";
   const plan = context.GeoScene.planImagery(map, src, {});
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   const tile = api.getChildren(level)[0];
   assert.equal(api.get(tile, "scale.x"), 260 / 256);
   assert.equal(api.get(tile, "scale.y"), 260 / 256);
@@ -2277,7 +2277,7 @@ test("buildImagery parents layers before setting their local transforms (parent 
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(api.get(r.groupId, "position.x"), 0, "outer imagery group local position must be reset after parenting");
   assert.equal(api.get(r.groupId, "position.y"), 0);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.equal(api.get(level, "rotation.z"), 0, "level group local rotation must be reset after parenting");
   assert.equal(api.get(level, "position.x"), 0);
   assert.equal(api.get(level, "position.y"), 0);
@@ -2316,7 +2316,7 @@ test("buildImagery removes unreadable (zero-resolution) tiles and reports them a
   assert.equal(r.tiles, 45);
   assert.equal(r.unreadable, 3);
   assert.equal(deleted.length, 3, "only the unreadable footage layers are deleted");
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.equal(api.getChildren(level).length, 45);
 });
 
@@ -2331,7 +2331,7 @@ test("buildImagery's built-level range ignores a level whose tiles are all unrea
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(r.levels, 1);
   assert.ok(r.unreadable > 0);
-  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  const driver = imageryChild(api, r.groupId, "Imagery driver: z 4 opacity");
   const expr = String(api.get(driver, "expression"));
   assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
 });
@@ -2399,8 +2399,9 @@ function imageryFixture() {
 function imageryGroups(api) {
   return api.getCompLayers(false).filter((id) => String(api.getNiceName(id)).indexOf("Imagery:") === 0);
 }
+// Footage in any composition: a bent (or flat) build's tiles sit in its source comp, not the map comp.
 function footageCount(api) {
-  return api.getCompLayers(false).filter((id) => /^footageShape#/.test(id)).length;
+  return Object.keys(api._layerComp).filter((id) => /^footageShape#/.test(id)).length;
 }
 function stepToEnd(job, budget, each) {
   const out = [];
@@ -2408,7 +2409,24 @@ function stepToEnd(job, budget, each) {
   do { r = job.step(budget); out.push(r); if (each) each(r); } while (!r.done && out.length < 10000);
   return out;
 }
-function levelGroup(api, groupId, L) { return api.getChildren(groupId).find((id) => api.getNiceName(id) === "z " + L); }
+// The source composition of an imagery group's reference (bent and flat builds), or null (old flat imagery).
+function sourceCompOf(api, groupId) {
+  const ref = api.getChildren(groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  return ref ? api.getCompFromReference(ref) || null : null;
+}
+// A child of an imagery group by its name: directly in the group (old flat imagery), else in its View in
+// the source comp (bent and flat builds keep their level groups and level drivers there).
+function imageryChild(api, groupId, name) {
+  const direct = api.getChildren(groupId).find((id) => api.getNiceName(id) === name);
+  if (direct) return direct;
+  const comp = sourceCompOf(api, groupId);
+  if (!comp) return undefined;
+  return inComp(api, comp, () => {
+    const view = api.getCompLayers(false).find((id) => api.getNiceName(id) === "View");
+    return view ? api.getChildren(view).find((id) => api.getNiceName(id) === name) : undefined;
+  });
+}
+function levelGroup(api, groupId, L) { return imageryChild(api, groupId, "z " + L); }
 
 test("beginImageryBuild adds one tile per zero-budget step and keeps the new group hidden until its drivers are connected", () => {
   const { context, api, map, src, plan } = imageryFixture();
@@ -2571,7 +2589,7 @@ test("an error in a build step tears down the new group and keeps the old imager
 });
 
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
-const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+const PLUGIN_MISSING = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
 const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
 // A globe camera at lon 170 sees across the date line (tiles east of it are shifted by one world).
 function bentFixture(cam) {
@@ -2598,10 +2616,10 @@ function bentParts(api, im) {
   return { ref, filter: filter && filter[0], view, mask, top };
 }
 
-test("Bent imagery: an all-Web-Mercator plan is not bent", () => {
+test("Bent imagery: an all-Web-Mercator plan is bent too, so flat imagery repeats through Reproject", () => {
   const { context, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
   const plan = context.GeoScene.planImagery(map, src, {});
-  assert.equal(plan.bent, undefined);
+  assert.equal(plan.bent, true);
   assert.equal(plan.tiles.length, 48);
 });
 
@@ -2780,7 +2798,7 @@ test("Bent imagery: a second bent build replaces the first, layer by layer, then
 
 test("Bent imagery: flat and bent builds of the same source replace each other", () => {
   const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
-  const flat = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const flat = oldFlatBuild(context, map, src); // imagery from an earlier version: footage tiles, no source comp
   assert.equal(context.GeoScene.findImagery(map)[0].meta.bent, undefined);
   api.set(map.cameraId, { "array.4": 2 });
   const bent = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
@@ -2795,11 +2813,12 @@ test("Bent imagery: flat and bent builds of the same source replace each other",
   found = context.GeoScene.findImagery(map);
   assert.equal(found.length, 1);
   assert.equal(found[0].groupId, flat2.groupId);
+  assert.equal(found[0].meta.bent, true, "a flat build now wraps, so it is bent too");
   assert.equal(api.layerExists(bent.groupId), false);
-  assert.deepEqual(compIds(api), [], "the bent source comp is deleted");
+  assert.deepEqual(compIds(api), [found[0].meta.sourceComp], "the bent source comp is deleted, the flat one is the only one left");
   assert.equal(api._comps[comp], undefined);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 0, "the filter is gone");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 1, "one filter, the flat build's");
 });
 
 test("Bent imagery: cancel during tiles discards the new group and deletes the new source comp", () => {
@@ -2860,6 +2879,135 @@ test("Bent imagery: an abandoned half-built bent group is found and removed by t
   assert.equal(context.GeoScene.findImagery(map).length, 1);
   assert.equal(compIds(api).length, 1);
   assert.equal(imageryGroups(api).length, 1);
+});
+
+// ---- Flat imagery through Reproject (task 6): flat builds are bent; old flat imagery is left alone ----
+const OLD_FLAT_NOTE = "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps.";
+const PLUGIN_NEEDED = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+// The base-branch shape of a flat build: footage-tile layers, with no bent flag and no source comp.
+function oldFlatBuild(context, map, src) {
+  const plan = context.GeoScene.planImagery(map, src, {});
+  delete plan.bent;
+  return context.GeoScene.buildImagery(map, src, {}, plan);
+}
+// Makes the world map (flat, the panel's own camera) and tiles that are all downloaded already.
+function flatWorld(context) {
+  createWorldMap(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  return { map: context.GeoScene.findMaps()[0], src: tileSource(context) };
+}
+
+test("Flat imagery: a flat plan is bent, and a flat build makes the source comp, one reference with the Reproject filter and the view drivers", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.bent, true, "a flat plan is bent");
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  const im = found[0], comp = im.meta.sourceComp;
+  assert.equal(im.meta.bent, true);
+  assert.equal(im.groupId, r.groupId);
+  assert.equal(api.getNiceName(comp), "Imagery source: EOX Sentinel-2 · World");
+  assert.deepEqual(compIds(api), [comp], "one source comp");
+  const p = bentParts(api, im);
+  assert.ok(p.ref, "one composition reference");
+  assert.equal(api.getCompFromReference(p.ref), comp);
+  assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.equal(api._connections.filter((c) => c[2] === p.ref && /^filters\.\d+$/.test(c[3])).length, 1, "one filter on the reference");
+  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"] };
+  VIEW_WHICH.forEach((which) => {
+    const from = inConn(api, targets[which][0], targets[which][1]);
+    assert.ok(from, which + " is driven");
+    assert.equal(api.getParent(from.split(".")[0]), r.groupId, which);
+  });
+});
+
+test("Flat imagery: a camera at lon 179 plans canonical tiles on both sides of the date line, each downloaded once and placed per shift", () => {
+  const { context, api, map, src } = bentFixture({ lon: 179, zoom: 4, projection: 0 });
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const shifts = new Set(plan.items.map((r) => r.shift || 0));
+  assert.ok(shifts.has(0) && shifts.has(1), "tiles on both sides of the date line: shifts " + Array.from(shifts));
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  const canonical = new Set(plan.items.map((x) => context.GeoBlocks.rectKey(x)));
+  assert.equal(r.tiles, plan.items.length, "every placed tile is built");
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, canonical.size, "each canonical tile is loaded once");
+});
+
+test("Flat imagery: a wide flat view at lon 179 places some canonical tiles at two shifts, and still downloads each once", () => {
+  const { context, map, src } = bentFixture({ lon: 179, zoom: 1, projection: 0 });
+  context.GeoNet.cachedTile = () => null;
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const keys = plan.items.map((x) => context.GeoBlocks.rectKey(x));
+  assert.ok(keys.length > new Set(keys).size, "some canonical tile is placed at two shifts");
+  assert.equal(plan.missing.length, new Set(keys).size, "downloaded once");
+  assert.equal(new Set(plan.missing.map((x) => context.GeoBlocks.rectKey(x))).size, plan.missing.length);
+});
+
+test("Flat imagery: without the Cavalry Geo Reproject type a flat build throws the plugin message and makes nothing", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
+  assert.throws(() => context.GeoScene.planImagery(map, src, {}), (e) => e.message === PLUGIN_NEEDED);
+  assert.deepEqual(compIds(api), []);
+  assert.equal(context.GeoScene.findImagery(map).length, 0);
+});
+
+test("Flat imagery: night lights plan flat (no bent flag) and need no plugin, so their pre-comped setup is unchanged", () => {
+  const { context, api, map } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
+  const plan = context.GeoScene.planImagery(map, context.GeoSources.night(), {}, true);
+  assert.equal(plan.bent, undefined, "night lights stay flat on a flat map");
+  assert.equal(context.GeoScene.planNightLights(map).bent, undefined);
+});
+
+test("Flat imagery: old flat imagery is left alone by Refresh controls, which reports the note and ends its status with it", () => {
+  const { context, api } = buildSandbox();
+  const { map, src } = flatWorld(context);
+  const old = oldFlatBuild(context, map, src);
+  const kids = api.getChildren(old.groupId).length;
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.imageryNote, OLD_FLAT_NOTE);
+  assert.equal(r.dayNightNote, null);
+  assert.ok(api.layerExists(old.groupId), "the old imagery is still there");
+  assert.equal(api.getChildren(old.groupId).length, kids, "its tiles are untouched");
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, old.groupId);
+  assert.equal(found[0].meta.bent, undefined);
+  assert.deepEqual(compIds(api), [], "no source comp is made for it");
+  context.refreshControlsBtn.onClick();
+  assert.match(context.statusLabel.getText(), new RegExp(OLD_FLAT_NOTE.replace(/[.]/g, "\\.") + "$"));
+});
+
+test("Flat imagery: a rebuild over old flat imagery replaces it with the wrapping build, and the note goes", () => {
+  const { context, api } = buildSandbox();
+  const { map, src } = flatWorld(context);
+  const old = oldFlatBuild(context, map, src);
+  assert.equal(context.GeoControlPanel.sync(map).imageryNote, OLD_FLAT_NOTE);
+  const next = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, next.groupId);
+  assert.equal(found[0].meta.bent, true);
+  assert.equal(api.layerExists(old.groupId), false, "the old flat group is deleted");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 1);
+  assert.equal(context.GeoControlPanel.sync(map).imageryNote, null);
+});
+
+test("Flat imagery: a Controls sync makes at most 9 comp scans with a flat build, and with old flat imagery", () => {
+  ["new", "old"].forEach((kind) => {
+    const { context, api } = buildSandbox();
+    const { map, src } = flatWorld(context);
+    if (kind === "old") oldFlatBuild(context, map, src);
+    else context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+    context.GeoControlPanel.sync(map); // settle
+    let scans = 0;
+    const realScan = api.getCompLayers;
+    api.getCompLayers = function () { scans++; return realScan.apply(this, arguments); };
+    context.GeoControlPanel.sync(map);
+    api.getCompLayers = realScan;
+    assert.ok(scans <= 9, kind + " flat imagery: comp scans " + scans + " (budget 9)");
+  });
 });
 
 // F10: a tile marked empty (404/204 on a previous download) must not show up as
@@ -3578,14 +3726,16 @@ test("Imagery tab: downloads tick every 60 ms, then the same timer builds in 20 
   useCustomTiles(context);
   context.buildImageryBtn.onClick();
   const total = context.imageryState.plan.items.length;
+  // One download tick per tile to fetch: a bent plan (flat imagery too) downloads each canonical tile once, though it places it at two shifts.
+  const downloads = context.imageryState.plan.missing.length;
   context.buildImageryBtn.onClick();
   const timer = api._timers[0];
   assert.equal(timer.interval, 60, "a gap between blocking downloads keeps the UI responsive");
-  for (let i = 0; i < total; i++) timer.callbacks.onTimeout();
+  for (let i = 0; i < downloads; i++) timer.callbacks.onTimeout();
   assert.equal(timer.active, true, "the same timer keeps running to build");
   assert.equal(timer.interval, 20);
+  timer.callbacks.onTimeout(); // the first build step sets the progress bar to the build's total
   assert.equal(context.imageryProgress._max, total);
-  timer.callbacks.onTimeout();
   assert.equal(context.statusLabel.getText(), "Building imagery: 1 / " + total + " tiles…");
   assert.equal(context.imageryProgress._value, 1);
   context.buildImageryBtn.onClick();
@@ -13093,11 +13243,12 @@ test("night lights: a flat night build's source comp is deleted when the night l
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
-  assert.equal(compIds(api).length, 1);
+  assert.deepEqual(compIds(api).sort(), [dayComp, G.findNightLights(map)[0].meta.sourceComp].sort());
   api.deleteLayer(d.groupId);
   assert.equal(G.prepareNightLights(map).removed, 1);
-  assert.deepEqual(compIds(api), [], "the night source comp is gone");
+  assert.deepEqual(compIds(api), [dayComp], "the night source comp is gone; the day one is not the night lights'");
   assert.equal(api.getActiveComp(), "comp#1");
 });
 
@@ -13124,12 +13275,13 @@ test("night lights: a rebuild replaces the Night lights group, and a day rebuild
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const first = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   const firstComp = G.findNightLights(map)[0].meta.sourceComp;
   const again = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.equal(api.layerExists(first.groupId), false, "old Night lights removed");
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "one Night lights group");
-  assert.deepEqual(compIds(api), [G.findNightLights(map)[0].meta.sourceComp], "the old night source comp is deleted");
+  assert.deepEqual(compIds(api).sort(), [dayComp, G.findNightLights(map)[0].meta.sourceComp].sort(), "the old night source comp is deleted");
   assert.notEqual(G.findNightLights(map)[0].meta.sourceComp, firstComp);
   const dayAgain = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "night lights kept by a day rebuild");
@@ -13154,13 +13306,14 @@ test("night lights: cancelling a flat night build discards its group and its sou
   const { context, api, map, dn, rec } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
   job.step(0); job.step(0);
-  assert.equal(compIds(api).length, 1, "the source comp exists mid-build");
+  assert.equal(compIds(api).length, 2, "the night source comp exists mid-build, beside the day one");
   assert.equal(job.cancel(), true);
   const steps = stepToEnd(job, 0, () => assert.equal(api.getActiveComp(), "comp#1"));
   assert.equal(steps[steps.length - 1].cancelled, true);
-  assert.deepEqual(compIds(api), [], "the source comp is deleted");
+  assert.deepEqual(compIds(api), [dayComp], "the night source comp is deleted");
   assert.equal(G.findNightLights(map).length, 0);
   assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
   rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown after cancel"));
@@ -13170,12 +13323,13 @@ test("night lights: a throw after the flat source comp exists deletes it and the
   const { context, api, map, dn } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const before = api.getCompLayers(false).slice().sort();
   api.createCompReference = function () { throw new Error("no reference"); };
   const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.throws(() => job.step(0), /no reference/);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.deepEqual(compIds(api), [], "the new source comp is deleted");
+  assert.deepEqual(compIds(api), [dayComp], "the new source comp is deleted");
   assert.deepEqual(api.getCompLayers(false).slice().sort(), before, "nothing left in the map comp");
   assert.equal(G.findNightLights(map).length, 0);
   assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
@@ -13185,6 +13339,7 @@ test("night lights: a throw in the middle of a flat night build deletes the grou
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   let calls = 0;
   const realAdd = api.addAssetToComp.bind(api);
   api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
@@ -13192,7 +13347,7 @@ test("night lights: a throw in the middle of a flat night build deletes the grou
   job.step(0); job.step(0);
   assert.throws(() => job.step(0), /boom/);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.deepEqual(compIds(api), []);
+  assert.deepEqual(compIds(api), [dayComp], "only the day source comp is left");
   assert.equal(G.findNightLights(map).length, 0);
 });
 

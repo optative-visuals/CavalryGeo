@@ -513,6 +513,8 @@ var GeoControlPanel = (function () {
     // An older overlay is upgraded when the plugin is installed; without it, it is left as it is and the note says so.
     var dayNightNote = null;
     attempt(function () { keepSelection(function () { var dn = GeoScene.prepareDayNight(map); dayNightNote = dn && dn.note ? dn.note : null; }); });
+    // Old flat imagery (footage tiles, stopping at the date line) is left as it is; the note says to rebuild it.
+    var imageryNote = GeoScene.imageryNote(found.imagery);
     // Night lights no longer wanted are removed (found.night is read again then); whether a night build is due is reported.
     var nightLightsNeeded = false;
     attempt(function () {
@@ -600,7 +602,7 @@ var GeoControlPanel = (function () {
     });
     var total = 0;
     GROUP_ORDER.forEach(function (g) { total += wanted[g].length; });
-    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded, dayNightNote: dayNightNote };
+    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded, dayNightNote: dayNightNote, imageryNote: imageryNote };
   }
 
   return { sync: sync };

@@ -895,13 +895,16 @@ var GeoScene = (function () {
     return plan.mode === "images" ? GeoSources.imageUrl(src, r) : GeoSources.tileUrl(src, opts, r.z, r.x0, r.y0);
   }
 
-  function planImagery(map, src, opts) {
+  // night: the plan is for night lights. Day imagery is always bent, flat maps included, so it repeats past
+  // the date line through Reproject. Night lights stay flat on a flat map (pre-comped, see "Night lights").
+  function planImagery(map, src, opts, night) {
     GeoSources.tileUrl(src, opts, 0, 0, 0); // validates key, style or link before any work
     // Large images need background downloads: one at a time, an EOX image would freeze
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
     var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
-    // Any Equal Earth or globe frame makes the whole build bent (see "Bent imagery" below).
-    var bent = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
+    // Day imagery is bent on any map (see "Bent imagery" below); a night plan is bent only when a globe or Equal Earth frame is in view.
+    var projected = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
+    var bent = !night || projected;
     if (bent && !reprojectAvailable()) throw new Error(REPROJECT_MISSING);
     // Each sample's region is worked out once, however many times the level drops.
     var regions = [];
@@ -1079,6 +1082,12 @@ var GeoScene = (function () {
     return fileInAssetGroup(loose, imageryAssetGroup(map));
   }
 
+  // The Refresh controls note for day imagery (findImagery entries): old flat imagery is footage tiles with
+  // no bent flag and no source comp, which stop at the date line until they are rebuilt. Null when there is none.
+  function imageryNote(imagery) {
+    return (imagery || []).some(function (im) { return !im.meta.bent && !im.meta.sourceComp; }) ? OLD_FLAT_NOTE : null;
+  }
+
   // camCount: how many camera inputs to connect (default all five); the rest keep their
   // default values (bent level drivers: lat, lon and zoom only, rotation and projection held 0).
   function imageryDriver(map, parentId, name, expr, targetId, targetAttr, camCount) {
@@ -1124,7 +1133,8 @@ var GeoScene = (function () {
     return tiles.concat(levelGroups, [groupId]);
   }
 
-  // ---- Bent imagery (globe / Equal Earth) -------------------------------------------
+  // ---- Bent imagery (globe / Equal Earth, and flat day imagery) ---------------------
+  // Flat day imagery is bent too: Reproject's flat branch wraps longitude, so the source repeats past the date line.
   // The tiles go into a separate composition, "Imagery source: <label> · <map>", laid out as a
   // north-up Web Mercator map centred on the camera: a group "View" (masked by the rectangle
   // "View mask") holds today's level groups, with level drivers that read only the camera's
@@ -1135,7 +1145,9 @@ var GeoScene = (function () {
   // layers and footage land in the active comp, so source-comp work runs inside withComp, which
   // always puts the map comp back.
   var REPROJECT_TYPE = "cavalryGeo::reproject";
-  var REPROJECT_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+  var REPROJECT_MISSING = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+  // Imagery made before flat builds went through Reproject: footage tiles that stop at the date line.
+  var OLD_FLAT_NOTE = "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps.";
   var REFERENCE_NAME = "Imagery source", VIEW_NAME = "View", VIEW_MASK_NAME = "View mask";
   var FILTER_CAMERA_ATTRS = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
   var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"]];
@@ -1545,7 +1557,7 @@ var GeoScene = (function () {
   // layer's maximum zoom (8); zoomCapped says the camera went past it.
   function planNightLights(map) {
     var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
-    var plan = planImagery(map, GeoSources.night(), {});
+    var plan = planImagery(map, GeoSources.night(), {}, true);
     plan.night = true;
     if (zoomed) plan.zoomCapped = true;
     return plan;
@@ -3375,7 +3387,7 @@ var GeoScene = (function () {
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
-    addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, findDayNight: findDayNight, dayNightParts: dayNightParts,
+    addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, imageryNote: imageryNote, findDayNight: findDayNight, dayNightParts: dayNightParts,
     nightMattes: nightMattes, dayNightComplete: dayNightComplete, NIGHT_TYPE: NIGHT_TYPE, DAYNIGHT_MISSING: DAYNIGHT_MISSING, layerTypeAvailable: layerTypeAvailable, nightAvailable: nightAvailable,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer

@@ -1028,7 +1028,7 @@ refreshControlsBtn.onClick = guardAction(function () {
   var names = [map.name + " Map controls"];
   [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"], ["time", "Time"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
   var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + "." + (r.dayNightNote ? " " + r.dayNightNote : "");
+  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + "." + (r.dayNightNote ? " " + r.dayNightNote : "") + (r.imageryNote ? " " + r.imageryNote : "");
   say(msg);
   if (r.nightLightsNeeded) startNightLights(map, msg);
 });
