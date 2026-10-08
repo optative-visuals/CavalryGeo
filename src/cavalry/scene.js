@@ -435,9 +435,9 @@ var GeoScene = (function () {
     api.connect(bPosition, CA + ".6", handle, at("bLat"), true);
   }
 
-  // A route made before great circles has handle helpers with only the first 14 inputs. Adds the
-  // rest (shape Arc, so the look is unchanged), connects them and writes the current expression.
-  // A helper that already has all its inputs is left alone, so a second refresh changes nothing.
+  // A route made before some handle inputs were added has handle helpers that lack the newer ones. A helper without
+  // the last input gets each missing one added (shape Arc, so the look is unchanged), connected, and the current
+  // expression written. A helper that already has the last input is left alone, so a second refresh changes nothing.
   function upgradeHandles(map, g) {
     var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
     if (!rec || !rec.legs || !rec.stops) return;
@@ -1632,7 +1632,7 @@ var GeoScene = (function () {
   function extendComp(newEnd) {
     var comp = api.getActiveComp(), oldEnd = compFrameRange().end;
     if (!(newEnd > oldEnd)) return null;
-    // Bent imagery and flat night lights live in their own source composition(s), which must be as long.
+    // Imagery and night lights (and older pre-comped night lights) live in their own source composition(s), which must be as long.
     var sources = [];
     api.getCompLayers(false).forEach(function (id) {
       try {
@@ -3253,7 +3253,7 @@ var GeoScene = (function () {
   // so a pin or label the user moved into it still sits on the copy nearest the camera.
   function isRouteGroup(g) {
     if (!g) return false;
-    if (api.hasUserDataKey(g, ROUTE_KEY) || api.hasUserDataKey(g, ROUTE_NUMBER_KEY) || api.hasUserDataKey(g, ROUTE_TRAVEL_KEY)) return true;
+    if (typeof api.hasUserDataKey === "function" && (api.hasUserDataKey(g, ROUTE_KEY) || api.hasUserDataKey(g, ROUTE_NUMBER_KEY) || api.hasUserDataKey(g, ROUTE_TRAVEL_KEY))) return true;
     return ROUTE_PREFIX.test(String(api.getNiceName(g)));
   }
   // The data layers that repeat on a flat map: each display's inputs and its expression builder (null for the rest).

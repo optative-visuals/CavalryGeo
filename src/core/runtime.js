@@ -4,6 +4,8 @@ if (typeof GeoProjection === "undefined" && typeof require !== "undefined") { va
 if (typeof GeoRoutes === "undefined" && typeof require !== "undefined") { var GeoRoutes = require("./routes.js"); }
 var GeoRuntime = (function () {
   var Q = 1e6; // must match GeoCodec.Q
+  // A reference ring spanning this many degrees of longitude (or more) is a pole ring: it has no single copy to join to.
+  var POLE_RING_SPAN = 300;
 
   function buildPath(enc, cam, detail, opts, PathCtor) {
     var path = new PathCtor();
@@ -117,7 +119,7 @@ var GeoRuntime = (function () {
     }
     // A reference spanning about a whole turn (a pole ring) has no single copy to join to: other rings keep
     // the copy nearest 0, within [-180, 180], instead.
-    var refMid = (ref.lo + ref.hi) / 2, target = ref.hi - ref.lo >= 300 ? 0 : refMid;
+    var refMid = (ref.lo + ref.hi) / 2, target = ref.hi - ref.lo >= POLE_RING_SPAN ? 0 : refMid;
     var rings = [];
     for (var s = 0; s < decoded.length; s++) {
       var ring = decoded[s], turn = 0;

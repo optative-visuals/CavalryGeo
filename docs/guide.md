@@ -322,7 +322,7 @@ can't be baked: Bake skips them.
   earlier version get the Shape setting when you press **Refresh controls**. Very long legs (a
   third of the world or more) are a close fit rather than exact and can sit noticeably off the
   true path, from tens up to a couple of hundred pixels on a world-sized view. Legs that cross the
-  date line take the short way across it, and on the flat map and Equal Earth draw as a plain arc.
+  date line take the short way across it. On the flat map they keep their great circle; only Equal Earth draws a plain arc.
 - The curve is shaped from the map's Controls: **Route n · Arc height** changes every leg at
   once. **Lean**, **Flip side** and shaping a leg by hand (its handle X / Y) are no longer in the
   Controls: their values live on the route's handle helpers (inside its "Route helpers" group),
