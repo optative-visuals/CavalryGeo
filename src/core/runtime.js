@@ -60,7 +60,8 @@ var GeoRuntime = (function () {
 
   // Whole shapes (highlights, flat maps): every point of the layer moves by the same whole turn, chosen so the
   // middle of the layer's longitude extent is on the copy nearest the camera. Rings are unwrapped first (see
-  // wholeRings), so a shape that crosses the date line keeps its pieces together.
+  // wholeRings), so a shape that crosses the date line keeps its pieces together. A multi-feature highlight shares
+  // one shift, so features spread over more than 180 degrees cannot all sit on their nearest copy.
   function drawWhole(path, enc, count, cam, project, radius, scale) {
     var rows = [], lo = Infinity, hi = -Infinity, i, j;
     for (i = 0; i < count; i++) {
@@ -93,7 +94,7 @@ var GeoRuntime = (function () {
   // the feature's first ring. Natural Earth splits shapes at the date line (Russia's Chukotka and Fiji's far
   // islands sit at -180 in their own rings).
   function wholeRings(row) {
-    var rings = [], ref = null;
+    var decoded = [];
     for (var k = 1; k < row.length; k++) {
       var ints = row[k], x = 0, y = 0, lons = [], lats = [];
       for (var j = 0; j < ints.length; j += 2) { x += ints[j]; y += ints[j + 1]; lons.push(x / Q); lats.push(y / Q); }
@@ -103,15 +104,27 @@ var GeoRuntime = (function () {
       for (j = 1; j < lons.length; j++) if (Math.abs(lons[j] - lons[j - 1]) > 180) break;
       if (j < lons.length) { lons = lons.slice(j).concat(lons.slice(0, j)); lats = lats.slice(j).concat(lats.slice(0, j)); }
       lons = GeoRoutes.unwrapLons(lons);
-      var mid = (Math.min.apply(null, lons) + Math.max.apply(null, lons)) / 2;
-      if (ref === null) ref = mid;
-      else {
-        var turn = GeoProjection.nearestLon(mid, ref) - mid;
-        for (j = 0; j < lons.length; j++) lons[j] += turn;
-      }
-      var ring = [];
-      for (j = 0; j < lons.length; j++) ring.push([lons[j], lats[j]]);
-      rings.push(ring);
+      var lo = lons[0], hi = lons[0];
+      for (j = 1; j < lons.length; j++) { if (lons[j] < lo) lo = lons[j]; if (lons[j] > hi) hi = lons[j]; }
+      decoded.push({ lons: lons, lats: lats, lo: lo, hi: hi });
+    }
+    if (!decoded.length) return [];
+    // The join reference is the widest ring (ties: most points), so a small island never sets the frame.
+    var ref = decoded[0];
+    for (var r = 1; r < decoded.length; r++) {
+      var d = decoded[r].hi - decoded[r].lo, e = ref.hi - ref.lo;
+      if (d > e || (d === e && decoded[r].lons.length > ref.lons.length)) ref = decoded[r];
+    }
+    // A reference spanning about a whole turn (a pole ring) has no single copy to join to: other rings keep
+    // the copy nearest 0, within [-180, 180], instead.
+    var refMid = (ref.lo + ref.hi) / 2, target = ref.hi - ref.lo >= 300 ? 0 : refMid;
+    var rings = [];
+    for (var s = 0; s < decoded.length; s++) {
+      var ring = decoded[s], turn = 0;
+      if (ring !== ref) turn = GeoProjection.nearestLon((ring.lo + ring.hi) / 2, target) - (ring.lo + ring.hi) / 2;
+      var out = [];
+      for (var m = 0; m < ring.lons.length; m++) out.push([ring.lons[m] + turn, ring.lats[m]]);
+      rings.push(out);
     }
     return rings;
   }

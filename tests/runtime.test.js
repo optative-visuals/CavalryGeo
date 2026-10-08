@@ -347,6 +347,19 @@ test("highlight, flat: a ring whose raw jump crosses 180 keeps the jump as its o
   nearTo(Math.abs(pts[pts.length - 1][1] - pts[0][1]), 340 / 360 * worldW(0));
 });
 
+test("highlight, flat: a small first ring, a pole ring spanning 360 degrees, then an island at 165E: the island keeps its place", () => {
+  const small = [[-60, -60], [-59, -60], [-59, -61], [-60, -61], [-60, -60]];
+  const pole = [[-180, -80], [-90, -70], [0, -80], [90, -70], [180, -80], [180, -90], [-180, -90], [-180, -80]];
+  const island = [[165, -45], [166, -45], [166, -46], [165, -46], [165, -45]];
+  [0, 170].forEach((lon) => {
+    const c = cam({ lon, zoom: 1 });
+    const pts = movesOf(R.buildPath(hlEnc([small, pole, island]), c, 100, WHOLE, FakePath).ops);
+    assert.equal(pts.length, 3);
+    // The layer is centred on 0 (the pole ring spans -180..180), so the shift is 0 at both cameras: the island stays at 165.
+    nearTo(pts[2][1], R.projectPoint(165, -45, c)[0]);
+  });
+});
+
 test("highlight: whole changes nothing on globe or Equal Earth", () => {
   [2, 1].forEach((projection) => {
     const c = cam({ lon: 175, zoom: 4, projection });
