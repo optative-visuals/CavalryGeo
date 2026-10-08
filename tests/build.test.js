@@ -11415,6 +11415,20 @@ test("GeoStyle.tip sets the tooltip on a widget and on a toggle's widget, and is
   assert.equal(l._toolTip, undefined);
 });
 
+test("GeoStyle.tip wraps long tooltips after every 7th word and leaves short ones on one line", () => {
+  const { context, ui } = buildSandbox();
+  const S = context.GeoStyle;
+  const b = new ui.Button("Go");
+  S.tip(b, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen");
+  assert.equal(b._toolTip, "one two three four five six seven\neight nine ten eleven twelve thirteen fourteen\nfifteen");
+  S.tip(b, "one two three four five six seven eight nine");
+  assert.equal(b._toolTip, "one two three four five six seven eight nine", "under 10 words: one line");
+  S.tip(b, "one two three four five six seven eight nine ten");
+  assert.equal(b._toolTip, "one two three four five six seven\neight nine ten");
+  const T = context.GeoTips;
+  T.keys().forEach((k) => assert.ok(T.text(k).indexOf("\n") < 0, k + " is a single-line source string"));
+});
+
 test("GeoTips.text returns plain strings, throws for unknown keys, and no text contains <", () => {
   const { context } = buildSandbox();
   const T = context.GeoTips;
@@ -11481,7 +11495,8 @@ test("hover help: every control on every page has a plain tooltip, and every Geo
   const texts = keys.map((k) => context.GeoTips.text(k));
   assert.equal(new Set(texts).size, texts.length, "no two keys share a text");
   keys.forEach((k, i) => {
-    const users = controls.filter((w) => w._toolTip === texts[i]);
+    const wrapped = texts[i].split(" ").length < 10 ? texts[i] : texts[i].split(" ").reduce((acc, word, n) => acc + (n === 0 ? "" : n % 7 === 0 ? "\n" : " ") + word, "");
+    const users = controls.filter((w) => w._toolTip === wrapped);
     assert.equal(users.length, 1, k + " is used by " + users.length + " control(s)");
   });
 });
