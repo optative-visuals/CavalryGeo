@@ -11398,3 +11398,58 @@ test("settings: the panel reads the old settings.json on first open, copies it t
   context.GeoNet.updateSettings({ mapStyle: "Dark" });
   assert.equal(logged.filter((l) => l.indexOf("SECRET-KEY-123") >= 0).length, 0);
 });
+
+// ---- guard(): selection and redraw after a panel action ---------------------------------
+function nestedLayer(api) {
+  const group = api.create("group", "G"), child = api.create("group", "Child");
+  api.parent(child, group);
+  return { group, child };
+}
+
+test("guard: an action that leaves a nested layer selected gets the old selection back", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  context.guard(() => { api.select([child]); })();
+  assert.deepEqual(api.getSelection(), [group]);
+});
+
+test("guard: a top-level selection made on purpose stays", () => {
+  const { context, api } = buildSandbox();
+  const { group } = nestedLayer(api);
+  const other = api.create("group", "Top");
+  api.select([group]);
+  context.guard(() => { api.select([other]); })();
+  assert.deepEqual(api.getSelection(), [other]);
+});
+
+test("guard: a selection that did not change is left alone, and an error still reaches the status line", () => {
+  const { context, api } = buildSandbox();
+  const { child } = nestedLayer(api);
+  api.select([child]); // the user's own nested selection
+  let selects = 0;
+  const real = api.select.bind(api);
+  api.select = (ids) => { selects++; return real(ids); };
+  context.guard(() => { throw new Error("boom"); })();
+  assert.equal(selects, 0);
+  assert.deepEqual(api.getSelection(), [child]);
+  assert.match(context.statusLabel.getText(), /^Error: boom$/);
+});
+
+test("guard: an error that left a nested layer selected still restores the selection", () => {
+  const { context, api } = buildSandbox();
+  const { group, child } = nestedLayer(api);
+  api.select([group]);
+  context.guard(() => { api.select([child]); throw new Error("late"); })();
+  assert.deepEqual(api.getSelection(), [group]);
+  assert.match(context.statusLabel.getText(), /late/);
+});
+
+test("guard: an older Cavalry without getParent or select never breaks the action", () => {
+  const { context, api } = buildSandbox();
+  delete api.getParent; delete api.select; delete api.setFrame;
+  let ran = 0;
+  context.guard(() => { ran++; })();
+  assert.equal(ran, 1);
+  assert.equal(context.statusLabel.getText(), "Ready.");
+});

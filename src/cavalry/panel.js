@@ -11,9 +11,34 @@ function sayNow(msg) {
   say(msg);
   if (typeof api.processEvents === "function") api.processEvents();
 }
+// Wraps a panel action. Afterwards (also after an error): Cavalry expands Scene Window groups to
+// reveal selected nested layers and no API collapses them, so a selection that now holds a nested
+// layer is put back to what it was (a top-level selection made on purpose stays).
+function currentSelection() {
+  try { return typeof api.getSelection === "function" ? (api.getSelection() || []).slice() : null; } catch (e) { return null; }
+}
+function sameIds(a, b) {
+  if (a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+function keepGroupsCollapsed(before) {
+  if (before === null || typeof api.getParent !== "function" || typeof api.select !== "function") return;
+  try {
+    var after = currentSelection();
+    if (after === null || sameIds(before, after)) return;
+    var nested = false;
+    for (var i = 0; i < after.length; i++) {
+      try { if (String(api.getParent(after[i])) !== "") { nested = true; break; } } catch (e) { /* not a layer with a parent */ }
+    }
+    if (nested) api.select(before);
+  } catch (e) { /* cosmetic */ }
+}
 function guard(fn) {
   return function () {
+    var before = currentSelection();
     try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); }
+    keepGroupsCollapsed(before);
   };
 }
 // Brings the map's Controls component up to date after an action changed the map. Never
