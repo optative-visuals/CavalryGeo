@@ -703,9 +703,10 @@ var GeoScene = (function () {
         // keep their screen places.
         // The dropped longitude may come back wrapped (a globe pin), so the chain takes the copy nearest its old value:
         // the same screen point, and the same copy the stop was on.
-        var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref, oldChain = v(7);
-        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7") && isFinite(shift)) {
-          o[A.CAMERA_ARRAY_ATTR + ".7"] = isFinite(oldChain) ? GeoProjection.nearestLon(ll.lon - shift, oldChain) : ll.lon - shift;
+        // Only a stop with the chain input (7) reads the shift and the old chain: a stop with fewer inputs never reads them.
+        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7")) {
+          var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref, oldChain = v(7);
+          if (isFinite(shift)) o[A.CAMERA_ARRAY_ATTR + ".7"] = isFinite(oldChain) ? GeoProjection.nearestLon(ll.lon - shift, oldChain) : ll.lon - shift;
         }
         api.set(s.position, o);
         api.set(s.circle, { position: [0, 0] });
@@ -837,9 +838,11 @@ var GeoScene = (function () {
     var lift = meta.category === "route" ? v(7) : undefined;
     // A repeating layer (its expression names a comp frame) bakes every copy of the world the frame shows,
     // with the comp size read from its own compW / compH inputs. Old layers, pins, labels and routes have none.
-    var fi = GeoExpression.frameInputs(readExpr(layerId, A.MAP_EXPR_ATTR)), frame = null;
+    // Its call holds the frame and the nearest option: a pin or label bakes on the copy nearest the camera, as it draws live.
+    var call = callOf(readExpr(layerId, A.MAP_EXPR_ATTR)), fi = GeoExpression.frameInputs(call), frame = null;
     if (fi) frame = { w: v(fi.w), h: v(fi.h) };
-    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift, frame: frame }, cavalry.Path);
+    var nearest = call.indexOf(", nearest: true") >= 0;
+    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift, frame: frame, nearest: nearest }, cavalry.Path);
     var id = api.createEditable(path, api.getNiceName(layerId) + " (baked)");
     var parent = api.getParent(layerId);
     if (parent) api.parent(id, parent);

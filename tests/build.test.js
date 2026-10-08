@@ -7410,6 +7410,27 @@ test("routes: Pin here treats a stop whose camera inputs aren't numbers as off t
   assert.deepEqual(plain(api.get(s.circle, "position")), { x: 10, y: 10, z: 0 }, "and its drag");
 });
 
+test("routes: Pin here on a stop with only seven inputs never reads the shift inputs (8 and the old chain)", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[0];
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.set(s.position, { "array.0": 0, "array.1": 10, "array.2": 4, "array.3": 0, "array.4": 0 });
+  api.set(s.position, { "array.7": undefined, "array.8": undefined }); // a seven-input stop: no chain or ref inputs
+  const realGet = api.get;
+  api.get = function (id, attr) {
+    if (id === s.position && /^array\.[78]$/.test(attr)) throw new Error("no attribute " + attr);
+    return realGet.apply(this, arguments);
+  };
+  let res;
+  try { res = plain(context.GeoScene.pinStops(map, [s.circle])); } finally { api.get = realGet; }
+  assert.deepEqual(res, { pinned: 1, offGlobe: [] });
+  assert.ok(Number.isFinite(api.get(s.position, "array.5")) && Number.isFinite(api.get(s.position, "array.6")), "the stop is placed");
+  assert.equal(api.hasAttribute(s.position, "array.7"), false, "and gets no chain input");
+});
+
 test("controls: a new route gets its four rows beside the stop rows; Arc height drives every handle", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
@@ -14160,6 +14181,27 @@ test("Bake: a repeating flat layer bakes every copy the comp frame shows; pins a
     context.GeoRuntime.buildPath = realBuild;
     api.createEditable = realEditable;
   }
+});
+
+// Bake matches the live draw for a pin: on the copy nearest the camera, not a world away (camera at -178, pin at 178).
+test("Date line: bake puts a pin on the copy nearest the camera, as it draws live", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("Wide", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const pin = G.addPin(map, "Here", 178, 0, null, true);
+  const shot = { lat: 0, lon: -178, zoom: 4, rotation: 0, projection: 0 };
+  api.set(pin, { "generator.array.0": shot.lat, "generator.array.1": shot.lon, "generator.array.2": shot.zoom, "generator.array.3": 0, "generator.array.4": 0, "generator.array.5": 100, "generator.array.6": 8 });
+  const realEditable = api.createEditable;
+  let baked = null;
+  api.createEditable = function (path) { baked = path; return realEditable.apply(this, arguments); };
+  try { G.bake(pin); } finally { api.createEditable = realEditable; }
+  const dots = baked._cmds.filter((c) => c[0] === "addEllipse");
+  assert.equal(dots.length, 1);
+  const enc = context.GeoCodec.encodeLayer({ kind: "point", features: [{ name: "Here", rank: 1, rings: [[[178, 0]]] }] });
+  const live = context.GeoRuntime.buildPath(enc, shot, 100, { pointRadius: 8, ellipseScale: 1, nearest: true }, baked.constructor);
+  const want = live._cmds.filter((c) => c[0] === "addEllipse")[0];
+  assert.ok(Math.abs(dots[0][1] - want[1]) < 1e-6 && Math.abs(dots[0][2] - want[2]) < 1e-6, `baked ${dots[0][1]} vs live ${want[1]}`);
+  assert.ok(Math.abs(dots[0][1]) < 100, "the copy near the camera, not one world (about 4000 px) away");
 });
 
 // Date line, task 8: Refresh controls brings a map made before the date line up to date.
