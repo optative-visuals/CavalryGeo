@@ -2903,8 +2903,18 @@ var GeoScene = (function () {
       });
       refs.forEach(function (r) { if (layerThere(r)) api.connect(rect, "id", r, "trackMattes"); });
       setHidden(rect, false);
+      // A key on an old layer's own input goes with the layer, so it is not a kept setting; only a Controls value's key is
+      // (drivenBy names the Controls value that drives the input, if any).
       if (given.dayOfYear != null || given.utcTime != null) {
-        f.layers.forEach(function (id) { if (id && layerThere(id)) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
+        f.layers.forEach(function (id) {
+          if (!id || !layerThere(id)) return;
+          var own = {};
+          setDayNightTime(map, id, E.NIGHT_INPUTS, given, own);
+          ["dayOfYear", "utcTime"].forEach(function (name) {
+            var attr = A.MAP_ARRAY_ATTR + "." + E.inputIndex(E.NIGHT_INPUTS, name);
+            if (own[name] && drivenBy(map, { layer: id, attr: attr }).src) kept[name] = true;
+          });
+        });
       }
       var old = userData(g, DAYNIGHT_KEY) || {}, fixed = {};
       Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });

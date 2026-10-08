@@ -10911,6 +10911,41 @@ test("day & night: Add on an older overlay leaves omitted values alone and skips
   assert.match(context.statusLabel.getText(), /^Day & night updated to 1 Jan 06:00 UTC\. It kept your animated UTC time\./);
 });
 
+test("day & night: Add on an older overlay whose own Day of year input is keyed says nothing was kept, and the filter takes the typed day (version 1 to 2)", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene, E = context.GeoExpression;
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const dayAttr = "generator.array." + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear");
+  const first = dnRec(api, g).layers[0];
+  api.keyframe(first, 0, { [dayAttr]: 30 });
+  api.keyframe(first, 10, { [dayAttr]: 200 });
+  context.dayNightDayField.setValue(1); context.dayNightMonthPicker.setValue(0); context.dayNightTimeField.setValue(6);
+  context.addDayNightBtn.onClick();
+  const rec = dnRec(api, g);
+  assert.equal(rec.version, 2);
+  assert.equal(api.get(rec.filter, "dayOfYear"), 1, "the filter has the typed day");
+  assert.doesNotMatch(context.statusLabel.getText(), /It kept your animated/, "the old layer's own key went with the layer");
+});
+
+test("day & night: Add on an older overlay whose Day of year is a keyed Controls value says it kept it (version 1 to 2)", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  // The rows are wired to the old layers while the plugin's type is off, so this sync does not upgrade yet.
+  const at = api._layerTypes.findIndex((t) => t.type === "cavalryGeo::night"), type = api._layerTypes.splice(at, 1)[0];
+  let s;
+  try { s = context.GeoControlPanel.sync(map); } finally { api._layerTypes.splice(at, 0, type); }
+  const V = s.valuesId, slots = slotsOf(api, V);
+  api.keyframe(V, 0, { [slots["dn:day"]]: 1 });
+  api.keyframe(V, 20, { [slots["dn:day"]]: 365 });
+  const r = G.addDayNight(map, { dayOfYear: 172, utcTime: 18 });
+  assert.deepEqual(plain(r.kept), ["Day of year"]);
+  assert.equal(api.get(dnRec(api, g).filter, "dayOfYear"), 172, "the filter has the typed day");
+  assert.deepEqual(plain(api.getKeyframeTimes(V, slots["dn:day"])), [0, 20], "the Controls keys stay");
+});
+
 test("day & night: Add on an older overlay with the time on Controls values sets those values and keeps the rows connected; a keyed value is kept (version 1 to 2)", () => {
   const { context, api } = dayNightSandbox();
   createWorldMap(context);
