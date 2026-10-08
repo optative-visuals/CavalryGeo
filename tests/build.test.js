@@ -4460,7 +4460,7 @@ test("Routes preview: a click during a lookup is ignored with a status, so stops
     return "C";
   };
   clickAt(context.routesPreview, 100, 60);
-  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.equal(nestedStatus, "Still working on the last action…");
   assert.deepEqual(plain(context.stops.map((s) => s.name)), ["A"], "only the first click was added");
   assert.equal(context.statusLabel.getText(), "Added stop 1: A.");
   context.GeoNet.reverse = () => "B";
@@ -4476,7 +4476,7 @@ test("Pins preview: a click during a lookup is ignored, so spot, ring and name a
     return "Second";
   };
   clickAt(context.pinsPreview, 100, 60);
-  assert.equal(nestedStatus, "Still looking up the last place…");
+  assert.equal(nestedStatus, "Still working on the last action…");
   const v = context.pinsPreview._view(), want = context.GeoPreview.fromPx(v, 100, v.height - 60); // the Label previews are y-up
   assert.ok(Math.abs(context.lonField.getValue() - want.lon) < 1e-3 && Math.abs(context.latField.getValue() - want.lat) < 1e-3, "Lat / Lon are the first click's");
   assert.equal(context.labelText.getText(), "First");
@@ -11982,4 +11982,41 @@ test("comp follow: the catch-up when a job ends is silent, so the build's result
   new context.ImageryTimerCallbacks().onTimeout();
   assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"], "caught up");
   assert.equal(context.statusLabel.getText(), "Imagery built: 4 tiles.");
+});
+
+test("busy lock: a button or Enter pressed while an action runs is refused, Cancel is not, and the lock clears after an error", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const seen = {};
+  let runs = 0;
+  context.GeoNet.search = () => {
+    runs++;
+    if (runs === 1) {
+      context.routeSearchField.setText("Rome");
+      context.routeSearchBtn.onClick();
+      seen.button = context.statusLabel.getText();
+      context.searchField.setText("Oslo");
+      context.searchField.onValueCommitted();
+      seen.enter = context.statusLabel.getText();
+      context.cancelImageryBtn.onClick();
+      seen.cancel = context.statusLabel.getText();
+    }
+    if (runs === 3) throw new Error("offline");
+    return [PARIS];
+  };
+  context.pinSearchField.setText("Paris");
+  context.pinSearchBtn.onClick();
+  assert.equal(runs, 1, "nothing nested ran a search");
+  assert.equal(seen.button, "Still working on the last action…");
+  assert.equal(seen.enter, "Still working on the last action…");
+  assert.equal(seen.cancel, "Error: Nothing is downloading or building.", "Cancel ran");
+  context.pinSearchField.setText("Rome");
+  context.pinSearchBtn.onClick(); // runs === 2: works again
+  assert.equal(runs, 2);
+  context.pinSearchField.setText("Oslo");
+  context.pinSearchBtn.onClick(); // throws inside
+  assert.match(context.statusLabel.getText(), /offline/);
+  context.pinSearchField.setText("Bern");
+  context.pinSearchBtn.onClick();
+  assert.equal(runs, 4, "the lock cleared after the error");
 });

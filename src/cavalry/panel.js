@@ -49,12 +49,33 @@ function guard(fn) {
     try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); }
   };
 }
-// Wraps a button's click: guard() plus the selection restore and the redraw nudge. With keepSelection the
-// restore is skipped (an action that selects something on purpose, like a new callout's label).
-function guardAction(fn, keepSelection) {
+// One action at a time: a button, an Enter that starts work or a preview click can pump Cavalry's events
+// (sayNow, the network waits), so a second press could otherwise run nested inside the first.
+var busy = false;
+function refuseIfBusy() {
+  if (!busy) return false;
+  say("Still working on the last action…");
+  return true;
+}
+// guard() for a commit (Enter) that starts work: refused while another action runs; the flag clears in a finally.
+function guardWork(fn) {
   return function () {
+    if (refuseIfBusy()) return;
+    busy = true;
+    try { guard(fn)(); } finally { busy = false; }
+  };
+}
+// Wraps a button's click: guardWork() plus the selection restore and the redraw nudge. With keepSelection the
+// restore is skipped (an action that selects something on purpose, like a new callout's label). With
+// allowNested (Cancel) the click runs even while another action is busy, and leaves the flag alone.
+function guardAction(fn, keepSelection, allowNested) {
+  return function () {
+    if (!allowNested && refuseIfBusy()) return;
     var before = keepSelection ? null : currentSelection();
+    var wasBusy = busy;
+    if (!allowNested) busy = true;
     try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); }
+    finally { if (!allowNested) busy = wasBusy; }
     keepGroupsCollapsed(before);
     nudgeRedraw();
   };
@@ -378,7 +399,7 @@ function mapSearchResults(q) {
 }
 
 // Return (or leaving the box) lists the results, but never makes a map: that stays with Search.
-searchField.onValueCommitted = guard(function () {
+searchField.onValueCommitted = guardWork(function () {
   var q = searchField.getText().trim();
   if (!q || q === lastMapQuery || recentlyTried(mapTry, q)) return;
   var creating = newMapSelected();
@@ -845,7 +866,7 @@ function runFind() {
   say(groups.length ? groups.length + " match(es). Select some, then Extract." : "No named features match.");
 }
 findBtn.onClick = guardAction(runFind);
-featureQuery.onValueCommitted = guard(function () {
+featureQuery.onValueCommitted = guardWork(function () {
   if (featureQuery.getText().trim() !== lastFindText) runFind();
 });
 
@@ -1088,7 +1109,7 @@ function searchInto(field, picker, memo) {
 }
 // Return (or leaving the box) runs the box's search, unless it is empty or already searched.
 function searchOnCommit(field, memo, run) {
-  field.onValueCommitted = guard(function () {
+  field.onValueCommitted = guardWork(function () {
     var q = field.getText().trim();
     if (!q || q === memo.q || recentlyTried(memo, q)) return;
     run();
@@ -1127,14 +1148,9 @@ function labelPreview(hint, onClick, onPick) {
 }
 // guard() drops its arguments, so the click handlers get them passed on here. A lookup lets Cavalry
 // run queued events (sayNow, and reverse's wait for its turn), so a second click could start inside
-// the first: while one is being handled, further clicks are ignored.
-var lookingUp = false;
+// the first: while one is being handled (or any other action runs), further clicks are ignored.
 function guardClick(fn) {
-  return function (lon, lat) {
-    if (lookingUp) { say("Still looking up the last place…"); return; }
-    lookingUp = true;
-    try { guard(function () { fn(lon, lat); })(); } finally { lookingUp = false; }
-  };
+  return function (lon, lat) { guardWork(function () { fn(lon, lat); })(); };
 }
 function round4(v) { return Math.round(v * 1e4) / 1e4; }
 var spotName = null; // the name the last Pins click put in the text box
@@ -1559,7 +1575,7 @@ function runLoad() {
   say(table.rows.length + " rows, " + prepared.matched + " place(s) matched, " + prepared.unmatched.length + " unmatched" + (prepared.unmatched.length ? " (see list)." : "."));
 }
 dataLoadBtn.onClick = guardAction(runLoad);
-dataLinkField.onValueCommitted = guard(function () {
+dataLinkField.onValueCommitted = guardWork(function () {
   var url = dataLinkField.getText().trim();
   if (url && url !== lastLoadedLink) runLoad();
 });
@@ -1934,7 +1950,7 @@ cancelImageryBtn.onClick = guardAction(function () {
   resetImageryPlan();
   say("Download cancelled. Downloaded tiles are kept; nothing was built.");
   followActiveComp(false);
-});
+}, false, true);
 
 imageryAttrBtn.onClick = guardAction(function () {
   disarmClearTiles();
