@@ -1412,7 +1412,8 @@ test("script layers get exactly one slot per input (no spare trailing slot)", ()
   assert.equal(api.hasAttribute(map.cameraId, "array.5"), false, "camera has 5 inputs, no n5");
   const pinId = GeoScene.addPin(map, "P", 0, 0);
   assert.equal(api.hasAttribute(pinId, "generator.array.6"), true);
-  assert.equal(api.hasAttribute(pinId, "generator.array.7"), false, "map layer has 7 inputs, no n7");
+  assert.equal(api.hasAttribute(pinId, "generator.array.8"), true);
+  assert.equal(api.hasAttribute(pinId, "generator.array.9"), false, "map layer has 9 inputs (the comp size last), no n9");
 });
 
 test("default styles: countries show borders; states are border lines only", () => {
@@ -13660,4 +13661,30 @@ test("night lights in the panel: a day build over an older overlay without the p
   context.buildImageryBtn.onClick();
   const seen = runSeen(context, api);
   assert.ok(seen.some((s) => /^Imagery built: .* Credit: .* · NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\)/.test(s)), seen.join(" | "));
+});
+
+// Date line: base and data layers take the comp size as their frame (compW / compH) and repeat on flat maps;
+// pins and old-style route stop pins draw once, as single things do.
+test("date line: base and data layers get the comp size and repeat; pins and old-style route stops do not", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, E = context.GeoExpression;
+  const map = G.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  const at = (inputs, n) => "generator.array." + E.inputIndex(inputs, n);
+  const expr = (id) => String(api.get(id, "generator.expression"));
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  assert.equal(api.get(countries, at(E.MAP_LAYER_INPUTS, "compW")), 1080);
+  assert.equal(api.get(countries, at(E.MAP_LAYER_INPUTS, "compH")), 1080);
+  assert.ok(expr(countries).includes("frame: {w: _i7, h: _i8}"));
+  assert.ok(!expr(G.addPin(map, "Paris", 2.35, 48.85, null, true)).includes("frame: {w:"));
+  assert.ok(!expr(G.addPin(map, "Stop", 2.35, 48.85, null, false)).includes("frame: {w:"));
+  const d = G.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: false });
+  assert.equal(api.get(d.layers.regions, at(E.REGION_INPUTS, "compW")), 1080);
+  assert.equal(api.get(d.layers.bubbles, at(E.BUBBLE_INPUTS, "compH")), 1080);
+  assert.ok(expr(d.layers.regions).includes("frame: {w: _i16, h: _i17}"));
+  assert.ok(expr(d.layers.bubbles).includes("frame: {w: _i9, h: _i10}"));
+  assert.ok(expr(d.layers.labels).includes("frame: {w: _i11, h: _i12}"));
+  api.get = realGet;
 });

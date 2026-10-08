@@ -125,11 +125,19 @@ var GeoScene = (function () {
     }
   }
 
+  // The comp size as a layer's frame inputs (compW, compH), with the layer's own values over them.
+  function withCompSize(values) {
+    var s = compSize(), out = { compW: s.width, compH: s.height };
+    for (var k in values) if (Object.prototype.hasOwnProperty.call(values, k)) out[k] = values[k];
+    return out;
+  }
+
   // nearest: single things (pins, text labels) draw on the copy of the world nearest the camera.
-  function createMapLayer(map, name, enc, meta, style, inputValues, parentId, nearest) {
+  // single: a single thing (pin, label, old-style route stop) is drawn once; other map layers repeat on a flat map.
+  function createMapLayer(map, name, enc, meta, style, inputValues, parentId, nearest, single) {
     var id = api.create(A.MAP_LAYER_TYPE, name);
-    addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.MAP_INPUTS, inputValues);
-    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: nearest === true }));
+    addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.MAP_LAYER_INPUTS, withCompSize(inputValues));
+    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: nearest === true, single: single === true }));
     connectCamera(map.cameraId, id, A.MAP_ARRAY_ATTR);
     applyStyle(id, style);
     api.parent(id, parentId || map.groupId);
@@ -157,7 +165,7 @@ var GeoScene = (function () {
   // nearest (default true): the pin sits on the copy nearest the camera; false keeps the old global placement (old-style route stops).
   function addPin(map, name, lon, lat, parentId, nearest) {
     var enc = GeoCodec.encodeLayer({ kind: "point", features: [{ name: name, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, nearest !== false);
+    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, nearest !== false, true);
   }
 
   function createRouteLeg(map, parentId, name, enc, lift) {
@@ -640,12 +648,12 @@ var GeoScene = (function () {
     var groupId = api.create("group", "Data: " + prepared.title);
     api.parent(groupId, map.groupId);
     function meta(display) { return { camera: map.cameraId, category: "data", display: display, source: source }; }
-    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, { year: year }, E.regionsExpression(src, p.regions, meta("regions")), GeoStyles.layerStyle(look, "regions"), true);
+    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, withCompSize({ year: year }), E.regionsExpression(src, p.regions, meta("regions")), GeoStyles.layerStyle(look, "regions"), true);
     if (opts.bubbles) {
-      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, { year: year }, E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), GeoStyles.layerStyle(look, "bubbles"), true);
+      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, withCompSize({ year: year }), E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), GeoStyles.layerStyle(look, "bubbles"), true);
       if (A.FILL_ALPHA_ATTR) { try { setOne(layers.bubbles, A.FILL_ALPHA_ATTR, 70); } catch (e) { /* opacity is cosmetic */ } }
     }
-    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, { year: year }, E.valueLabelsExpression(src, p.points, meta("labels")), GeoStyles.layerStyle(look, "valueLabels"), true);
+    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, withCompSize({ year: year }), E.valueLabelsExpression(src, p.points, meta("labels")), GeoStyles.layerStyle(look, "valueLabels"), true);
     if (opts.legend) {
       var s = compSize();
       if (layers.regions) {
@@ -750,7 +758,7 @@ var GeoScene = (function () {
       return textId;
     }
     var enc = GeoCodec.encodeLayer({ kind: "text", features: [{ name: text, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, nearest !== false);
+    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, nearest !== false, true);
   }
 
   // Newly created layers land on top of the group, which can bury an existing pin,

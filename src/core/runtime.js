@@ -18,6 +18,9 @@ var GeoRuntime = (function () {
     }
     var radius = opts && opts.pointRadius != null ? opts.pointRadius : 4;
     var scale = opts && opts.ellipseScale != null ? opts.ellipseScale : 1;
+    // opts.frame (the comp size) on a flat map: each shape is projected once above, then also drawn on every
+    // copy of the world that reaches the frame. Without a frame, or for single things, it is drawn once.
+    var frame = opts && opts.frame && !opts.nearest && isFlat(cam) ? opts.frame : null;
     var out = [0, 0], pts = [], vis = [];
     for (var i = 0; i < count; i++) {
       var row = enc.f[i];
@@ -32,15 +35,75 @@ var GeoRuntime = (function () {
           pts.push(out[0], out[1]);
         }
         if (!visible || pts.length < 2) continue;
-        if (kind === "point") { path.addEllipse(pts[0], pts[1], radius * scale, radius * scale); continue; }
-        if (kind === "text") { path.addText(String(row[0]), radius, pts[0], pts[1]); continue; }
-        if (kind === "line") { drawVisibleRuns(path, pts, vis); continue; }
-        path.moveTo(pts[0], pts[1]);
-        for (var m = 2; m < pts.length; m += 2) path.lineTo(pts[m], pts[m + 1]);
-        if (kind === "polygon") path.close();
+        var copies = frame ? worldCopies(cam, shapeBox(pts, kind === "point" ? radius * scale : kind === "text" ? radius * (String(row[0]).length + 1) : 0), frame) : [0];
+        for (var c = 0; c < copies.length; c++) {
+          if (copies[c] === 0) drawShape(path, kind, row, pts, vis, radius, scale);
+          else drawShape(path, kind, row, shiftPoints(pts, copyOffset(cam, copies[c])), vis, radius, scale);
+        }
       }
     }
     return path;
+  }
+
+  // Draws one projected shape (pts: x, y pairs; vis: visible per point, used by lines on the globe).
+  function drawShape(path, kind, row, pts, vis, radius, scale) {
+    if (kind === "point") { path.addEllipse(pts[0], pts[1], radius * scale, radius * scale); return; }
+    if (kind === "text") { path.addText(String(row[0]), radius, pts[0], pts[1]); return; }
+    if (kind === "line") { drawVisibleRuns(path, pts, vis); return; }
+    path.moveTo(pts[0], pts[1]);
+    for (var m = 2; m < pts.length; m += 2) path.lineTo(pts[m], pts[m + 1]);
+    if (kind === "polygon") path.close();
+  }
+
+  function shiftPoints(pts, off) {
+    var out = [];
+    for (var i = 0; i < pts.length; i += 2) out.push(pts[i] + off[0], pts[i + 1] + off[1]);
+    return out;
+  }
+
+  // Bounding box of projected x, y pairs, grown by pad on every side.
+  function shapeBox(pts, pad) {
+    var box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (var i = 0; i < pts.length; i += 2) {
+      box.minX = Math.min(box.minX, pts[i]); box.maxX = Math.max(box.maxX, pts[i]);
+      box.minY = Math.min(box.minY, pts[i + 1]); box.maxY = Math.max(box.maxY, pts[i + 1]);
+    }
+    return { minX: box.minX - pad, minY: box.minY - pad, maxX: box.maxX + pad, maxY: box.maxY + pad };
+  }
+
+  // Same clamps as GeoProjection.makeProjector, so a copy's offset matches the projection it repeats.
+  var D2R = Math.PI / 180, MAX_ZOOM = 22;
+  function isFlat(cam) { return Math.max(0, Math.min(2, Math.round(cam.projection || 0))) === 0; }
+  function zoomOf(cam) { return Math.max(0, Math.min(MAX_ZOOM, cam.zoom)); }
+  function rotationOf(cam) { return (cam.rotation || 0) * D2R; }
+  // One world-width in Cavalry pixels (360 degrees of longitude at the camera's zoom).
+  function worldWidth(cam) { return 2 * Math.PI * GeoProjection.worldScale(zoomOf(cam)); }
+
+  // Screen offset of copy k: k world-widths along the camera's rotated x axis.
+  function copyOffset(cam, k) {
+    if (k === 0) return [0, 0];
+    var W = k * worldWidth(cam), r = rotationOf(cam);
+    return [W * Math.cos(r), W * Math.sin(r)];
+  }
+
+  // The whole-world shifts k (ascending) whose copy of bbox ({minX, minY, maxX, maxY}, screen space) meets
+  // the frame, a w x h rectangle centred on the camera. [0] when not flat or without a frame.
+  function worldCopies(cam, bbox, frame) {
+    if (!frame || !isFlat(cam) || !(frame.w > 0) || !(frame.h > 0)) return [0];
+    var W = worldWidth(cam), r = rotationOf(cam), lo = -Infinity, hi = Infinity;
+    // Along one screen axis the copy k sits at a0 + k s .. a1 + k s; it meets [-half, half] for k between two bounds.
+    function axis(a0, a1, s, half) {
+      if (Math.abs(s) < 1e-9 * W) { if (a0 > half || a1 < -half) { lo = 1; hi = 0; } return; }
+      var p = (half - a0) / s, q = (-half - a1) / s;
+      lo = Math.max(lo, Math.min(p, q));
+      hi = Math.min(hi, Math.max(p, q));
+    }
+    axis(bbox.minX, bbox.maxX, W * Math.cos(r), frame.w / 2);
+    axis(bbox.minY, bbox.maxY, W * Math.sin(r), frame.h / 2);
+    if (!isFinite(lo) || !isFinite(hi)) return [0];
+    var ks = [];
+    for (var k = Math.ceil(lo); k <= Math.floor(hi); k++) ks.push(k);
+    return ks;
   }
 
   function decodePoints(ints) {
@@ -139,6 +202,7 @@ var GeoRuntime = (function () {
     return GeoProjection.makeProjector(cam)(lon, lat, [0, 0]);
   }
 
-  return { Q: Q, buildPath: buildPath, projectPoint: projectPoint, projectNearest: projectNearest, pointVisible: pointVisible };
+  return { Q: Q, buildPath: buildPath, projectPoint: projectPoint, projectNearest: projectNearest, pointVisible: pointVisible,
+    worldCopies: worldCopies, copyOffset: copyOffset };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoRuntime;

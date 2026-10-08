@@ -75,7 +75,7 @@ test("label visibility expression returns 100 when visible and 0 behind the glob
 });
 
 test("map layer expression keeps an explicit ellipseScale of 0", () => {
-  assert.ok(E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 0 }).includes("ellipseScale: 0}"));
+  assert.ok(E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 0 }).includes("ellipseScale: 0,"));
 });
 
 test("route layer expression draws a leg and reads lift from n7 or the renamed input", () => {
@@ -651,4 +651,60 @@ test("map layer expression: nearest is passed to buildPath only when asked for",
   assert.ok(!plain.includes("nearest: true"));
   const near = E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 1, nearest: true });
   assert.ok(near.includes("nearest: true"));
+});
+
+// Date line: the input lists as they were at 82b4dbd. Map and data layers gained compW and compH at the end only.
+const MAP_BASE = [["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["detail", 100], ["pointRadius", 4]];
+const COMP_SIZE = [["compW", 1920], ["compH", 1080]];
+const COLOUR_BASE = [["low", "#f2e8cf", "color"], ["high", "#bc4749", "color"], ["useMiddle", 0], ["middle", "#ffffff", "color"], ["middleValue", 0], ["min", 0], ["max", 0]];
+test("input lists: earlier names, defaults and indices are unchanged; compW and compH are appended last", () => {
+  assert.deepEqual(E.MAP_INPUTS, MAP_BASE);
+  assert.deepEqual(E.MAP_LAYER_INPUTS, MAP_BASE.concat(COMP_SIZE));
+  assert.deepEqual(E.REGION_INPUTS, MAP_BASE.concat([["year", 0]], COLOUR_BASE, [["noData", "#dddddd", "color"]], COMP_SIZE));
+  assert.deepEqual(E.BUBBLE_INPUTS, MAP_BASE.concat([["year", 0], ["maxRadius", 40]], COMP_SIZE));
+  assert.deepEqual(E.VALUE_LABEL_INPUTS, MAP_BASE.concat([["year", 0], ["textSize", 16], ["format", 0], ["decimals", 1]], COMP_SIZE));
+  assert.deepEqual(E.ROUTE_INPUTS, MAP_BASE.concat([["lift", 30]]));
+  assert.equal(E.inputIndex(E.MAP_LAYER_INPUTS, "compW"), 7);
+  assert.equal(E.inputIndex(E.MAP_LAYER_INPUTS, "compH"), 8);
+  assert.equal(E.inputIndex(E.REGION_INPUTS, "compW"), 16);
+  assert.equal(E.inputIndex(E.BUBBLE_INPUTS, "compW"), 9);
+  assert.equal(E.inputIndex(E.VALUE_LABEL_INPUTS, "compH"), 12);
+});
+
+const wide = C.encodeLayer({ kind: "polygon", features: [{ name: "a", rank: 1, rings: [[[-178.5, 0], [-177.5, 0], [-177.5, 1], [-178.5, 0]]] }] });
+const copyCtx = (over) => Object.assign({ cavalry: { Path: FakePath }, n0: 0, n1: 175, n2: 4, n3: 0, n4: 0, n5: 100, n6: 4, n7: 1920, n8: 1080 }, over || {});
+test("map layer expression repeats on flat maps: one copy east of the date line", () => {
+  const expr = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1 });
+  assert.ok(expr.includes("frame: {w: _i7, h: _i8}"));
+  const ops = vm.runInNewContext(expr, copyCtx()).ops;
+  assert.equal(ops.filter((o) => o[0] === "M").length, 1);
+  assert.ok(ops[0][1] > 0, "the copy at +1 world-width, not the one 353 degrees west");
+});
+
+test("single things and old layers get no frame: the shape is drawn once at its own longitude", () => {
+  const single = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1, single: true });
+  assert.ok(!single.includes("frame: {w:"));
+  const x = vm.runInNewContext(single, copyCtx()).ops[0][1];
+  assert.ok(x < -4000, `x ${x} is the copy 353 degrees west`);
+  const nearest = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1, nearest: true });
+  assert.ok(!nearest.includes("frame: {w:"));
+});
+
+test("regions and bubbles expressions pass the comp frame into the data helpers", () => {
+  const data = { geo: wide, series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } };
+  const regions = E.regionsExpression(buildDataRuntimeSource(), data, meta);
+  assert.ok(regions.includes("frame: {w: _i16, h: _i17}"));
+  const mesh = vm.runInNewContext(regions, copyCtx({ n7: 2010, cavalry: { Path: FakePath, Mesh: class { constructor() { this.paths = []; } addPath(p) { this.paths.push([p]); } }, Material: class {} } }));
+  assert.equal(mesh.paths[1][0].ops.filter((o) => o[0] === "M").length, 1);
+  const bubbles = E.bubblesExpression(buildDataRuntimeSource(), { pts: [[170, 0]], series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } }, meta);
+  assert.ok(bubbles.includes("frame: {w: _i9, h: _i10}"));
+  const dots = vm.runInNewContext(bubbles, copyCtx({ n1: 0, n2: 0, n7: 2010, n8: 40, n9: 1920, n10: 1080, cavalry: { Path: FakePath } })).ops;
+  assert.equal(dots.length, 8);
+  assert.ok(E.valueLabelsExpression(buildDataRuntimeSource(), { pts: [], series: [], range: {} }, meta).includes("frame: {w: _i11, h: _i12}"));
+});
+
+test("routes, highlights and the legends never take a frame", () => {
+  assert.ok(!E.routeLayerExpression(buildRuntimeSource(), wide, meta, {}).includes("frame: {w:"));
+  assert.ok(!E.highlightLayerExpression(buildRuntimeSource(), wide, { effect: "outline" }, {}).includes("frame: {w:"));
+  assert.ok(!E.legendExpression(buildDataRuntimeSource(), { range: {}, title: "" }, meta).includes("frame: {w:"));
 });

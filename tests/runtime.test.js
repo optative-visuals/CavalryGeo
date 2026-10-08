@@ -215,3 +215,104 @@ test("projectNearest treats a negative projection as Mercator, like makeProjecto
   const c = cam({ lon: 179.9, projection: -1 });
   assert.deepEqual(R.projectNearest(179.5, 10, c), R.projectPoint(P.nearestLon(179.5, 179.9), 10, c));
 });
+
+// Date line: flat vector layers repeat side by side. Each shape is projected once and emitted again
+// one world-width (W = 256 * 2^zoom px) along the rotated x axis for every copy whose box reaches the frame.
+const FRAME = { w: 1920, h: 1080 };
+const worldW = (zoom) => 256 * Math.pow(2, zoom);
+const sq = (x0, x1, y0, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+const polyEnc = (ring) => C.encodeLayer({ kind: "polygon", features: [{ name: "a", rank: 1, rings: [ring] }] });
+const movesOf = (ops) => ops.filter((o) => o[0] === "M");
+const nearTo = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} vs ${b}`);
+const sameOps = (a, b) => {
+  assert.deepEqual(a.map((o) => o[0]), b.map((o) => o[0]));
+  a.forEach((o, i) => o.slice(1).forEach((v, j) => nearTo(v, b[i][j + 1])));
+};
+function boxOfOps(ops) {
+  const xs = [], ys = [];
+  ops.forEach((o) => { if (o[0] === "M" || o[0] === "L") { xs.push(o[1]); ys.push(o[2]); } });
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+const meetsFrame = (b, f = FRAME) => b.maxX >= -f.w / 2 && b.minX <= f.w / 2 && b.maxY >= -f.h / 2 && b.minY <= f.h / 2;
+
+test("date line: a small shape at lon -178 seen from lon 175 is drawn once, one world-width east", () => {
+  const c = cam({ lon: 175, zoom: 4 });
+  const framed = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, { frame: FRAME }, FakePath).ops;
+  const east = R.buildPath(polyEnc(sq(181.5, 182.5, 0, 1)), c, 100, {}, FakePath).ops;
+  assert.equal(movesOf(framed).length, 1, "the shift-0 copy (353 degrees west) is off the frame");
+  sameOps(framed, east);
+});
+
+test("date line: a shape around Japan seen from lon 179 at zoom 2 is drawn twice, one world-width apart", () => {
+  const ms = movesOf(R.buildPath(polyEnc(sq(130, 146, 30, 46)), cam({ lon: 179, zoom: 2 }), 100, { frame: FRAME }, FakePath).ops);
+  assert.equal(ms.length, 2);
+  nearTo(ms[1][1] - ms[0][1], worldW(2));
+  nearTo(ms[1][2], ms[0][2]);
+});
+
+test("date line: at zoom 0 the copies drawn are exactly those whose box reaches the frame", () => {
+  const ring = sq(0, 340, -60, 60), c = cam({ lon: 0, zoom: 0 });
+  // Reference: the unframed projection of each whole-turn shift, kept when its box reaches the frame.
+  const expected = [];
+  for (let k = -12; k <= 12; k++) {
+    const ops = R.buildPath(polyEnc(ring.map((p) => [p[0] + 360 * k, p[1]])), c, 100, {}, FakePath).ops;
+    if (meetsFrame(boxOfOps(ops))) expected.push(ops);
+  }
+  const framed = R.buildPath(polyEnc(ring), c, 100, { frame: FRAME }, FakePath).ops;
+  const starts = movesOf(framed);
+  assert.equal(expected.length, 8);
+  assert.equal(starts.length, expected.length);
+  expected.forEach((ops, i) => { nearTo(starts[i][1], movesOf(ops)[0][1]); nearTo(starts[i][2], movesOf(ops)[0][2]); });
+});
+
+test("date line: with rotation 90 the copies are one world-width apart along screen y", () => {
+  const c = cam({ lon: 175, zoom: 4, rotation: 90 });
+  const framed = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, { frame: FRAME }, FakePath).ops;
+  const east = R.buildPath(polyEnc(sq(181.5, 182.5, 0, 1)), c, 100, {}, FakePath).ops;
+  const k0 = R.buildPath(polyEnc(sq(-178.5, -177.5, 0, 1)), c, 100, {}, FakePath).ops;
+  assert.equal(movesOf(framed).length, 1);
+  sameOps(framed, east);
+  nearTo(movesOf(framed)[0][1] - movesOf(k0)[0][1], 0);
+  nearTo(movesOf(framed)[0][2] - movesOf(k0)[0][2], worldW(4));
+});
+
+test("date line: a point is copied the same way (8 dots at lon 170 seen from lon 0 at zoom 0)", () => {
+  const enc = C.encodeLayer({ kind: "point", features: [{ name: "p", rank: 1, rings: [[[170, 0]]] }] });
+  const ops = R.buildPath(enc, cam({ zoom: 0 }), 100, { pointRadius: 2, frame: FRAME }, FakePath).ops;
+  const dots = ops.filter((o) => o[0] === "E");
+  assert.equal(dots.length, 8);
+  dots.forEach((o, i) => nearTo(o[1], 170 / 360 * 256 + 256 * (i - 4)));
+});
+
+test("date line: without a frame (old layers), on globe and on Equal Earth the output is unchanged", () => {
+  const enc = polyEnc(sq(-178.5, -177.5, 0, 1));
+  const plain = R.buildPath(enc, cam({ lon: 175, zoom: 4 }), 100, {}, FakePath).ops;
+  assert.equal(movesOf(plain).length, 1);
+  nearTo(movesOf(plain)[0][1], R.projectPoint(-178.5, 0, cam({ lon: 175, zoom: 4 }))[0]);
+  [1, 2].forEach((projection) => {
+    const c = cam({ lon: 175, zoom: 4, projection });
+    assert.deepEqual(R.buildPath(enc, c, 100, { frame: FRAME }, FakePath).ops, R.buildPath(enc, c, 100, {}, FakePath).ops);
+  });
+});
+
+test("date line: routes, nearest single things and highlights are never copied", () => {
+  const route = C.encodeLayer({ kind: "route", features: [{ name: "r", rank: 1, rings: [[[-178.5, 0], [-177.5, 0]]] }] });
+  const c = cam({ lon: 175, zoom: 4 });
+  assert.deepEqual(R.buildPath(route, c, 100, { frame: FRAME }, FakePath).ops, R.buildPath(route, c, 100, {}, FakePath).ops);
+  const dot = C.encodeLayer({ kind: "point", features: [{ name: "p", rank: 1, rings: [[[-178, 0]]] }] });
+  assert.equal(R.buildPath(dot, c, 100, { pointRadius: 0, nearest: true, frame: FRAME }, FakePath).ops.filter((o) => o[0] === "E").length, 1);
+});
+
+test("worldCopies: [0] off flat maps and without a frame; copyOffset is one world-width along the rotated x axis", () => {
+  const b = { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+  assert.deepEqual(R.worldCopies(cam({ projection: 2 }), b, FRAME), [0]);
+  assert.deepEqual(R.worldCopies(cam({ projection: 1 }), b, FRAME), [0]);
+  assert.deepEqual(R.worldCopies(cam({}), b, undefined), [0]);
+  assert.deepEqual(R.worldCopies(cam({}), b, FRAME), [-3, -2, -1, 0, 1, 2, 3]);
+  const off = R.copyOffset(cam({ zoom: 4, rotation: 90 }), 1);
+  nearTo(off[0], 0);
+  nearTo(off[1], worldW(4));
+  const diag = R.copyOffset(cam({ zoom: 0, rotation: 30 }), -2);
+  nearTo(diag[0], -2 * 256 * Math.cos(Math.PI / 6));
+  nearTo(diag[1], -2 * 256 * Math.sin(Math.PI / 6));
+});
