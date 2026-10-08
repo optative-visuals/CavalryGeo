@@ -404,6 +404,39 @@ test("settings round-trip and tolerate a broken file", () => {
   assert.deepEqual(plainObj(net.loadSettings()), {});
 });
 
+test("settings live outside the scripts folder (AppData/CavalryGeo), and their folder is made", () => {
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:\\fake\\AppData";
+  const made = [];
+  fakeApi.makeFolder = (p) => { made.push(p); };
+  const net = loadNetWith(fakeApi);
+  net.updateSettings({ source: "maptiler" });
+  assert.equal(fakeApi._files["C:/fake/AppData/CavalryGeo/settings.json"], JSON.stringify({ source: "maptiler" }, null, 2));
+  assert.equal(fakeApi._files["C:/fake/CavalryGeo_assets/settings.json"], undefined);
+  assert.ok(made.indexOf("C:/fake/AppData/CavalryGeo") >= 0);
+});
+
+test("settings: an old settings.json is copied to the new place once, and the old file is left alone", () => {
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:/fake/AppData";
+  const OLD = "C:/fake/CavalryGeo_assets/settings.json", NEW = "C:/fake/AppData/CavalryGeo/settings.json";
+  fakeApi._files[OLD] = JSON.stringify({ maptilerKey: "K1", mapStyle: "Mono" });
+  const net = loadNetWith(fakeApi);
+  assert.deepEqual(plainObj(net.loadSettings()), { maptilerKey: "K1", mapStyle: "Mono" });
+  assert.equal(fakeApi._files[NEW], fakeApi._files[OLD], "copied");
+  net.updateSettings({ mapStyle: "Dark" });
+  fakeApi._files[OLD] = JSON.stringify({ maptilerKey: "other" });
+  assert.deepEqual(plainObj(net.loadSettings()), { maptilerKey: "K1", mapStyle: "Dark" }, "the new file wins; the old one is not copied again");
+  assert.equal(fakeApi._files[OLD], JSON.stringify({ maptilerKey: "other" }), "the old file is untouched");
+});
+
+test("settings: without api.getAppDataFolder (an older Cavalry) the old place is used", () => {
+  const fakeApi = makeScriptedApi([]);
+  const net = loadNetWith(fakeApi);
+  net.updateSettings({ a: 1 });
+  assert.ok(fakeApi._files["C:/fake/CavalryGeo_assets/settings.json"]);
+});
+
 test("reverse: a failed or empty lookup gives null and never throws", () => {
   assert.equal(buildGeoNet([500], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null);
   assert.equal(buildGeoNet([200], { __loadSearch: true }).GeoNet.reverse(48.85, 2.35, 12), null, "body [] has no name");

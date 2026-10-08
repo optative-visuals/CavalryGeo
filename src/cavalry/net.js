@@ -287,11 +287,26 @@ var GeoNet = (function () {
     return { status: -1 };
   }
 
-  function settingsFile() { return assetsDir() + "/settings.json"; }
+  // settings.json lives in Cavalry's app-data folder (CavalryGeo/settings.json), outside the Scripts
+  // folder, so replacing CavalryGeo_assets when updating never wipes it. An older Cavalry without
+  // api.getAppDataFolder keeps it inside the assets folder.
+  function oldSettingsFile() { return assetsDir() + "/settings.json"; }
+  function settingsDir() {
+    if (typeof api.getAppDataFolder !== "function") return assetsDir();
+    return String(api.getAppDataFolder()).replace(/\\/g, "/") + "/CavalryGeo";
+  }
+  function settingsFile() { return settingsDir() + "/settings.json"; }
   function plainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
   function readSettingsRaw() {
-    var f = settingsFile();
-    if (!api.filePathExists(f)) return null;
+    var f = settingsFile(), old = oldSettingsFile();
+    if (!api.filePathExists(f)) {
+      // First read in the new place: the old file's content is copied over (the old file stays).
+      if (f === old || !api.filePathExists(old)) return null;
+      var text;
+      try { text = String(api.readFromFile(old)); } catch (e) { return null; }
+      try { ensureDir(settingsDir()); api.writeToFile(f, text, true); } catch (e) { /* read again from the old file next time */ }
+      return text;
+    }
     try { return String(api.readFromFile(f)); } catch (e) { return null; }
   }
   function parseSettings(raw) {
@@ -301,14 +316,14 @@ var GeoNet = (function () {
     var raw = readSettingsRaw();
     return (raw === null ? null : parseSettings(raw)) || {};
   }
-  function saveSettings(obj) { ensureDir(assetsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
+  function saveSettings(obj) { ensureDir(settingsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
   // Merges patch's keys into settings.json, keeping every other key.
   function updateSettings(patch) {
     var raw = readSettingsRaw(), s = raw === null ? {} : parseSettings(raw);
     if (!s) {
       // The file is there but unreadable: keep a copy before it is replaced.
       s = {};
-      if (raw !== null && raw !== "") { try { ensureDir(assetsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
+      if (raw !== null && raw !== "") { try { ensureDir(settingsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
     }
     Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
     saveSettings(s);

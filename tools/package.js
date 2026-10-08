@@ -13,7 +13,7 @@ function installText(version) {
   "1. In Cavalry, choose Help > Show Scripts Folder.",
   "2. Drag CavalryGeo.js and the CavalryGeo_assets folder into that folder (straight in,",
   "   not inside another folder).",
-  "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one. On a Mac, hold Option while dragging and choose Merge: Replace would delete your settings (keys, saved styles) and downloads.",
+  "   Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.",
   "3. Open Scripts > CavalryGeo. No restart needed.",
   "4. Imagery on the globe or Equal Earth? Drag the CavalryGeo_plugin folder anywhere into the Cavalry window once and confirm the install. Nothing else needs it.",
   "",

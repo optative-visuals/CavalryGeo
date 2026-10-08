@@ -85,7 +85,7 @@ The **Style** section at the bottom of the Map tab colours a whole map in one go
 
 - **Pick a style** — Dark (the original look), Light, Blueprint, Vintage, Mono or Neon night. The preview shows its colours, and the next map you make uses it.
 - **Apply to map** — restyles the map picked at the top of the tab. Colours shared in the map's Controls change there; a colour you animated or connected to something else is left alone (the status line says how many).
-- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo_assets/settings.json` in the Scripts folder. When you update, merge the new CavalryGeo_assets folder into yours rather than replacing it, or your saved styles go with it (on a Mac, hold Option while dragging and choose Merge). **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
+- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo/settings.json` in Cavalry's app-data folder (on Windows, `AppData/Roaming/Cavalry/CavalryGeo`), outside the Scripts folder, so updating never wipes your saved styles or keys. Settings from an older version are copied there the first time the panel opens. **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
 
 Each map remembers its style, so pins, routes, labels and layers you add later match it.
 
@@ -175,7 +175,11 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 - **Sources:** **EOX Sentinel‑2** (free for non‑commercial use) and **NASA Blue Marble** (public
   domain) work straight away; **MapTiler** and **Mapbox** need your own free key; **Custom tile
   link** takes any `{z}/{x}/{y}` address. Keys stay on your computer
-  (`CavalryGeo_assets/settings.json`), never in the scene.
+  (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
+- **Assets window:** each map's imagery images (and, on the globe and Equal Earth, its
+  "Imagery source" composition) are filed in one group in the Assets window,
+  **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
+  map's older imagery into its group too. Anything you put in a group of your own stays there.
 - **Building:** animate the camera first, then press **Build imagery**. It works out how many
   images (or tiles) the animation needs and asks once, showing the count and download size —
   **Yes** downloads them and builds the imagery at the bottom of the map with a progress bar;
@@ -374,7 +378,7 @@ can't be baked: Bake skips them.
 - **Updates:** once a day, opening the panel asks GitHub (in the background) whether a newer
   version is out. If one is, the status line and Cavalry's console say so, with the download
   link, each time the panel opens until you update. To switch it off, add
-  `"checkForUpdates": false` to `CavalryGeo_assets/settings.json`.
+  `"checkForUpdates": false` to `CavalryGeo/settings.json` in Cavalry's app-data folder.
 - Place search and street downloads use OpenStreetMap's Nominatim and Overpass services under
   their fair‑use policies: keep searches occasional and don't script bulk requests.
 

@@ -3337,7 +3337,7 @@ test("Imagery tab: first press plans, second press downloads in timer steps then
   context.buildImageryBtn.onClick(); // a new plan must not keep showing the last build's 100%
   assert.equal(context.imageryProgress._value, 0);
   assert.ok(api.getCompLayers(false).some((id) => String(api.getNiceName(id)).startsWith("Imagery: ")));
-  const settings = JSON.parse(api._files["C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json"]);
+  const settings = JSON.parse(api._files[SETTINGS_FILE]);
   assert.equal(settings.source, "custom");
 });
 
@@ -3799,7 +3799,7 @@ test("Imagery tab: missing and rejected keys", () => {
 
 // ---- Update check -------------------------------------------------------------------
 const UPDATE_DIR = "C:/fake/AppData/Scripts/CavalryGeo_assets";
-const SETTINGS = UPDATE_DIR + "/settings.json";
+const SETTINGS = "C:/fake/AppData/CavalryGeo/settings.json";
 const REPLY = UPDATE_DIR + "/cache/downloads/latest-release.json";
 const NEWER = "Cavalry Geo v0.5.0 is available (you have v0.4.1). Download: https://github.com/optative-visuals/CavalryGeo/releases/latest";
 function readSettings(api) { return JSON.parse(api._files[SETTINGS] || "{}"); }
@@ -5510,7 +5510,8 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
 });
 
 // ---- Map tab: Style section ----
-const SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
+const SETTINGS_FILE = "C:/fake/AppData/CavalryGeo/settings.json"; // outside the Scripts folder, so an update can't wipe it
+const OLD_SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
 function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
 function pickStyle(context, name) {
   const i = context.mapStylePicker._entries.indexOf(name);
@@ -11385,4 +11386,15 @@ test("Imagery group: Refresh controls gathers older top-level assets and bent so
   const g = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
   assert.equal(api.getParent(im.meta.sourceComp), g);
   assetIds(api).forEach((id) => assert.equal(api.getParent(id), g));
+});
+
+test("settings: the panel reads the old settings.json on first open, copies it to AppData, and never logs keys", () => {
+  const logged = [];
+  const spy = { log: (...a) => logged.push(a.join(" ")), warn: (...a) => logged.push(a.join(" ")), error: (...a) => logged.push(a.join(" ")) };
+  const { context, api } = buildSandbox({ globals: { console: spy }, setup: (a) => { a._files[OLD_SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mono", maptilerKey: "SECRET-KEY-123" }); } });
+  assert.equal(context.GeoNet.loadSettings().mapStyle, "Mono");
+  assert.equal(JSON.parse(api._files[SETTINGS_FILE]).maptilerKey, "SECRET-KEY-123");
+  assert.equal(JSON.parse(api._files[OLD_SETTINGS_FILE]).maptilerKey, "SECRET-KEY-123", "the old file stays");
+  context.GeoNet.updateSettings({ mapStyle: "Dark" });
+  assert.equal(logged.filter((l) => l.indexOf("SECRET-KEY-123") >= 0).length, 0);
 });
