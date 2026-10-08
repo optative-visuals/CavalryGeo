@@ -2955,9 +2955,18 @@ function fakeTileDownloads(context, api, status) {
   };
 }
 
-// A fake `curl --parallel -K cfg ... --stderr status`: reads the config the panel wrote and,
+// The status file a detached curl writes: the --stderr value (curl older than 8.3), or the
+// PATH in a -w "%output{>>PATH}..." value (curl 8.3 or newer, no --stderr).
+function statusPathOf(args) {
+  if (args.indexOf("--stderr") >= 0) return args[args.indexOf("--stderr") + 1];
+  const w = args[args.indexOf("-w") + 1];
+  return w.slice(w.indexOf("%output{>>") + "%output{>>".length, w.indexOf("}%{http_code}"));
+}
+
+// A fake `curl --parallel -K cfg ... status`: reads the config the panel wrote and,
 // when `deliver()` is called, writes each output file and appends
-// "<code> <exit code> <content type> <path>\n" lines. codeFor(url) returns an HTTP code, or
+// "<code> <exit code> <content type> <path>\n" lines to the status file (see statusPathOf).
+// codeFor(url) returns an HTTP code, or
 // { code, exit, type, write } to say exactly what curl reports and writes (write: null = no file).
 // A batch whose config has been deleted is treated as a curl that is gone.
 function fakeCurl(api, codeFor = () => 200, version = "curl 8.4.0 (x86_64-pc-win32)") {
@@ -2978,7 +2987,7 @@ function fakeCurl(api, codeFor = () => 200, version = "curl 8.4.0 (x86_64-pc-win
     calls.forEach((c) => {
       const cfg = api._files[c.args[c.args.indexOf("-K") + 1]];
       if (cfg === undefined) return;
-      const status = c.args[c.args.indexOf("--stderr") + 1];
+      const status = statusPathOf(c.args);
       const un = (v) => v.replace(/\\(.)/g, "$1");
       const pairs = [...cfg.matchAll(/url = "((?:[^"\\]|\\.)*)"\noutput = "((?:[^"\\]|\\.)*)"/g)].map((m) => ({ url: un(m[1]), path: un(m[2]) }));
       let n = 0;
@@ -3005,7 +3014,55 @@ test("GeoFetch.available needs runDetachedProcess, runProcess and curl 7.75 or n
   assert.equal(context.GeoFetch.available(), false, "too old for %{exitcode}");
   fakeCurl(api, undefined, "curl 7.75.0 (Windows)"); context.GeoFetch._reset();
   assert.equal(context.GeoFetch.available(), true);
+  assert.equal(context.GeoFetch._appendOutput(), false, "7.75 has no %output");
+  fakeCurl(api, undefined, "curl 8.2.9 (Windows)"); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), true);
+  assert.equal(context.GeoFetch._appendOutput(), false, "8.2.9 has no %output");
+  fakeCurl(api, undefined, "curl 8.3.0 (Windows)"); context.GeoFetch._reset();
+  assert.equal(context.GeoFetch.available(), true);
+  assert.equal(context.GeoFetch._appendOutput(), true, "%output needs 8.3");
 });
+
+test("curl 8.3 or newer appends its status lines itself: -w %output{>>status}, no --stderr", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([job(1)]);
+  const a = curl.calls[0].args;
+  assert.equal(a.indexOf("--stderr"), -1);
+  assert.ok(a[a.indexOf("-w") + 1].startsWith("%output{>>" + batch.status + "}"), a[a.indexOf("-w") + 1]);
+});
+
+test("curl older than 8.3 keeps --stderr and the %{stderr} format", () => {
+  const { context, api } = buildSandbox();
+  const curl = fakeCurl(api, undefined, "curl 8.2.1 (x86_64-pc-win32)"); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([job(1)]);
+  const a = curl.calls[0].args;
+  assert.equal(a[a.indexOf("--stderr") + 1], batch.status);
+  assert.ok(a[a.indexOf("-w") + 1].startsWith("%{stderr}%{http_code} "), a[a.indexOf("-w") + 1]);
+});
+
+test("a status path containing } keeps --stderr, since %output{>>PATH} would end at that brace", () => {
+  const { context, api } = buildSandbox();
+  api.getAppDataFolder = () => "C:/fake/a}b/AppData";
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([job(1)]);
+  const a = curl.calls[0].args;
+  assert.ok(batch.status.includes("}"));
+  assert.equal(a[a.indexOf("--stderr") + 1], batch.status);
+  assert.equal(a[a.indexOf("-w") + 1].startsWith("%{stderr}"), true);
+});
+
+for (const version of ["curl 7.75.0 (Windows)", "curl 8.4.0 (x86_64-pc-win32)"]) {
+  test("a download round trip works with " + version + " (start, deliver, poll)", () => {
+    const { context, api } = buildSandbox();
+    const curl = fakeCurl(api, (url) => (/missing/.test(url) ? 404 : 200), version); context.GeoFetch._reset();
+    const batch = context.GeoFetch.start([job(1), { url: "https://a.example/missing", path: "C:/x/2.jpg" }]);
+    curl.deliver();
+    const r = context.GeoFetch.poll(batch);
+    assert.deepEqual(plain(r.results.map((x) => [x.path, x.ok])), [["C:/x/1.jpg", true], ["C:/x/2.jpg", false]]);
+    assert.equal(r.done, true);
+  });
+}
 
 test("GeoFetch.available is false when the assets folder path isn't plain ASCII (F4)", () => {
   const { context, api } = buildSandbox();
@@ -3075,7 +3132,8 @@ test("GeoFetch starts one detached curl batch and reports each file as its statu
   assert.equal(curl.calls[0].cmd, "curl");
   const a = curl.calls[0].args;
   assert.deepEqual(plain(a.slice(0, 11)), ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2", "--max-time", "120"]);
-  assert.equal(a[a.indexOf("-w") + 1], "%{stderr}%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n");
+  assert.equal(a.indexOf("--stderr"), -1, "curl 8.4 appends to the status file itself (no --stderr)");
+  assert.equal(a[a.indexOf("-w") + 1], "%output{>>" + batch.status + "}%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n");
   assert.match(api._files[a[a.indexOf("-K") + 1]], /url = "https:\/\/a\.example\/1\?x=\\"q\\""\noutput = ".*\/1\.jpg"\n/);
   assert.deepEqual(plain(context.GeoFetch.leftovers()), jobs.map((j) => j.path), "in-flight list written before curl starts");
   let r = context.GeoFetch.poll(batch);
@@ -3152,8 +3210,8 @@ test("GeoFetch.start fetches again a file an earlier batch reported as failed, d
   curl.deliver();
   api._files["C:/x/3.jpg"] = "<partial>"; // reported fine, but not part of the next stage
   api._files["C:/x/1.jpg"] = "<partial>"; // reported fine, so it stays
-  const fake = api._files[curl.calls[0].args[curl.calls[0].args.indexOf("--stderr") + 1]];
-  api._files[curl.calls[0].args[curl.calls[0].args.indexOf("--stderr") + 1]] = fake.replace(/200 0 image\/jpeg C:\/x\/3\.jpg/, "000 7  C:/x/3.jpg");
+  const fake = api._files[statusPathOf(curl.calls[0].args)];
+  api._files[statusPathOf(curl.calls[0].args)] = fake.replace(/200 0 image\/jpeg C:\/x\/3\.jpg/, "000 7  C:/x/3.jpg");
   const b = context.GeoFetch.start([job(1), job(2)]);
   assert.equal(api._files["C:/x/3.jpg"], undefined, "a failed file outside this stage is deleted too");
   assert.equal(api._files["C:/x/2.jpg"], undefined);

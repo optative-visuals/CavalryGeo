@@ -10,7 +10,7 @@
 var GeoFetch = (function () {
   // curl gives up on a file after --max-time 120 s x 3 tries plus back-off, so a batch is only
   // stalled after 400 s without a line; 20 min after a batch started its curl is certainly gone.
-  var STALL_MS = 400000, FIRST_LINE_MS = 90000, MAX_BATCH_MS = 1200000, support = null, batchSeq = 0;
+  var STALL_MS = 400000, FIRST_LINE_MS = 90000, MAX_BATCH_MS = 1200000, support = null, appendOutput = false, batchSeq = 0;
   var LINE = /^(\d{3}) (\d+) (\S*) (.*)$/;
   function dir() { return GeoAttrs.ASSETS_DIR() + "/cache/downloads"; }
   function inflightFile() { return dir() + "/inflight.json"; }
@@ -26,6 +26,7 @@ var GeoFetch = (function () {
       var r = api.runProcess("curl", ["--version"]);
       var m = /curl (\d+)\.(\d+)/.exec(typeof r === "string" ? r : JSON.stringify(r));
       support = !!m && (Number(m[1]) > 7 || (Number(m[1]) === 7 && Number(m[2]) >= 75)); // %{exitcode} needs 7.75
+      appendOutput = !!m && (Number(m[1]) > 8 || (Number(m[1]) === 8 && Number(m[2]) >= 3)); // %output needs 8.3
     } catch (e) { support = false; }
     return support;
   }
@@ -150,9 +151,16 @@ var GeoFetch = (function () {
     }
     writeState(state); // the in-flight list is written before curl starts
     if (fresh.length) {
-      api.runDetachedProcess("curl", ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2",
-        "--max-time", "120", "-A", GeoNet.USER_AGENT, "-w", "%{stderr}%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n",
-        "--stderr", batch.status, "-K", batch.cfg]);
+      // On Windows Cavalry can't read a file curl holds open (--stderr keeps it open for the whole
+      // run) and logs an error on every poll until curl exits. "%output{>>file}" (curl 8.3+) opens,
+      // appends and closes the file per line, so the status can be read while curl runs.
+      available(); // sets appendOutput (cached after the first call)
+      var statusFormat = "%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n";
+      var curlArgs = ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2",
+        "--max-time", "120", "-A", GeoNet.USER_AGENT];
+      if (appendOutput && batch.status.indexOf("}") < 0) curlArgs.push("-w", "%output{>>" + batch.status + "}" + statusFormat);
+      else curlArgs.push("-w", "%{stderr}" + statusFormat, "--stderr", batch.status);
+      api.runDetachedProcess("curl", curlArgs.concat(["-K", batch.cfg]));
     }
     return batch;
   }
@@ -237,5 +245,5 @@ var GeoFetch = (function () {
   return { STALL_MS: STALL_MS, FIRST_LINE_MS: FIRST_LINE_MS, MAX_BATCH_MS: MAX_BATCH_MS, available: available, leftovers: leftovers,
     disable: disable,
     start: start, poll: poll, finish: finish, abandon: abandon, release: release, discard: del,
-    _reset: function () { support = null; } };
+    _reset: function () { support = null; appendOutput = false; }, _appendOutput: function () { return appendOutput; } };
 })();
