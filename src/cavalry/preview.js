@@ -1,5 +1,7 @@
-// The Map tab's preview: a ui.Draw showing a flat Web Mercator map (GeoPreview does the maths)
-// with a fixed green frame in the middle. Dragging only updates the view; a 40 ms timer redraws
+// The map preview, used by the Map, Pins and Routes pages: a ui.Draw showing a flat Web Mercator map
+// (GeoPreview does the maths). The Map page's also has a fixed green frame in the middle and dims what
+// is outside it; Pins and Routes turn the frame and dim off (opts.frame, opts.dim) and take clicks
+// instead. Dragging only updates the view; a 40 ms timer redraws
 // the latest state while something changed (or only on release, if Cavalry draws too slowly).
 // Land is one fill path plus one border path per redraw; detail follows the zoom (one level
 // lower while dragging), and 50m data is read the first time it's needed.

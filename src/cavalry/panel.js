@@ -1191,7 +1191,7 @@ calloutCoordBtn.onClick = guard(function () {
   calloutSay(map, GeoScene.createCallout(map, { lon: lonField.getValue(), lat: latField.getValue() }, text), text);
 });
 
-// ---- Day & night (Layers section, before Map furniture) -----------------------------------
+// ---- Day & night (Layers → Overlays, above Map furniture) -----------------------------------
 // The date and time start at now (UTC), the time rounded to a quarter hour. Pressing the button again
 // on a map that has the overlay sets its date and time instead of making another.
 var DAYNIGHT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -2069,8 +2069,6 @@ var TIP_TARGETS = [
 ];
 // (Dropdowns keep Cavalry's own look: setBackgroundColor on a DropDown only paints its open list.)
 TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
-
-// ---- Other tabs are appended above this line by later tasks ---------------
 
 // Sections: one tab bar above one page per section. Builders register (name, layout);
 // SECTION_ORDER sets the order (unlisted ones go last). The old section names still work in
