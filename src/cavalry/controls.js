@@ -60,6 +60,12 @@ var GeoControlPanel = (function () {
     return byName;
   }
 
+  // True when the layer sits anywhere inside the map group (at any depth).
+  function insideMap(id, map) {
+    for (var p = id, n = 0; p && n < 50; n++) { p = api.getParent(p) || ""; if (p === map.groupId) return true; }
+    return false;
+  }
+
   // What holds the map group: its parent, or the composition itself at the top level.
   function containerOf(map) {
     var parent = "";
@@ -115,7 +121,8 @@ var GeoControlPanel = (function () {
     });
     attempt(function () {
       if (where.parent) api.parent(comp, where.parent);
-      else if (has("unParent") && api.getParent(comp)) api.unParent(comp);
+      // Cavalry's unParent moves a layer up one level only, so it repeats until the layer is at the top (guarded).
+      else if (has("unParent")) for (var n = 0; n < 20 && api.getParent(comp); n++) api.unParent(comp);
     });
     if (!has("bringForward") || !has("moveBackward") || !has("select")) return;
     attempt(function () {
@@ -155,7 +162,10 @@ var GeoControlPanel = (function () {
   // The overlay / data / extract component: found again, or made when `create` says it is needed.
   function findOrCreateGroup(map, group, create, cache) {
     return keepSelection(function () {
-      var comp = findGroupIn(containerOf(map).id, map, group, create) || findAnywhere(map, group, cache), move = false;
+      var comp = findGroupIn(containerOf(map).id, map, group, create), move = false;
+      // Found elsewhere: a user's own placement is kept, but one that landed inside the map group (at any depth,
+      // e.g. a new component made while a layer in the Imagery group was selected) goes back to the top level.
+      if (!comp) { comp = findAnywhere(map, group, cache); move = !!comp && insideMap(comp, map); }
       if (!comp && create) { comp = api.create("component", map.name + GROUP_SUFFIX[group]); move = true; }
       if (!comp) return null;
       setUserData(comp, CONTROLS_KEY, map.cameraId);
@@ -166,9 +176,10 @@ var GeoControlPanel = (function () {
   }
 
   // The map's layers in Scene Window order (GeoScene.sceneOrder), never looking inside imagery groups.
-  function mapOrder(map, imagery) {
+  function mapOrder(map, imagery, night) {
     var skip = {};
-    imagery.forEach(function (im) { skip[im.groupId] = true; });
+    // Night lights are skipped like imagery (they hold as many tiles) but are not listed as imagery.
+    imagery.concat(night || GeoScene.findNightLights(map)).forEach(function (im) { skip[im.groupId] = true; });
     return GeoScene.sceneOrder(map.groupId, skip);
   }
 
@@ -282,9 +293,14 @@ var GeoControlPanel = (function () {
         draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
     });
     var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
+    // The Night lights group (the top child of Day & night) drives its own opacity from the Night lights % input.
+    // A Night lights group still hidden is mid-build (beginImageryBuild shows it once its drivers connect): it is not read.
+    var nightGroup = (found.night || GeoScene.findNightLights(map)).filter(function (im) {
+      return !(api.hasAttribute(im.groupId, "hidden") && api.get(im.groupId, "hidden"));
+    })[0], lights = nightGroup && dn && api.getParent(nightGroup.groupId) === dn.groupId ? nightGroup.groupId : null;
     model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
       helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), blurs: dn.blurs.filter(Boolean),
-      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel) } : null;
+      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel), nightLights: lights ? dnMember(lights, S.nightLights) : null } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -324,7 +340,7 @@ var GeoControlPanel = (function () {
     path = api.addDynamic(valuesId, A.CAMERA_ARRAY_ATTR, INPUT_TYPES[row.type]);
     if (!path) throw new Error("Couldn't add a control value.");
     slots[row.key] = path;
-    var seed = read(row.linked[0] || row.link[0]);
+    var seed = row.start !== undefined ? row.start : read(row.linked[0] || row.link[0]);
     attempt(function () {
       if (seed === undefined || seed === null) return;
       api.set(valuesId, one(path, row.type === "color" ? A.COLOR_VALUE(hex(seed)) : row.type === "bool" ? !!seed : Number(seed)));
@@ -415,6 +431,25 @@ var GeoControlPanel = (function () {
     attempt(function () { setUserData(comp, NOTES_KEY, next); });
   }
 
+  // The Night lights % input drives each helper's lights only while the Night lights group is there. Once the row
+  // is gone the helpers let go of the input and their lights go back to 0, so the overlay looks as before (no night
+  // lights). A keyed input stays connected and keeps its key, as retireHandleSlots does.
+  function retireLightsSlot(V, slots, helpers) {
+    var path = slots["dn:lights"];
+    if (!path || !has("disconnect")) return;
+    var keys = [], at = "array." + GeoExpression.inputIndex(GeoExpression.NIGHT_OPACITY_INPUTS, "lights"), from = V + "." + path, letGo = true;
+    try { keys = api.getKeyframeTimes(V, path) || []; } catch (e) { keys = []; }
+    if (keys.length) return;
+    helpers.forEach(function (h) {
+      var driven = "";
+      try { driven = String(api.getInConnection(h.id, at) || ""); } catch (e) { driven = ""; }
+      if (driven !== from) return;
+      if (!attempt(function () { api.disconnect(V, path, h.id, at); })) { letGo = false; return; }
+      attempt(function () { api.set(h.id, one(at, 0)); });
+    });
+    if (letGo) delete slots["dn:lights"];
+  }
+
   // Rows an older version showed for a new-style route's handles (Lean, Flip side, a leg's shape
   // by hand and handle X / Y) are no longer in the Controls. A values input still driving them
   // that isn't animated hands its value to the handle helper inputs it drives, lets go of them
@@ -462,13 +497,24 @@ var GeoControlPanel = (function () {
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
     // Routes are numbered and given their draw helpers first, from the lists and Scene Window
     // order this sync reads once (Cavalry may select the helpers it makes: the selection is kept).
-    var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: GeoScene.findImagery(map) };
-    found.order = mapOrder(map, found.imagery);
+    var imageryAll = GeoScene.findAllImagery(map);
+    var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: imageryAll.filter(function (im) { return !im.meta.night; }) };
+    found.night = imageryAll.filter(function (im) { return !!im.meta.night; });
+    found.order = mapOrder(map, found.imagery, found.night);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
+    // Night lights no longer wanted are removed (found.night is read again then); whether a night build is due is reported.
+    var nightLightsNeeded = false;
+    attempt(function () {
+      keepSelection(function () {
+        var night = GeoScene.prepareNightLights(map, imageryAll);
+        nightLightsNeeded = night.needsBuild;
+        if (night.removed > 0) found.night = GeoScene.findNightLights(map);
+      });
+    });
     // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
-    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
+    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery.concat(found.night)); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {
@@ -489,6 +535,8 @@ var GeoControlPanel = (function () {
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
       attempt(function () { retireHandleSlots(V, slots, found.routes); });
+      // No Night lights % row because the night lights are gone: the helpers let go of its input (see retireLightsSlot).
+      attempt(function () { if (!(model.dayNight && model.dayNight.nightLights)) retireLightsSlot(V, slots, model.dayNight ? model.dayNight.helpers : []); });
       p.rows.forEach(function (row, i) {
         if (row.kind === "direct") {
           attempt(function () { api.renameAttribute(row.layer, row.attr, inputLabel(row.attr, row.label)); });
@@ -509,7 +557,7 @@ var GeoControlPanel = (function () {
           row.link.forEach(function (t) {
             // A new input links only the targets already showing its value; any other target
             // was set apart on purpose, so it is marked as if the user had pressed Disconnect.
-            if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
+            if (slot.created && row.start === undefined && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
             if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
           wanted[p.groups[i]].push({ layer: V, attr: path, notes: row.notes || "" });
@@ -543,7 +591,7 @@ var GeoControlPanel = (function () {
     });
     var total = 0;
     GROUP_ORDER.forEach(function (g) { total += wanted[g].length; });
-    return { componentId: made.id, valuesId: V, controls: total, components: components };
+    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded };
   }
 
   return { sync: sync };

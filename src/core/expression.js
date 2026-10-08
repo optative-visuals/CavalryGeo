@@ -312,7 +312,7 @@ var GeoExpression = (function () {
   // Day & night: a night layer draws the dark side for a day of the year and a UTC time; the
   // opacity helpers split Night opacity into four soft steps; the label prints the time.
   var NIGHT_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["depression", 0]]);
-  var NIGHT_OPACITY_INPUTS = [["night", 55], ["twilight", 1], ["step", 0]];
+  var NIGHT_OPACITY_INPUTS = [["night", 55], ["twilight", 1], ["step", 0], ["lights", 0]];
   var TIME_LABEL_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["compW", 1920], ["compH", 1080], ["corner", 0], ["margin", 40], ["size", 18]]);
   function nightExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(NIGHT_INPUTS) +
@@ -323,7 +323,9 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_OPACITY_INPUTS) +
       "var _n = isFinite(Number(_i0)) ? Math.max(0, Math.min(100, Number(_i0))) : 55;\n" +
       "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1, _s = isFinite(Number(_i2)) ? Math.round(Number(_i2)) : 0;\n" +
-      "(_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n";
+      "var _l = isFinite(Number(_i3)) ? Math.max(0, Math.min(100, Number(_i3))) : 0;\n" +
+      "var _p = (_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n" +
+      "(_s === (_t >= 0.5 ? 3 : 0) && _l > 0 ? _p + (100 - _p) * _l / 100 : _p);\n";
   }
   // Fast Blur amount for the night layers' blurs: the same formula as GeoSun.blurAmount (a unit test
   // keeps them equal); the [x, y] it returns drives every blur's Amount.

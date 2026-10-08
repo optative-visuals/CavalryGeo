@@ -214,11 +214,13 @@ var GeoSun = (function () {
   }
 
   // Opacity (0-100) of one of the four stacked layers: soft splits Night into four equal steps
-  // that composite to it; hard puts it all on the first.
-  function stepOpacity(night, twilight, step) {
-    var n = Math.max(0, Math.min(100, num(night, 55)));
-    if (num(twilight, 1) >= 0.5) return (1 - Math.pow(1 - n / 100, 1 / 4)) * 100;
-    return Math.round(num(step, 0)) === 0 ? n : 0;
+  // that composite to it; hard puts it all on the first. lights (0-100, night lights) lifts the
+  // deepest drawn step towards 100 so the four layers matte the night lights at full strength in the core.
+  function stepOpacity(night, twilight, step, lights) {
+    var n = Math.max(0, Math.min(100, num(night, 55))), soft = num(twilight, 1) >= 0.5, s = Math.round(num(step, 0));
+    var p = soft ? (1 - Math.pow(1 - n / 100, 1 / 4)) * 100 : (s === 0 ? n : 0);
+    var L = Math.max(0, Math.min(100, num(lights, 0)));
+    return s === (soft ? 3 : 0) && L > 0 ? p + (100 - p) * L / 100 : p;
   }
 
   // Fast Blur amount (pixels, both axes) that smooths the four stacked steps into one gradient:

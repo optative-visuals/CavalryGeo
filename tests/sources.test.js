@@ -76,3 +76,27 @@ test("imageUrl asks for the rect's exact Web Mercator box at 256 px per tile", (
   assert.match(S.imageUrl(S.byId("nasa"), { z: 4, x0: 8, y0: 5, x1: 11, y1: 7 }), /&width=1024&height=768&format=image\/jpeg$/);
   assert.throws(() => S.imageUrl(S.byId("maptiler"), { z: 1, x0: 0, y0: 0, x1: 0, y1: 0 }), /doesn't serve large images/);
 });
+
+test("nasa-night: hidden from the picker, Black Marble 2016 as JPEG, zoom 8", () => {
+  const n = S.night();
+  assert.equal(n.id, "nasa-night");
+  assert.equal(S.byId("nasa-night"), n);
+  assert.ok(!S.list().some((s) => s.id === "nasa-night"));
+  assert.equal(n.maxZoom, 8);
+  assert.equal(S.cacheKey(n, {}), "nasa-night");
+  const url = S.imageUrl(n, { z: 3, x0: 0, y0: 0, x1: 1, y1: 1 });
+  assert.match(url, /layers=VIIRS_Black_Marble&/);
+  assert.match(url, /&time=2016-01-01/);
+  assert.match(url, /format=image\/jpeg/);
+  assert.equal(S.tileUrl(n, {}, 5, 16, 10), "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/5/10/16.png");
+  assert.ok(!/time=/.test(S.imageUrl(S.byId("nasa"), { z: 3, x0: 0, y0: 0, x1: 1, y1: 1 })));
+});
+
+test("isSatellite: EOX, NASA, MapTiler satellite/hybrid, Mapbox *satellite*; never custom or street styles", () => {
+  const yes = [{ source: "eox" }, { source: "nasa" }, { source: "maptiler", style: "satellite" }, { source: "maptiler", style: "hybrid" },
+    { source: "mapbox", style: "mapbox/satellite-v9" }, { source: "mapbox", style: "mapbox/satellite-streets-v12" }];
+  const no = [{ source: "custom" }, { source: "maptiler", style: "streets-v2" }, { source: "mapbox", style: "mapbox/streets-v12" },
+    { source: "nasa-night" }, null, undefined, {}];
+  yes.forEach((m) => assert.equal(S.isSatellite(m), true, JSON.stringify(m)));
+  no.forEach((m) => assert.equal(S.isSatellite(m), false, JSON.stringify(m)));
+});

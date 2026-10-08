@@ -470,7 +470,7 @@ test("day & night rows: the exact rows in order, all in the time group, with the
   const corner = dn[dn.length - 1];
   assert.equal(corner.kind, "value"); assert.deepEqual(corner.link, [{ layer: "tl", attr: TLAB("corner") }]); assert.deepEqual(corner.overrides, { hardMin: 0, hardMax: 3, step: 1 });
   assert.deepEqual(G.STATE_ATTRS.nightLayer, [NIGHT("dayOfYear"), NIGHT("utcTime"), "material.materialColor"]);
-  assert.deepEqual(G.STATE_ATTRS.nightHelper, [HELP("night"), HELP("twilight")]);
+  assert.deepEqual(G.STATE_ATTRS.nightHelper, [HELP("night"), HELP("twilight"), HELP("lights")]);
   assert.deepEqual(G.STATE_ATTRS.timeLabel, [TLAB("dayOfYear"), TLAB("utcTime"), TLAB("size"), TLAB("corner")]);
 });
 
@@ -482,4 +482,19 @@ test("day & night rows: none without a model, no label rows without a label, and
   assert.deepEqual(p.rows.find((r) => r.label === "Day & night · Day of year (1–365)").link.length, 4);
   const ids = G.ids(dnModel());
   ["dn", "tl", "n0", "n18", "h0", "h18"].forEach((id) => assert.equal(ids[id], true, id));
+});
+
+// ---- Night lights in Day & night ----
+test("night lights row: Night lights % follows Night opacity, drives the group's opacity and every helper's lights, and is absent without night lights", () => {
+  const p = G.plan(dnModel({ nightLights: { id: "nlg", state: {} } }));
+  const ls = labels(p), at = ls.indexOf("Day & night · Night opacity");
+  assert.equal(ls[at + 1], "Day & night · Night lights %");
+  const r = row(p, "Day & night · Night lights %");
+  assert.equal(r.kind, "value"); assert.equal(r.type, "double");
+  assert.deepEqual(r.link, [{ layer: "nlg", attr: "opacity" }].concat(["h0", "h6", "h12", "h18"].map((l) => ({ layer: l, attr: HELP("lights") }))));
+  assert.deepEqual(r.overrides, { hardMin: 0, hardMax: 100 });
+  assert.equal(p.groups[p.rows.indexOf(r)], "time");
+  assert.ok(!labels(G.plan(dnModel())).includes("Day & night · Night lights %"));
+  assert.deepEqual(G.STATE_ATTRS.nightLights, ["opacity"]);
+  assert.equal(G.ids(dnModel({ nightLights: { id: "nlg", state: {} } })).nlg, true);
 });

@@ -28,8 +28,17 @@ var GeoSources = (function () {
       licence: "Only use tiles you have permission to use." }
   ];
 
+  // Night lights (Day & night over satellite imagery): not offered in the Imagery picker.
+  var NIGHT = { id: "nasa-night", name: "NASA Black Marble", label: "NASA Black Marble 2016 (night lights)", key: null, minZoom: 0, maxZoom: 8, imagePx: 256,
+    wms: { url: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layer: "VIIRS_Black_Marble", format: "image/jpeg", time: "2016-01-01" },
+    template: "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png",
+    attribution: "NASA Black Marble 2016 (NASA Earth Observatory / Suomi NPP VIIRS)",
+    licence: "Public domain (NASA)." };
+
   function list() { return LIST; }
+  function night() { return NIGHT; }
   function byId(id) {
+    if (id === NIGHT.id) return NIGHT;
     for (var i = 0; i < LIST.length; i++) if (LIST[i].id === id) return LIST[i];
     throw new Error("Unknown imagery source: " + id);
   }
@@ -100,10 +109,19 @@ var GeoSources = (function () {
     var b = GeoBlocks.rectMercator(rect), px = GeoBlocks.rectPixels(rect);
     return src.wms.url + "?service=WMS&request=GetMap&version=1.1.1&layers=" + src.wms.layer + "&styles=&srs=EPSG:3857" +
       "&bbox=" + [b.minx, b.miny, b.maxx, b.maxy].map(function (v) { return v.toFixed(3); }).join(",") +
-      "&width=" + px[0] + "&height=" + px[1] + "&format=" + src.wms.format;
+      "&width=" + px[0] + "&height=" + px[1] + "&format=" + src.wms.format + (src.wms.time ? "&time=" + src.wms.time : "");
   }
 
-  return { list: list, byId: byId, tileUrl: tileUrl, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
+  // Satellite imagery (not street maps, not custom links): night lights are shown over these.
+  function isSatellite(m) {
+    if (!m || typeof m !== "object") return false;
+    if (m.source === "eox" || m.source === "nasa") return true;
+    if (m.source === "maptiler") return m.style === "satellite" || m.style === "hybrid";
+    if (m.source === "mapbox") return String(m.style || "").indexOf("satellite") >= 0;
+    return false;
+  }
+
+  return { list: list, night: night, isSatellite: isSatellite, byId: byId, tileUrl: tileUrl, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
     attribution: attribution, providerName: providerName, extForContentType: extForContentType, extForUrl: extForUrl,
     usesImages: usesImages, imageUrl: imageUrl };
 })();

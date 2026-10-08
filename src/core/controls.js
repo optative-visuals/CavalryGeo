@@ -26,6 +26,7 @@ var GeoControls = (function () {
   var CO_ANCHOR = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "anchor"), CO_ANCHOR_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor");
   var N_DAY = IN + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear"), N_TIME = IN + E.inputIndex(E.NIGHT_INPUTS, "utcTime");
   var NH_NIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night"), NH_TWILIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight");
+  var NH_LIGHTS = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
   var TL = function (n) { return IN + E.inputIndex(E.TIME_LABEL_INPUTS, n); };
   function choice(max) { return { hardMin: 0, hardMax: max, step: 1 }; }
   var CORNERS = " (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)";
@@ -39,7 +40,7 @@ var GeoControls = (function () {
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
     calloutDraw: [CO_DRAW, CO_STYLE, CO_ANCHOR_DRAW], calloutBend: [CO_STYLE, CO_ANCHOR], calloutEdge: [CO_ANCHOR], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
-    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
+    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT, NH_LIGHTS], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")], nightLights: ["opacity"]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
@@ -59,7 +60,8 @@ var GeoControls = (function () {
     }
     // One values input driving each target ({ m: member, attr }) it may: already ours → linked;
     // wired elsewhere, animated, or unlinked by the user on purpose → left alone; otherwise → link.
-    function valueTargets(key, type, label, targets, overrides) {
+    // start: a new input begins at that value and drives every target, whatever they hold (for the plugin's own defaults).
+    function valueTargets(key, type, label, targets, overrides, start) {
       var rec = recordFor(V, key), link = [], linked = [];
       targets.forEach(function (t) {
         var s = (t.m.state && t.m.state[t.attr]) || {};
@@ -73,6 +75,7 @@ var GeoControls = (function () {
       if (link.length || linked.length) {
         var row = { kind: "value", key: key, type: type, label: label, link: link, linked: linked };
         if (overrides) row.overrides = overrides;
+        if (start !== undefined) row.start = start;
         if (notes) row.notes = notes;
         out.rows.push(row);
         out.groups.push(group);
@@ -273,6 +276,12 @@ var GeoControls = (function () {
       valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(N_TIME, TL("utcTime")), { hardMin: 0, hardMax: 24 });
       value("dn:colour", "color", dsn + "Night colour", nl, FILL);
       value("dn:night", "double", dsn + "Night opacity", nh, NH_NIGHT, { hardMin: 0, hardMax: 100 });
+      // Night lights %: the Night lights group's opacity, then the helpers' lights. A new input starts at 100 even if the
+      // group's opacity had been changed before the row existed (start, not the group's value, seeds it).
+      if (dn.nightLights) {
+        var lightTargets = [{ m: dn.nightLights, attr: "opacity" }].concat(nh.map(function (m) { return { m: m, attr: NH_LIGHTS }; }));
+        valueTargets("dn:lights", "double", dsn + "Night lights %", lightTargets, { hardMin: 0, hardMax: 100 }, 100);
+      }
       // The Night blur helper's twilight is the same input number, so one value drives all of them.
       value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", dn.blurHelper ? nh.concat([dn.blurHelper]) : nh, NH_TWILIGHT, choice(1));
       direct(dn.id, "hidden", dsn + "Hide");
@@ -299,7 +308,7 @@ var GeoControls = (function () {
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); add(c.edge); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var dn = model.dayNight;
-    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label]).forEach(add); }
+    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label, dn.nightLights]).forEach(add); }
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};
