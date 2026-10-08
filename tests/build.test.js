@@ -8217,11 +8217,17 @@ test("findFurniture takes the fade from the bar: other wiring or another map's f
 });
 
 test("a panel action scans the comp's layers no more often than before the furniture existed", () => {
-  const measure = (withFurniture) => {
+  // dayNight: none, "v2" (a Night rectangle and filter), "v1Upgrade" (an older overlay that the measured sync upgrades)
+  // or "v1NoPlugin" (an older overlay with the plugin's type off, left as it is).
+  const measure = (withFurniture, dayNight) => {
     const { context, api } = buildSandbox();
     const map = controlsMap(context), G = context.GeoScene;
+    if (dayNight === "v1NoPlugin") noNightType(api);
     if (withFurniture) { G.addScaleBar(map); G.addNorthArrow(map); }
+    if (dayNight === "v2") G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+    if (dayNight === "v1NoPlugin") makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 });
     context.syncControls(map); // settle: the first sync adds the rows
+    if (dayNight === "v1Upgrade") makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 });
     let finds = 0, scans = 0;
     const realFind = G.findMapLayers, realScan = api.getCompLayers;
     G.findMapLayers = function () { finds++; return realFind.apply(this, arguments); };
@@ -8243,6 +8249,10 @@ test("a panel action scans the comp's layers no more often than before the furni
   assert.ok(furnished.finds <= 2, "findMapLayers calls: " + furnished.finds);
   assert.ok(plainMap.scans <= 9, "before the furniture branch one sync made 8 comp scans (9 with the group-controls lookup), now " + plainMap.scans);
   assert.equal(furnished.scans, plainMap.scans, "comp scans: " + furnished.scans + " vs " + plainMap.scans);
+  ["v2", "v1Upgrade", "v1NoPlugin"].forEach((kind) => {
+    const dn = measure(false, kind);
+    assert.ok(dn.scans <= 9, "Day & night " + kind + ": comp scans " + dn.scans + " (budget 9)");
+  });
 });
 
 // ---- Simpler route controls: numbers, titles, Travel % helpers ----
