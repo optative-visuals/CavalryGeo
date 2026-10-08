@@ -84,6 +84,9 @@ var GeoStyle = (function () {
     return label;
   }
   // A hover tooltip. A GeoStyle toggle keeps its button in .widget.
+  // Dropdowns take the text boxes' dark fill, so they stand out on the lighter panels.
+  var DROPDOWN_BACKGROUND = "#272727";
+  function dropDown(dd) { if (dd) maybe(dd, "setBackgroundColor", DROPDOWN_BACKGROUND); return dd; }
   function tip(widget, text) {
     if (!widget) return widget;
     maybe(widget.widget ? widget.widget : widget, "setToolTip", text);
@@ -237,6 +240,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, dropDown: dropDown, DROPDOWN_BACKGROUND: DROPDOWN_BACKGROUND, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

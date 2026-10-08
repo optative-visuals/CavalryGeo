@@ -1990,7 +1990,10 @@ var TIP_TARGETS = [
   [refreshDataBtn, "data.refresh"],
   [dataUnmatchedList, "data.unmatched"]
 ];
-TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
+TIP_TARGETS.forEach(function (t) {
+  GeoStyle.tip(t[0], GeoTips.text(t[1]));
+  if (typeof ui.DropDown === "function" && t[0] instanceof ui.DropDown) GeoStyle.dropDown(t[0]); // every dropdown is in this table
+});
 
 // ---- Other tabs are appended above this line by later tasks ---------------
 
