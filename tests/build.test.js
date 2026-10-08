@@ -7152,6 +7152,32 @@ test("routes: Pin here turns a dragged stop into its new place and zeroes the dr
   assert.deepEqual([p.x !== undefined ? p.x : p[0], p.y !== undefined ? p.y : p[1]], [0, 0]);
 });
 
+test("routes: Pin here keeps a route stop where it was dragged (flat at camera 0 and 180, globe), the other stops too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1, msg + ": " + a + " vs " + b);
+  [{ lon: 0, projection: 0 }, { lon: 180, projection: 0 }, { lon: 140, projection: 2 }].forEach((c) => {
+    const cam = { lat: 20, lon: c.lon, zoom: 1, rotation: 0, projection: c.projection };
+    d.stops.forEach((s) => api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection }));
+    const before = evalRouteAt(api, d, cam).pos;
+    d.stops.forEach((s, k) => api.set(s.holder, { position: { x: before[k][0], y: before[k][1], z: 0 } }));   // what the drivers computed
+    api.set(d.stops[0].circle, { position: { x: 12, y: -7, z: 0 } });                                       // the user's drag
+    const dragged = [before[0][0] + 12, before[0][1] - 7];
+    assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[0].circle])), { pinned: 1, offGlobe: [] });
+    const after = evalRouteAt(api, d, cam).pos;
+    const tag = JSON.stringify(c);
+    near(after[0][0], dragged[0], "dragged stop x " + tag); near(after[0][1], dragged[1], "dragged stop y " + tag);
+    near(after[1][0], before[1][0], "other stop x " + tag); near(after[1][1], before[1][1], "other stop y " + tag);
+    // The route stays chained: its handles follow the stops' chained longitudes.
+    const legs = evalRouteAt(api, d, cam).legs;
+    assert.ok(legs[0].start.every(Number.isFinite), "leg still draws " + tag);
+    api.set(d.stops[0].circle, { position: { x: 0, y: 0, z: 0 } });
+  });
+});
+
 test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores other layers", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);

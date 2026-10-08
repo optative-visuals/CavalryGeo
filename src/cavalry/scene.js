@@ -623,6 +623,7 @@ var GeoScene = (function () {
     var want = {}, res = { pinned: 0, offGlobe: [] };
     (ids || []).forEach(function (id) { want[id] = true; });
     findRoutes(map).forEach(function (r) {
+      var pinnedHere = false;
       r.stops.forEach(function (s) {
         if (!want[s.circle] && !want[s.holder] && !(s.label && want[s.label])) return;
         var h = xy(api.get(s.holder, "position")), c = xy(api.get(s.circle, "position"));
@@ -634,12 +635,38 @@ var GeoScene = (function () {
         var o = {};
         o[A.CAMERA_ARRAY_ATTR + ".5"] = ll.lon;
         o[A.CAMERA_ARRAY_ATTR + ".6"] = ll.lat;
+        // A route stop is placed by its chained longitude plus the route's shift (the reference longitude's copy nearest the
+        // camera), so the chain takes the dropped spot less that shift. The shift is left alone: the route's other stops
+        // keep their screen places.
+        var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref;
+        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7") && isFinite(shift)) o[A.CAMERA_ARRAY_ATTR + ".7"] = ll.lon - shift;
         api.set(s.position, o);
         api.set(s.circle, { position: [0, 0] });
         res.pinned++;
+        pinnedHere = true;
       });
+      if (pinnedHere) refreshRouteChains(r.groupId);
     });
     return res;
+  }
+
+  // The handles' chained longitudes follow their stops' (their own inputs are static, not connected).
+  function refreshRouteChains(groupId) {
+    var d = userData(groupId, ROUTE_KEY), CA = A.CAMERA_ARRAY_ATTR, E = GeoExpression;
+    if (!d || !d.stops || !d.legs) return;
+    var aAttr = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "aChainLon"), bAttr = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "bChainLon");
+    d.legs.forEach(function (l) {
+      var a = d.stops[l.from], b = d.stops[l.to];
+      if (!a || !b || !a.position || !b.position || !layerThere(a.position) || !layerThere(b.position)) return;
+      if (!api.hasAttribute(a.position, CA + ".7") || !api.hasAttribute(b.position, CA + ".7")) return;
+      [l.startHandle, l.endHandle].forEach(function (h) {
+        if (!h || !layerThere(h) || !api.hasAttribute(h, aAttr)) return;
+        var o = {};
+        o[aAttr] = api.get(a.position, CA + ".7");
+        o[bAttr] = api.get(b.position, CA + ".7");
+        api.set(h, o);
+      });
+    });
   }
 
   function dataPayloads(prepared, opts) {
