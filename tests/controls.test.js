@@ -461,7 +461,7 @@ test("day & night rows: the exact rows in order, all in the time group, with the
   assert.deepEqual(night.overrides, { hardMin: 0, hardMax: 100 });
   const tw = by("Day & night · Twilight (0 hard · 1 soft)");
   assert.deepEqual(tw.link.map((t) => t.attr), [HELP("twilight"), HELP("twilight"), HELP("twilight"), HELP("twilight")]);
-  assert.deepEqual(tw.overrides, { hardMin: 0, hardMax: 1, step: 1 });
+  assert.deepEqual(tw.overrides, { hardMin: 0, hardMax: 1, step: 0.01 });
   assert.deepEqual([by("Day & night · Hide").kind, by("Day & night · Hide").layer, by("Day & night · Hide").attr], ["direct", "dn", "hidden"]);
   assert.deepEqual([by("Time label · Hide").kind, by("Time label · Hide").layer, by("Time label · Hide").attr], ["direct", "tl", "hidden"]);
   assert.deepEqual([by("Time label · Colour").kind, by("Time label · Colour").layer, by("Time label · Colour").attr], ["direct", "tl", "material.materialColor"]);
@@ -497,4 +497,50 @@ test("night lights row: Night lights % follows Night opacity, drives the group's
   assert.ok(!labels(G.plan(dnModel())).includes("Day & night · Night lights %"));
   assert.deepEqual(G.STATE_ATTRS.nightLights, ["opacity"]);
   assert.equal(G.ids(dnModel({ nightLights: { id: "nlg", state: {} } })).nlg, true);
+});
+
+// ---- Day & night, version 2: one Night rectangle and one filter carry the look ----
+const dnModel2 = (extra) => ({ valuesId: V, camera: "cam", dayNight: Object.assign({ version: 2, id: "dn", night: { id: "nr", state: {} },
+  filter: { id: "nf", state: {} }, label: { id: "tl", state: {} }, nightLights: null }, extra || {}) });
+
+test("day & night v2 rows: the same rows, labels and order as version 1, targeting the Night rectangle and the filter", () => {
+  const p = G.plan(dnModel2());
+  const dn = p.rows.map((r, i) => [r, p.groups[i]]).filter((x) => x[1] === "time").map((x) => x[0]);
+  assert.deepEqual(dn.map((r) => r.label), ["Day & night · Day of year (1–365)", "Day & night · UTC time (0–24)", "Day & night · Night colour", "Day & night · Night opacity",
+    "Day & night · Twilight (0 hard · 1 soft)", "Day & night · Hide", "Time label · Hide", "Time label · Colour", "Time label · Size",
+    "Time label · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)"]);
+  const by = (label) => dn.find((r) => r.label === label);
+  assert.deepEqual(by("Day & night · Day of year (1–365)").link, [{ layer: "nf", attr: "dayOfYear" }, { layer: "tl", attr: TLAB("dayOfYear") }]);
+  assert.deepEqual(by("Day & night · Day of year (1–365)").overrides, { hardMin: 1, hardMax: 365 });
+  assert.deepEqual(by("Day & night · UTC time (0–24)").link, [{ layer: "nf", attr: "utcTime" }, { layer: "tl", attr: TLAB("utcTime") }]);
+  assert.deepEqual(by("Day & night · UTC time (0–24)").overrides, { hardMin: 0, hardMax: 24 });
+  const colour = by("Day & night · Night colour");
+  assert.equal(colour.kind, "value"); assert.equal(colour.type, "color");
+  assert.deepEqual(colour.link, [{ layer: "nr", attr: "material.materialColor" }]);
+  assert.deepEqual(by("Day & night · Night opacity").link, [{ layer: "nf", attr: "nightOpacity" }]);
+  assert.deepEqual(by("Day & night · Night opacity").overrides, { hardMin: 0, hardMax: 100 });
+  assert.deepEqual(by("Day & night · Twilight (0 hard · 1 soft)").link, [{ layer: "nf", attr: "twilight" }]);
+  assert.deepEqual(by("Day & night · Twilight (0 hard · 1 soft)").overrides, { hardMin: 0, hardMax: 1, step: 0.01 });
+  assert.deepEqual([by("Day & night · Hide").kind, by("Day & night · Hide").layer, by("Day & night · Hide").attr], ["direct", "dn", "hidden"]);
+  assert.deepEqual(by("Time label · Size").link, [{ layer: "tl", attr: TLAB("size") }]);
+  assert.deepEqual(dn[dn.length - 1].overrides, { hardMin: 0, hardMax: 3, step: 1 });
+  assert.deepEqual(G.STATE_ATTRS.nightNight, ["material.materialColor"]);
+  assert.deepEqual(G.STATE_ATTRS.nightFilter, ["dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]);
+});
+
+test("day & night v2: no label rows without a label, Night lights % only with night lights, and ids() lists the new members", () => {
+  const noLabel = G.plan(dnModel2({ label: null }));
+  assert.ok(!labels(noLabel).some((l) => /^Time label/.test(l)));
+  assert.deepEqual(row(noLabel, "Day & night · Day of year (1–365)").link, [{ layer: "nf", attr: "dayOfYear" }]);
+  assert.ok(!labels(G.plan(dnModel2())).includes("Day & night · Night lights %"));
+  const p = G.plan(dnModel2({ nightLights: { id: "nlg", state: {} } }));
+  const ls = labels(p), at = ls.indexOf("Day & night · Night opacity");
+  assert.equal(ls[at + 1], "Day & night · Night lights %");
+  const r = row(p, "Day & night · Night lights %");
+  assert.equal(r.kind, "value"); assert.equal(r.type, "double");
+  assert.deepEqual(r.link, [{ layer: "nlg", attr: "opacity" }, { layer: "nf", attr: "lights" }]);
+  assert.deepEqual(r.overrides, { hardMin: 0, hardMax: 100 });
+  assert.equal(p.groups[p.rows.indexOf(r)], "time");
+  const ids = G.ids(dnModel2({ nightLights: { id: "nlg", state: {} } }));
+  ["dn", "nr", "nf", "tl", "nlg"].forEach((id) => assert.equal(ids[id], true, id));
 });
