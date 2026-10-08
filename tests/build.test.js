@@ -7178,6 +7178,62 @@ test("routes: Pin here keeps a route stop where it was dragged (flat at camera 0
   });
 });
 
+// Drags stop k of a route by (dx, dy) on the camera, Pins it, and returns the screen points before and after.
+function dragAndPin(api, context, map, d, cam, k, dx, dy) {
+  d.stops.forEach((s) => api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection }));
+  const before = evalRouteAt(api, d, cam).pos;
+  d.stops.forEach((s, j) => api.set(s.holder, { position: { x: before[j][0], y: before[j][1], z: 0 } }));
+  api.set(d.stops[k].circle, { position: { x: dx, y: dy, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[k].circle])), { pinned: 1, offGlobe: [] });
+  const after = evalRouteAt(api, d, cam).pos;
+  api.set(d.stops[k].circle, { position: { x: 0, y: 0, z: 0 } });
+  return { before: before[k], dragged: [before[k][0] + dx, before[k][1] + dy], after: after[k], all: { before, after } };
+}
+
+test("routes: Pin here keeps a stop chained past 180 (LA) and a second London visit (~359.9) on their copies", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1, msg + ": " + a + " vs " + b);
+  const r = context.GeoScene.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  [0, 180].forEach((lon) => {
+    const cam = { lat: 20, lon, zoom: 1, rotation: 0, projection: 0 };
+    const chain0 = api.get(d.stops[2].position, "array.7");
+    const la = dragAndPin(api, context, map, d, cam, 2, 12, -7);
+    near(la.after[0], la.dragged[0], "LA x at camera " + lon); near(la.after[1], la.dragged[1], "LA y at camera " + lon);
+    // The chain moves with the drag (12 px at zoom 1 is about 8.4 degrees) and stays on LA's copy, past 180.
+    assert.ok(Math.abs(api.get(d.stops[2].position, "array.7") - chain0) < 10, "LA stays on its copy at camera " + lon + ": " + api.get(d.stops[2].position, "array.7"));
+  });
+  const cam0 = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 0 };
+  const ld = dragAndPin(api, context, map, d, cam0, 3, 12, -7);
+  near(ld.after[0], ld.dragged[0], "London' x at camera 0"); near(ld.after[1], ld.dragged[1], "London' y at camera 0");
+  assert.ok(Math.abs(api.get(d.stops[3].position, "array.7") - 359.88) < 10, "London' stays near 359.9");
+});
+
+test("routes: a stop pinned on the globe (wrapped longitude) keeps its chained copy on the flat map", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const flatCam = { lat: 20, lon: 180, zoom: 1, rotation: 0, projection: 0 };
+  const before = evalRouteAt(api, d, flatCam).pos;
+  // LA seen from a globe centred at 180 (it is on the near side): pinned, its longitude comes back wrapped (-118.2).
+  const globe = { lat: 20, lon: 180, zoom: 1, rotation: 0, projection: 2 };
+  d.stops.forEach((s) => api.set(s.position, { "array.0": 20, "array.1": 180, "array.2": 1, "array.3": 0, "array.4": 2 }));
+  api.set(d.stops[1].holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(d.stops[1].circle, { position: { x: 0, y: 0, z: 0 } });
+  const gp = evalRouteAt(api, d, globe).pos[1];
+  api.set(d.stops[1].holder, { position: { x: gp[0], y: gp[1], z: 0 } });
+  api.set(d.stops[1].circle, { position: { x: 0, y: 0, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[1].circle])), { pinned: 1, offGlobe: [] });
+  const chain = api.get(d.stops[1].position, "array.7");
+  assert.ok(Math.abs(chain - 241.8) < 180, "chain stays on LA's copy, got " + chain);
+  const flat = evalRouteAt(api, d, flatCam).pos;
+  assert.ok(Math.abs(flat[1][0] - before[1][0]) < 1, "LA still at its flat place: " + flat[1][0] + " vs " + before[1][0]);
+});
+
 test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores other layers", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);

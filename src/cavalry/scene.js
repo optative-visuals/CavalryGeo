@@ -638,8 +638,12 @@ var GeoScene = (function () {
         // A route stop is placed by its chained longitude plus the route's shift (the reference longitude's copy nearest the
         // camera), so the chain takes the dropped spot less that shift. The shift is left alone: the route's other stops
         // keep their screen places.
-        var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref;
-        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7") && isFinite(shift)) o[A.CAMERA_ARRAY_ATTR + ".7"] = ll.lon - shift;
+        // The dropped longitude may come back wrapped (a globe pin), so the chain takes the copy nearest its old value:
+        // the same screen point, and the same copy the stop was on.
+        var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref, oldChain = v(7);
+        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7") && isFinite(shift)) {
+          o[A.CAMERA_ARRAY_ATTR + ".7"] = isFinite(oldChain) ? GeoProjection.nearestLon(ll.lon - shift, oldChain) : ll.lon - shift;
+        }
         api.set(s.position, o);
         api.set(s.circle, { position: [0, 0] });
         res.pinned++;
