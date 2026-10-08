@@ -1,0 +1,131 @@
+// Cavalry Geo Night: paints the night side of the Earth per pixel, for Cavalry Geo's Day & night overlay.
+// Copyright (C) 2026 optative-visuals. Licensed under GPL-3.0-or-later; see LICENSE.txt.
+// Mirrors GeoNight in src/core/night.js: change both together. The subsolar point is GeoSun.subsolar
+// in src/core/sun.js (copied below), and the inverse projection follows reproject.sksl branch by branch.
+uniform float camLat;
+uniform float camLon;
+uniform float camZoom;
+uniform float camRotation;
+uniform float camProjection;
+uniform float dayOfYear;
+uniform float utcTime;
+uniform float nightOpacity;
+uniform float twilight;
+uniform float lights;
+uniform shader image;
+
+const float PI = 3.14159265358979;
+const float D2R = 0.0174532925199433;
+const float MAX_LAT = 85.0511287798;
+const float MAX_ZOOM = 22.0;
+const float TAU = 5.5;
+const float BAND = 18.0;
+const float A1 = 1.340264;
+const float A2 = -0.081106;
+const float A3 = 0.000893;
+const float A4 = 0.003796;
+const float EM = 0.8660254037844386;
+
+float mercY(float lat) {
+  float p = clamp(lat, -MAX_LAT, MAX_LAT) * D2R;
+  return log(tan(PI / 4.0 + p / 2.0));
+}
+
+// The inverse of mercY, in degrees (GeoNight's invMercY).
+float invMercY(float y) { return (2.0 * atan(exp(y)) - PI / 2.0) / D2R; }
+
+float wrapLon(float d) { return d - 360.0 * floor((d + 180.0) / 360.0); }
+
+float eeY(float t) { float t2 = t * t; float t6 = t2 * t2 * t2; return t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2)); }
+float eeD(float t) { float t2 = t * t; float t6 = t2 * t2 * t2; return A1 + 3.0 * A2 * t2 + t6 * (7.0 * A3 + 9.0 * A4 * t2); }
+
+// GeoSun.subsolar(doy, utc) in src/core/sun.js: the sun's latitude (x) and longitude (y), in degrees.
+// Its wrap180 is wrapLon (the same formula).
+float2 subsolar(float doy, float utc) {
+  float g = 2.0 * PI / 365.0 * (doy - 1.0 + (utc - 12.0) / 24.0);
+  float decl = 0.006918 - 0.399912 * cos(g) + 0.070257 * sin(g) - 0.006758 * cos(2.0 * g) +
+      0.000907 * sin(2.0 * g) - 0.002697 * cos(3.0 * g) + 0.00148 * sin(3.0 * g);
+  float eot = 229.18 * (0.000075 + 0.001868 * cos(g) - 0.032077 * sin(g) - 0.014615 * cos(2.0 * g) - 0.040849 * sin(2.0 * g));
+  return float2(decl / D2R, wrapLon(-15.0 * (utc - 12.0 + eot / 60.0)));
+}
+
+// Degrees the sun is below the horizon at lat / lon (negative = day), as GeoNight.depression.
+float depression(float lat, float lon, float doy, float utc) {
+  float2 s = subsolar(doy, utc);
+  float pr = lat * D2R;
+  float dl = (lon - s.y) * D2R;
+  float dec = s.x * D2R;
+  float sinAlt = sin(pr) * sin(dec) + cos(pr) * cos(dec) * cos(dl);
+  return -asin(clamp(sinAlt, -1.0, 1.0)) / D2R;
+}
+
+// Darkness in 0..1 at depression d, as GeoNight.curve. pxDeg is one pixel in degrees of arc.
+float curve(float d, float tw, float pxDeg) {
+  float W = BAND * clamp(tw, 0.0, 1.0);
+  float w = max(pxDeg, 1e-9);
+  if (W < w) { return clamp(d / w + 0.5, 0.0, 1.0); }
+  float u = clamp(d, 0.0, W) * BAND / W;
+  return (1.0 - exp(-u / TAU)) / (1.0 - exp(-BAND / TAU));
+}
+
+// GeoNight.unproject: lat (x), lon (y), edge (z) in degrees at screen point (X, Y); w = 0 off the Earth.
+float4 unproject(float X, float Y) {
+  float R = 256.0 * exp2(clamp(camZoom, 0.0, MAX_ZOOM)) / (2.0 * PI);
+  float rot = camRotation * D2R;
+  float cr = cos(rot);
+  float sr = sin(rot);
+  float x = (X * cr + Y * sr) / R;
+  float y = (-X * sr + Y * cr) / R;
+  float proj = floor(clamp(camProjection, 0.0, 2.0) + 0.5);
+  if (proj < 0.5) {
+    // Web Mercator: one world, no horizontal limit; see-through only beyond the map's top and bottom.
+    float my = y + mercY(camLat);
+    if (abs(my) > PI) { return float4(0.0); }
+    return float4(invMercY(my), camLon + x / D2R, 1.0, 1.0);
+  }
+  if (proj < 1.5) {
+    // Equal Earth: Newton's method (8 iterations) for the parametric latitude.
+    float l0 = camLon * D2R;
+    float t0 = asin(EM * sin(camLat * D2R));
+    float ex = x + l0 * cos(t0) / (EM * eeD(t0));
+    float ey = y + eeY(t0);
+    float t = ey / A1;
+    for (int i = 0; i < 8; i++) { t -= (eeY(t) - ey) / eeD(t); }
+    if (abs(t) > asin(EM)) { return float4(0.0); }
+    float fp = eeD(t);
+    float lonRel = ex * EM * fp / cos(t) / D2R;
+    if (abs(lonRel) > 180.0) { return float4(0.0); }
+    // One-pixel soft edge along the +-180 meridians, then along the pole lines.
+    float edge = clamp((180.0 - abs(lonRel)) * D2R * R * cos(t) / (EM * fp), 0.0, 1.0);
+    edge *= clamp((asin(EM) - abs(t)) * R * fp, 0.0, 1.0);
+    return float4(asin(clamp(sin(t) / EM, -1.0, 1.0)) / D2R, wrapLon(lonRel), edge, 1.0);
+  }
+  // Globe (orthographic): off the disc is see-through, with a one-pixel soft edge at the rim.
+  float rho2 = x * x + y * y;
+  if (rho2 > 1.0) { return float4(0.0); }
+  float rim = clamp((1.0 - sqrt(rho2)) * R, 0.0, 1.0);
+  float z = sqrt(1.0 - rho2);
+  float sp0 = sin(camLat * D2R);
+  float cp0 = cos(camLat * D2R);
+  return float4(asin(clamp(z * sp0 + y * cp0, -1.0, 1.0)) / D2R,
+      wrapLon(camLon + atan(x, z * cp0 - y * sp0) / D2R), rim, 1.0);
+}
+
+// Opacity (0..1) of the night at screen point (X, Y), as GeoNight.alphaAt.
+float alphaAt(float X, float Y) {
+  float4 ll = unproject(X, Y);
+  if (ll.w < 0.5) { return 0.0; }
+  float pxDeg = 1.0 / (256.0 * exp2(clamp(camZoom, 0.0, MAX_ZOOM)) / (2.0 * PI)) / D2R;
+  float d = depression(ll.x, ll.y, dayOfYear, utcTime);
+  float n = clamp(nightOpacity, 0.0, 100.0) / 100.0;
+  float L = clamp(lights, 0.0, 100.0) / 100.0;
+  return curve(d, twilight, pxDeg) * (n + (1.0 - n) * L) * ll.z;
+}
+
+half4 main(float2 p) {
+  half4 c = image.eval(p);
+  float a = max(float(c.a), 1e-4);
+  float3 rgb = float3(c.rgb) / a;
+  float alpha = alphaAt(p.x, p.y);
+  return half4(half3(rgb * alpha), half(alpha));
+}
