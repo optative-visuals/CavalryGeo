@@ -42,7 +42,7 @@ var GeoTips = (function () {
     "layers.detail": "Bundled detail works offline. High downloads 10–40 MB once.",
     "layers.mode": "Main features only keeps street downloads light. Everything takes every feature, which can be slow and heavy.",
     "layers.credit": "When ticked, adding a street layer also adds the © OpenStreetMap contributors credit, if the map doesn't have it yet.",
-    "layers.add": "Adds the ticked layers to the picked map. A street layer unticks once it is added.",
+    "layers.add": "Adds the ticked layers to the picked map. Each box unticks once its layer is added.",
     "layers.clearCache": "Deletes the map data downloaded to this computer; layers you add later download it again. Imagery is kept. Not while imagery is downloading or building.",
     "overlays.day": "The day of the month, in UTC. Opens on today.",
     "overlays.month": "The month. Opens on this month.",

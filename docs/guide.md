@@ -146,8 +146,8 @@ panel, which also holds **Clear download cache**).
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
-  the camera's current view — zoom in before adding them. Add one street layer at a time: once a
-  street layer is added, its box unticks by itself. (If nothing was found for a layer, or the add
+  the camera's current view — zoom in before adding them. Add one street layer at a time. Once a
+  layer is added (world or street), its box unticks by itself, so pressing Add layers again can't add it twice. (If nothing was found for a layer, or the add
   was cancelled or failed, the box stays ticked so you can try again.)
 - Each map layer has a **Detail** setting in the map's Controls: lower it to thin out small or
   minor features, and keyframe it for a "map filling in" effect.

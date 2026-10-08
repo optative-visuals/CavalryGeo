@@ -9369,10 +9369,10 @@ test("Streets note says to add one street layer at a time", () => {
   const { context, ui } = buildSandbox();
   const texts = [];
   walkUi(context.sectionPages.pages[1], (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
-  assert.ok(texts.includes("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."), texts.join(" | "));
+  assert.ok(texts.includes("Downloads the area the camera shows. Add one street layer at a time. Boxes untick once their layer is added."), texts.join(" | "));
 });
 
-test("Add layers: a street box unticks once its layer is added; World boxes stay ticked", () => {
+test("Add layers: every box unticks once its layer is added, so a repeated click can't add it twice", () => {
   const { context } = buildSandbox({ setup: installNe });
   const map = streetsSetup(context, {});
   context.checks.roads.setValue(true);
@@ -9381,7 +9381,7 @@ test("Add layers: a street box unticks once its layer is added; World boxes stay
   const cats = context.GeoScene.findMapLayers(map).map((l) => l.meta.category);
   assert.ok(cats.includes("roads") && cats.includes("countries"), context.statusLabel.getText());
   assert.equal(context.checks.roads.getValue(), false, "Roads unticked");
-  assert.equal(context.checks.countries.getValue(), true, "Countries stays ticked");
+  assert.equal(context.checks.countries.getValue(), false, "Countries unticked too");
 });
 
 test("Add layers: a street layer that came back empty stays ticked", () => {
@@ -12051,7 +12051,7 @@ test("busy lock: clicks Cavalry held back during a long action are dropped quiet
     context.pinSearchBtn.onClick(); // a held-back click, delivered right after
     assert.equal(runs, 1, "the held-back click didn't run");
     assert.equal(context.statusLabel.getText(), msg, "and the action's message stays");
-    clock += 1000; // a fresh click a moment later works
+    clock += 2500; // a fresh click once the quiet window (as long as the action, at least 1.5 s) has passed works
     context.pinSearchBtn.onClick();
     assert.equal(runs, 2);
   } finally { D.now = realNow; }

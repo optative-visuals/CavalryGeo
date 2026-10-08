@@ -55,7 +55,7 @@ var busy = false;
 // While a long action runs Cavalry is frozen and keeps the user's clicks; it delivers them all as soon as
 // the action ends, after the flag has cleared. So after an action that took a while, clicks arriving in
 // the next moment are those held-back ones and are dropped (quietly, keeping the action's message).
-var SETTLE_AFTER_MS = 300, SETTLE_FOR_MS = 700, settleUntil = 0;
+var SETTLE_AFTER_MS = 300, SETTLE_MIN_MS = 1500, settleUntil = 0;
 function refuseIfBusy() {
   if (busy) { say("Still working on the last action…"); return true; }
   return Date.now() < settleUntil;
@@ -67,7 +67,8 @@ function runAsAction(fn) {
   try { fn(); } finally {
     busy = false;
     var ended = Date.now();
-    if (ended - started >= SETTLE_AFTER_MS) settleUntil = ended + SETTLE_FOR_MS;
+    // Cavalry often freezes again just after (drawing what the action made), for about as long again.
+    if (ended - started >= SETTLE_AFTER_MS) settleUntil = ended + Math.max(SETTLE_MIN_MS, ended - started);
   }
 }
 // guard() for a commit (Enter) that starts work: refused while another action runs; the flag clears in a finally.
@@ -763,7 +764,7 @@ addLayersBtn.onClick = guardAction(function () {
     GeoScene.createMapLayer(map, map.name + ": " + CATEGORY_LABEL[r.category], r.enc,
       { camera: map.cameraId, category: r.category }, GeoScene.layerStyle(map, r.category), {});
     added++;
-    if (isOsm(r.category)) checks[r.category].setValue(false); // one street layer at a time: its box unticks once it's added
+    checks[r.category].setValue(false); // every box unticks once its layer is added, so a repeated click can't add it twice
   });
   if (selected.some(isOsm) && creditCheck.getValue() && !GeoScene.hasAttribution(map)) GeoScene.createAttribution(map);
   GeoScene.restackBaseLayers(map, DRAW_ORDER);
@@ -1054,7 +1055,7 @@ TAB_BUILDERS.push(function (tabs) {
     ]),
     GeoStyle.panel([
       GeoStyle.heading("Streets · OpenStreetMap"),
-      GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."),
+      GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time. Boxes untick once their layer is added."),
       GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
       modePicker,
       row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
