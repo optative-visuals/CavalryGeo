@@ -653,7 +653,7 @@ test("Map tab: picking \"New map\" in the picker is not an error: it clears the 
   context.featureList.setModel([{ uuid: "g0", label: "France" }]);
   context.mapPicker.setValue(1);
   context.mapPicker.onValueChanged();
-  assert.equal(context.statusLabel.getText(), "New map: type a place and press Search to make it.");
+  assert.equal(context.statusLabel.getText(), "New map: type a place and press Search to make it, or press Create map here.");
   assert.deepEqual(plain(context.featureList._model), []);
   assert.equal(context.groupsLayer, null);
 });
@@ -917,7 +917,7 @@ test("Map tab: the frame-field boxes follow New map: hidden with no map, shown a
 
 test("Map tab: a note under the Fly row says what Fly here does, and hides with the row for New map", () => {
   const { context, ui } = buildSandbox();
-  assert.equal(context.flyNote.getText(), "(animates the camera to the map preview)");
+  assert.equal(context.flyNote.getText(), "(animates the camera to the preview's green frame)");
   assert.equal(context.flyNote._textColor, "#8a8a8a");
   const items = panelItems(context, context.sectionPages.pages[0]);
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
@@ -4354,7 +4354,7 @@ test("Pins preview: a click fills Lat / Lon, sets the ring, and puts the looked-
   const lat = context.latField.getValue(), lon = context.lonField.getValue();
   assert.equal(Math.round(lat * 1e4) / 1e4, lat, "4 decimals");
   assert.equal(context.labelText.getText(), "Gare du Nord");
-  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: Gare du Nord. Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
   lookupGives(context, "Gare de l'Est");
   clickAt(context.pinsPreview, 120, 70);
   assert.equal(context.labelText.getText(), "Gare de l'Est", "an earlier click's name is replaced");
@@ -4371,7 +4371,7 @@ test("Pins preview: a failed lookup says the coordinates and clears a stale look
   lookupGives(context, null);
   clickAt(context.pinsPreview, 140, 80);
   assert.equal(context.labelText.getText(), "");
-  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: " + context.coordName() + ". Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
 });
 
 test("Pins preview: Pin at coordinates after a click pins the looked-up name there, and the previews redraw with it", () => {
@@ -4452,7 +4452,7 @@ test("Pins preview: a click during a lookup is ignored, so spot, ring and name a
   const rings = ellipseCmds(strokes(context.pinsPreview._draw, "#ffffff"));
   assert.equal(rings.length, 1);
   assert.ok(Math.abs(rings[0][1] - 100) < 0.5, "the ring is at the first click");
-  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates or Label at coordinates.");
+  assert.equal(context.statusLabel.getText(), "Spot set: First. Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
 });
 
 test("Previews follow the map: picking a map centres the Label previews on its camera; Create route redraws them", () => {
@@ -8858,9 +8858,9 @@ test("Highlight selected: when every feature fails the first error is shown and 
 
 // ---- Start here tips ---------------------------------------------------------
 const TIPS_LINES = [
-  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "1. Make a map: type a place in Search and press Search, or pick \"New map\" and press Create map here.",
   "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
-  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "3. Mark places: the Label tab adds pins, labels and routes. On Routes, click the preview to add a stop.",
   "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
   "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
 ];
@@ -9767,11 +9767,11 @@ test("callouts: Callout here makes the callout for the picked place and says how
   mapSearch(context, "Paris");
   context.calloutHereBtn.onClick();
   assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 1: Paris"));
-  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for Paris. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
   context.labelText.setText("The capital");
   context.calloutHereBtn.onClick();
   assert.ok(api.getChildren(context.currentMap().groupId).some((id) => api.getNiceName(id) === "Callout 2: The capital"));
-  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 2 added for The capital. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
 });
 
 test("callouts: Callout here with no search says where to search; a failed Controls update keeps the callout", () => {
@@ -9784,7 +9784,7 @@ test("callouts: Callout here with no search says where to search; a failed Contr
   context.GeoControlPanel.sync = () => { throw new Error("boom"); };
   context.calloutHereBtn.onClick();
   assert.equal(context.GeoScene.findCallouts(context.currentMap()).length, 1);
-  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Overlay controls\. Its controls couldn't be updated: boom\./);
+  assert.match(context.statusLabel.getText(), /^Callout 1 added for Paris\. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls. Its controls couldn't be updated: boom\./);
 });
 
 test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordinate name unless text is typed", () => {
@@ -9797,7 +9797,7 @@ test("callouts: Callout at coordinates uses the Lat / Lon fields and the coordin
   const rec = plain(api.getUserDataKey(found[0].groupId, "geoCallout"));
   assert.equal(rec.lat, 48.8566); assert.equal(rec.lon, 2.3522);
   assert.equal(api.getNiceName(found[0].groupId), "Callout 1: 48.8566, 2.3522");
-  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Overlay controls.");
+  assert.equal(context.statusLabel.getText(), "Callout 1 added for 48.8566, 2.3522. Drag its label in the viewport to place it; key its Draw % in Map Overlay controls.");
   context.labelText.setText("Home");
   context.calloutCoordBtn.onClick();
   assert.equal(api.getNiceName(context.GeoScene.findCallouts(map)[0].groupId), "Callout 2: Home");

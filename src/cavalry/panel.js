@@ -112,7 +112,7 @@ var flyEndField = new ui.NumericField(playhead() + 100);
   if (typeof f.setFixedWidth === "function") f.setFixedWidth(48); // number-sized, so the whole Fly row fits
 });
 var flyBtn = GeoStyle.primaryButton("Fly here");
-var flyNote = GeoStyle.note("(animates the camera to the map preview)");
+var flyNote = GeoStyle.note("(animates the camera to the preview's green frame)");
 // Camera feel: how a flight eases, how far it zooms out on the way, a button to redo the flight
 // under the playhead with new choices, and Drift (a small move from the current view, From to To).
 var easingLabel = GeoStyle.fieldLabel("Easing");
@@ -539,9 +539,9 @@ if (typeof tipsTitle.setFontSize === "function") tipsTitle.setFontSize(11);
 if (typeof tipsTitle.setTextColor === "function") tipsTitle.setTextColor(GeoStyle.HEADING_COLOR);
 if (typeof tipsTitle.setFixedHeight === "function") tipsTitle.setFixedHeight(16);
 var tipsBox = [tipsTitle].concat([
-  "1. Make a map: type a place in Search and press Enter, or pick \"New map\" and press Create map here.",
+  "1. Make a map: type a place in Search and press Search, or pick \"New map\" and press Create map here.",
   "2. Add layers: in the Layers tab, tick countries, coastlines, roads… and press Add layers.",
-  "3. Mark places: the Label tab adds pins, labels and routes. Click the preview to drop a stop.",
+  "3. Mark places: the Label tab adds pins, labels and routes. On Routes, click the preview to add a stop.",
   "4. Animate: Fly here moves the camera between frames; key a route's Travel % or a highlight's Amount % in its Controls.",
   "Every map's settings are in \"(map name) Map controls\" in the Scene Window."
 ].map(function (t) { return GeoStyle.note(t); }), [tipsGotItBtn]);
@@ -773,7 +773,7 @@ mapPicker.onValueChanged = guard(function () {
   if (!newMapSelected()) refreshSourceLayers();
   else {
     clearSourceLayers();
-    say("New map: type a place and press Search to make it.");
+    say("New map: type a place and press Search to make it, or press Create map here.");
   }
   previewShowMap(); // last, so a preview problem can't skip the layer refresh
 });
@@ -920,7 +920,7 @@ bakeBtn.onClick = guard(function () {
   }
 
   var msg = "Baked " + baked + " layer(s) at the current frame. Baked shapes no longer follow the camera.";
-  if (skippedData) msg += " Skipped " + skippedData + " data layer(s) - data layers can't be baked yet.";
+  if (skippedData) msg += " Skipped " + skippedData + " data layer(s) — data layers can't be baked yet.";
   if (skippedRoute) msg += " Skipped " + skippedRoute + " route part(s) — they're already Cavalry shapes.";
   if (skippedHighlight) msg += " Skipped " + skippedHighlight + " highlight part(s).";
   if (skippedCallout) msg += " Skipped " + skippedCallout + " callout part(s).";
@@ -1082,7 +1082,7 @@ function pinsClick(lon, lat) {
   var name = GeoNet.reverse(lat, lon, pinsPreview.frameCamera().zoom), typed = labelText.getText().trim();
   var ours = !typed || (spotName !== null && typed === spotName);
   if (ours) { labelText.setText(name || ""); spotName = name || null; }
-  say("Spot set: " + (name || coordName()) + ". Press Pin at coordinates or Label at coordinates.");
+  say("Spot set: " + (name || coordName()) + ". Press Pin at coordinates, Label at coordinates or Callout at coordinates.");
 }
 var pinsPreview = labelPreview("Click to set the spot · drag to move · middle-drag or + / − to zoom", guardClick(pinsClick), function (i) {
   if (i < 0 || i >= pinResults.length) return;
@@ -1117,7 +1117,7 @@ function pinPlace() {
 
 function pinSearch() {
   pinResults = searchInto(pinSearchField, pinResultPicker, pinMemo);
-  if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here or Label here.");
+  if (pinResults.length) say(pinResults.length + " result(s). Pick one, then Pin here, Label here or Callout here.");
   pinsFollowPicked();
 }
 pinSearchBtn.onClick = guard(pinSearch);
@@ -1143,7 +1143,7 @@ labelCoordBtn.onClick = guard(function () {
   say("Label \"" + text + "\" added at " + coordName() + "." + syncControls(map));
 });
 function calloutSay(map, g, text) {
-  say("Callout " + GeoScene.calloutNumber(g) + " added for " + text + ". Drag its label in the viewport to place it; key its Draw % in Overlay controls." + syncControls(map));
+  say("Callout " + GeoScene.calloutNumber(g) + " added for " + text + ". Drag its label in the viewport to place it; key its Draw % in " + map.name + " Overlay controls." + syncControls(map));
 }
 calloutHereBtn.onClick = guard(function () {
   var r = pinPlace(), text = labelOr(shortName(r)), map = currentMap();
