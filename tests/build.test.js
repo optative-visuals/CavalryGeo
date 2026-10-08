@@ -7034,7 +7034,7 @@ test("Highlight selected: reuses the feature's existing extract", () => {
 test("Highlight selected: asks for Find first, then for a selection", () => {
   const { context } = buildSandbox();
   context.highlightBtn.onClick();
-  assert.equal(context.statusLabel.getText(), "Error: Click Find first (Layers tab).");
+  assert.equal(context.statusLabel.getText(), "Error: Click Find first (Layers → Extract).");
   findFrance(context);
   context.featureList.getSelection = () => [];
   context.highlightBtn.onClick();

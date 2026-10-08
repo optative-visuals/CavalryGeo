@@ -773,7 +773,7 @@ featureQuery.onValueCommitted = guard(function () {
 });
 
 extractBtn.onClick = guard(function () {
-  if (!groupsLayer) throw new Error("Click Find first (Layers tab).");
+  if (!groupsLayer) throw new Error("Click Find first (Layers → Extract).");
   var sel = featureList.getSelection();
   if (!sel || !sel.length) throw new Error("Select features in the list first.");
   var map = currentMap();
@@ -782,7 +782,7 @@ extractBtn.onClick = guard(function () {
 });
 
 highlightBtn.onClick = guard(function () {
-  if (!groupsLayer) throw new Error("Click Find first (Layers tab).");
+  if (!groupsLayer) throw new Error("Click Find first (Layers → Extract).");
   var sel = featureList.getSelection();
   if (!sel || !sel.length) throw new Error("Select some features in the list first.");
   var map = currentMap(), effects = GeoScene.HIGHLIGHT_EFFECTS, effect = effects[highlightEffectPicker.getValue()] || effects[0];

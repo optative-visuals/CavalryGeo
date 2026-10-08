@@ -142,7 +142,7 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 panel, which also holds **Clear download cache**).
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
-  bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
+  bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
   the camera's current view — zoom in before adding them. Add one street layer at a time: once a
   street layer is added, its box unticks by itself. (If nothing was found for a layer, or the add
@@ -369,8 +369,8 @@ can't be baked: Bake skips them.
 - Downloads are cached in `CavalryGeo_assets/cache` inside the Scripts folder
   (**Help → Show Scripts Folder** in Cavalry).
 - **Clear download cache** (Layers → Add, in the Streets panel) deletes downloaded map data and shows how much space was
-  freed. It keeps imagery (built imagery points at those files) and waits until imagery has
-  finished downloading and building; use **Clear imagery tiles** (Imagery) for imagery.
+  freed. It keeps imagery (built imagery points at those files) and can't be used while
+  imagery is downloading or building; use **Clear imagery tiles** (Imagery) for imagery.
 - **Updates:** once a day, opening the panel asks GitHub (in the background) whether a newer
   version is out. If one is, the status line and Cavalry's console say so, with the download
   link, each time the panel opens until you update. To switch it off, add
