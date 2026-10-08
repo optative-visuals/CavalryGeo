@@ -1990,11 +1990,8 @@ var TIP_TARGETS = [
   [refreshDataBtn, "data.refresh"],
   [dataUnmatchedList, "data.unmatched"]
 ];
-TIP_TARGETS.forEach(function (t) {
-  GeoStyle.tip(t[0], GeoTips.text(t[1]));
-  // Every dropdown is in this table; Cavalry's widgets don't answer instanceof, so tell them by addEntry.
-  if (t[0] && typeof t[0].addEntry === "function") GeoStyle.dropDown(t[0]);
-});
+// (Dropdowns keep Cavalry's own look: setBackgroundColor on a DropDown only paints its open list.)
+TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
 
 // ---- Other tabs are appended above this line by later tasks ---------------
 

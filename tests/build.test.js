@@ -5467,14 +5467,6 @@ test("Map tab: the preview follows the tab bar's width when the panel is resized
   assert.deepEqual(plain(context.preview._draw._size), [284, 160]);
 });
 
-test("every dropdown on every page takes the text boxes' dark fill", () => {
-  const { context, ui } = buildSandbox({ setup: installNe });
-  const dds = [];
-  walkUi(context.sectionPages.widget, (n) => { if (n instanceof ui.DropDown) dds.push(n); });
-  assert.ok(dds.length >= 15, "dropdowns found: " + dds.length);
-  dds.forEach((d, i) => assert.equal(d._background, "#272727", "dropdown " + i));
-});
-
 test("the window, each tab's page and its panels get lighter layer by layer", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   assert.equal(ui._background, "#282828");
