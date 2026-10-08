@@ -533,7 +533,8 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
   const S = require("../src/core/sun.js");
   const cam5 = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
   assert.deepEqual(E.NIGHT_INPUTS.map((i) => i[0]), cam5.concat(["dayOfYear", "utcTime", "depression"]));
-  assert.deepEqual(E.NIGHT_OPACITY_INPUTS, [["night", 55], ["twilight", 1], ["step", 0]]);
+  assert.deepEqual(E.NIGHT_OPACITY_INPUTS, [["night", 55], ["twilight", 1], ["step", 0], ["lights", 0]]);
+  assert.deepEqual(E.NIGHT_OPACITY_INPUTS.map((i) => i[0]), ["night", "twilight", "step", "lights"]);
   assert.deepEqual(E.TIME_LABEL_INPUTS.map((i) => i[0]), cam5.concat(["dayOfYear", "utcTime", "compW", "compH", "corner", "margin", "size"]));
   assert.deepEqual(E.TIME_LABEL_INPUTS.slice(7).map((i) => i[1]), [1920, 1080, 0, 40, 18]);
   const { buildSunSource } = require("../tools/buildlib.js");
@@ -560,10 +561,10 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
   assert.equal(p.cmds.filter((c) => c[0] === "close").length, 2, "the antimeridian copy is drawn");
   const lab = run(E.timeLabelExpression(src, { camera: "c", category: "timeLabel" }), withIn(E.TIME_LABEL_INPUTS, { dayOfYear: 172, utcTime: 14.5 }));
   assert.deepEqual(lab.cmds.filter((c) => c[0] === "addText").map((c) => c[1]), ["21 Jun · 14:30 UTC"]);
-  [[55, 1], [55, 0], [30, 1], [100, 1], [0, 1]].forEach(([n, t]) => [0, 1, 2, 3].forEach((step) => {
-    const got = run(E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step }), [["night", n], ["twilight", t], ["step", step]]);
-    assert.ok(Math.abs(got - S.stepOpacity(n, t, step)) < 1e-9);
-  }));
+  [[55, 1], [55, 0], [30, 1], [100, 1], [0, 1]].forEach(([n, t]) => [0, 1, 2, 3].forEach((step) => [0, 35, 100].forEach((lights) => {
+    const got = run(E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step }), [["night", n], ["twilight", t], ["step", step], ["lights", lights]]);
+    assert.ok(Math.abs(got - S.stepOpacity(n, t, step, lights)) < 1e-9);
+  })));
 });
 
 test("the opacity expression treats non-numbers as the defaults", () => {

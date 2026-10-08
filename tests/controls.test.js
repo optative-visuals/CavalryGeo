@@ -470,7 +470,7 @@ test("day & night rows: the exact rows in order, all in the time group, with the
   const corner = dn[dn.length - 1];
   assert.equal(corner.kind, "value"); assert.deepEqual(corner.link, [{ layer: "tl", attr: TLAB("corner") }]); assert.deepEqual(corner.overrides, { hardMin: 0, hardMax: 3, step: 1 });
   assert.deepEqual(G.STATE_ATTRS.nightLayer, [NIGHT("dayOfYear"), NIGHT("utcTime"), "material.materialColor"]);
-  assert.deepEqual(G.STATE_ATTRS.nightHelper, [HELP("night"), HELP("twilight")]);
+  assert.deepEqual(G.STATE_ATTRS.nightHelper, [HELP("night"), HELP("twilight"), HELP("lights")]);
   assert.deepEqual(G.STATE_ATTRS.timeLabel, [TLAB("dayOfYear"), TLAB("utcTime"), TLAB("size"), TLAB("corner")]);
 });
 

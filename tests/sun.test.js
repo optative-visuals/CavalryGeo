@@ -88,6 +88,19 @@ test("stepOpacity", () => {
   assert.deepEqual([0, 1, 2, 3].map((k) => S.stepOpacity(55, 0, k)), [55, 0, 0, 0]);
 });
 
+test("stepOpacity: lights lifts only the deepest drawn step", () => {
+  const p = S.stepOpacity(55, 1, 3);
+  assert.equal(S.stepOpacity(55, 1, 3, 0), p);
+  assert.equal(S.stepOpacity(55, 1, 3, 100), 100);
+  assert.ok(Math.abs(S.stepOpacity(55, 1, 3, 50) - (p + (100 - p) / 2)) < 1e-9);
+  [0, 1, 2].forEach((k) => assert.equal(S.stepOpacity(55, 1, k, 100), S.stepOpacity(55, 1, k)));
+  assert.equal(S.stepOpacity(55, 0, 0, 100), 100);               // hard: step 0 is the one drawn
+  assert.deepEqual([1, 2, 3].map((k) => S.stepOpacity(55, 0, k, 100)), [0, 0, 0]);
+  // full core: the four layers composite to 100 %
+  const a = [0, 1, 2, 3].map((k) => S.stepOpacity(55, 1, k, 100) / 100);
+  assert.equal(1 - a.reduce((m, x) => m * (1 - x), 1), 1);
+});
+
 test("timeText", () => {
   assert.equal(S.timeText(172, 14.5), "21 Jun · 14:30 UTC");
   assert.equal(S.timeText(1, 24), "1 Jan · 00:00 UTC");

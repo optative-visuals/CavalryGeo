@@ -26,6 +26,7 @@ var GeoControls = (function () {
   var CO_ANCHOR = "array." + E.inputIndex(E.CALLOUT_GEOM_INPUTS, "anchor"), CO_ANCHOR_DRAW = "array." + E.inputIndex(E.CALLOUT_DRAW_INPUTS, "anchor");
   var N_DAY = IN + E.inputIndex(E.NIGHT_INPUTS, "dayOfYear"), N_TIME = IN + E.inputIndex(E.NIGHT_INPUTS, "utcTime");
   var NH_NIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "night"), NH_TWILIGHT = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight");
+  var NH_LIGHTS = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
   var TL = function (n) { return IN + E.inputIndex(E.TIME_LABEL_INPUTS, n); };
   function choice(max) { return { hardMin: 0, hardMax: max, step: 1 }; }
   var CORNERS = " (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)";
@@ -39,7 +40,7 @@ var GeoControls = (function () {
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
     calloutDraw: [CO_DRAW, CO_STYLE, CO_ANCHOR_DRAW], calloutBend: [CO_STYLE, CO_ANCHOR], calloutEdge: [CO_ANCHOR], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
-    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
+    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT, NH_LIGHTS], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
