@@ -330,6 +330,17 @@ refreshMapsBtn.onClick = guard(function () { refreshMaps(); say(maps.length + " 
 
 // The query the Map box last searched: pressing Enter again, or Search after Enter, doesn't ask the network twice.
 var lastMapQuery = null;
+// A search that fails on Enter would fire again as the box loses focus a moment later, and net.js would answer
+// "Please wait a second" in place of the real error: the same text tried within this time is skipped.
+var SEARCH_RETRY_MS = 1500;
+function recentlyTried(memo, q) {
+  var now = Date.now();
+  if (memo.tried === q && now - memo.triedAt < SEARCH_RETRY_MS) return true;
+  memo.tried = q;
+  memo.triedAt = now;
+  return false;
+}
+var mapTry = { tried: null, triedAt: 0 };
 function mapSearchResults(q) {
   results = GeoNet.search(q);
   lastMapQuery = q;
@@ -345,7 +356,7 @@ function mapSearchResults(q) {
 // Return (or leaving the box) lists the results, but never makes a map: that stays with Search.
 searchField.onValueCommitted = guard(function () {
   var q = searchField.getText().trim();
-  if (!q || q === lastMapQuery) return;
+  if (!q || q === lastMapQuery || recentlyTried(mapTry, q)) return;
   var creating = newMapSelected();
   mapSearchResults(q);
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
@@ -763,6 +774,7 @@ function clearSourceLayers() {
   groups = [];
   groupsEnc = null;
   groupsLayer = null;
+  lastFindText = null;
   featureList.setModel([]);
 }
 
@@ -780,9 +792,11 @@ mapPicker.onValueChanged = guard(function () {
 
 // Find runs from the button (always) or from Return / leaving the box (only when the text changed;
 // blank is a valid Find, meaning all named features).
-var lastFindText = "";
+// null = nothing found yet (so the first Enter, even on a blank box, runs); it is only set once a Find
+// has worked, and cleared with the layer list, so a failed Find or another map's layers run again.
+var lastFindText = null;
 function runFind() {
-  lastFindText = featureQuery.getText().trim();
+  var findText = featureQuery.getText().trim();
   // Refresh always (the map may have changed layers since the last refresh), but
   // keep the user's picked layer selected if it still exists.
   var pickedId = (sourceLayers[layerPicker.getValue()] || {}).id;
@@ -793,10 +807,11 @@ function runFind() {
   layerPicker.setValue(idx);
   groupsLayer = sourceLayers[idx];
   groupsEnc = GeoScene.readLayerData(groupsLayer.id);
-  groups = GeoCodec.findByName(groupsEnc, lastFindText).slice(0, 500);
+  groups = GeoCodec.findByName(groupsEnc, findText).slice(0, 500);
   featureList.setModel(groups.map(function (g, i) {
     return { uuid: "g" + i, label: g.name + (g.indices.length > 1 ? " (" + g.indices.length + " parts)" : "") };
   }));
+  lastFindText = findText;
   say(groups.length ? groups.length + " match(es). Select some, then Extract." : "No named features match.");
 }
 findBtn.onClick = guard(runFind);
@@ -1026,7 +1041,7 @@ function searchInto(field, picker, memo) {
 function searchOnCommit(field, memo, run) {
   field.onValueCommitted = guard(function () {
     var q = field.getText().trim();
-    if (!q || q === memo.q) return;
+    if (!q || q === memo.q || recentlyTried(memo, q)) return;
     run();
   });
 }
@@ -1472,10 +1487,9 @@ function showUnmatched(list) {
 
 // Load runs from the button (always, so a link can be reloaded) or from Return / leaving the box
 // (only for a non-empty link that differs from the last one loaded).
-var lastLoadedLink = "";
+var lastLoadedLink = ""; // set once a link has loaded, so a failed one runs again on Enter
 function runLoad() {
   var url = dataLinkField.getText().trim();
-  lastLoadedLink = url;
   sayNow("Downloading data…");
   var table = GeoCsv.parse(GeoNet.fetchCsv(url));
   if (!table.rows.length) throw new Error("That link has no data rows.");
@@ -1487,6 +1501,7 @@ function runLoad() {
   fillPicker(yearPicker, yearEntries, detection.time.layout === "wide" ? WIDE_YEARS : (detection.time.yearColumn || NO_YEAR));
   var prepared = GeoDataset.prepare(table, currentChoice(), GeoNet.neLayer("countries", "50m"));
   showUnmatched(prepared.unmatched);
+  lastLoadedLink = url;
   say(table.rows.length + " rows, " + prepared.matched + " place(s) matched, " + prepared.unmatched.length + " unmatched" + (prepared.unmatched.length ? " (see list)." : "."));
 }
 dataLoadBtn.onClick = guard(runLoad);
@@ -1648,6 +1663,10 @@ function runImageryTimer(intervalMs, tick) {
   imageryState.timer.setInterval(intervalMs);
   imageryState.timer.start();
 }
+// The keys, token, style, link and credit boxes are saved when you leave them, not only by Build imagery.
+[maptilerKeyField, mapboxKeyField, styleField, customUrlField, customAttrField].forEach(function (f) {
+  f.onValueCommitted = guard(function () { saveImagerySettings(); });
+});
 refreshSourceUi();
 sourcePicker.onValueChanged = function () { refreshSourceUi(); };
 stylePicker.onValueChanged = function () {

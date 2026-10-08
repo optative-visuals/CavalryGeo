@@ -1017,6 +1017,29 @@ test("Map search box: a failing search stays inside guard() on commit", () => {
   assert.match(context.statusLabel.getText(), /offline/);
 });
 
+test("a failing search on Enter is not repeated when the box loses focus right after, so the real error stays", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  let calls = 0, now = 1000000;
+  vm.runInContext("Date", context).now = () => now;
+  context.GeoNet.search = () => { calls++; throw new Error(calls === 1 ? "offline" : "Please wait a second between searches."); };
+  [["searchField"], ["pinSearchField"], ["routeSearchField"]].forEach(([name]) => {
+    calls = 0;
+    now += 10000;
+    context[name].setText("Paris");
+    context[name].onValueCommitted();
+    context[name].onValueCommitted(); // focus lost a moment later
+    assert.equal(calls, 1, name + ": the same text is not tried twice within 1.5 s");
+    assert.match(context.statusLabel.getText(), /offline/);
+    now += 1600;
+    context[name].onValueCommitted();
+    assert.equal(calls, 2, name + ": later it tries again");
+    context[name].setText("Rome");
+    context[name].onValueCommitted();
+    assert.equal(calls, 3, name + ": different text is never skipped");
+  });
+});
+
 [["Pins", "pinSearchField", "pinSearchBtn", "pinResultPicker", "pinResults"],
  ["Routes", "routeSearchField", "routeSearchBtn", "routeResultPicker", "routeResults"]].forEach(([name, fieldName, btnName, pickerName, resultsName]) => {
   test(name + " search box: Enter searches once, the same text again does not, and the button reuses the results", () => {
@@ -7019,6 +7042,61 @@ test("Extract Find box: the Find button always runs, and the text it ran counts 
   assert.deepEqual(calls, ["Rivoli", "Rivoli", "Louvre"]);
 });
 
+test("Extract Find box: the first Enter on a blank box lists every named feature", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, [""], "blank runs Find the first time");
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1, "then the same blank does nothing");
+});
+
+test("Extract Find box: switching layer (or map) forgets the last text, so the same text runs again", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  context.featureQuery.setText("Rivoli");
+  context.featureQuery.onValueCommitted();
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 1);
+  context.mapPicker.onValueChanged();
+  context.featureQuery.onValueCommitted();
+  assert.equal(calls.length, 2, "the same text runs again after a map switch");
+});
+
+test("Extract Find box: a failed Find is not remembered, so Enter with the same text tries again", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const calls = stubFind(context);
+  let fail = true;
+  const real = context.GeoScene.readLayerData;
+  context.GeoScene.readLayerData = (id) => { if (fail) throw new Error("unreadable"); return real(id); };
+  context.featureQuery.setText("Rivoli");
+  context.featureQuery.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /unreadable/);
+  fail = false;
+  context.featureQuery.onValueCommitted();
+  assert.deepEqual(calls, ["Rivoli"], "the retry ran Find");
+  assert.equal(context.statusLabel.getText(), "1 match(es). Select some, then Extract.");
+});
+
+test("Data link box: a failed load is not remembered, so Enter with the same link tries again", () => {
+  const { context } = buildSandbox();
+  const fetched = stubLoad(context);
+  let fail = true;
+  const real = context.GeoNet.fetchCsv;
+  context.GeoNet.fetchCsv = (url) => { if (fail) { fetched.push(url); throw new Error("offline"); } return real(url); };
+  context.dataLinkField.setText("https://example.com/a.csv");
+  context.dataLinkField.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /offline/);
+  fail = false;
+  context.dataLinkField.onValueCommitted();
+  assert.match(context.statusLabel.getText(), /^1 rows, /);
+  context.dataLinkField.onValueCommitted();
+  assert.equal(fetched.length, 2, "now it is remembered");
+});
+
 function findFrance(context) {
   const C = require("../src/core/codec.js"), map = controlsMap(context), G = context.GeoScene;
   const poly = C.encodeLayer({ kind: "polygon", features: [{ name: "France", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]], props: {} }] });
@@ -11532,4 +11610,14 @@ test("guard: nudges a redraw with the current frame once per action, also after 
   api.setFrame = () => { throw new Error("no redraw"); };
   context.guard(() => {})(); // a failing nudge is ignored
   assert.equal(context.statusLabel.getText().indexOf("no redraw"), -1);
+});
+
+test("Imagery boxes: key, token, style, link and credit are saved when committed, without Build imagery", () => {
+  const { context } = buildSandbox();
+  const boxes = { maptilerKeyField: "maptilerKey", mapboxKeyField: "mapboxKey", styleField: "style", customUrlField: "customUrl", customAttrField: "customAttribution" };
+  Object.keys(boxes).forEach((name) => {
+    context[name].setText(" value-" + name + " ");
+    context[name].onValueCommitted();
+    assert.equal(plain(context.GeoNet.loadSettings())[boxes[name]], "value-" + name, name + " was saved, trimmed");
+  });
 });
