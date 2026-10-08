@@ -92,12 +92,14 @@ function makeFakeApi() {
       (childOrder[parentId] = childOrder[parentId] || []).unshift(id); // newly parented layers land on top
     },
     // Like Cavalry: moves the layer to the top level, directly below its former parent group.
+    // Like Cavalry: one level up (into the former parent's container, just after the former parent), so repeated calls climb to the top.
     unParent: function (id) {
       var former = parents[id];
       leave(id);
-      delete parents[id];
-      var key = layerComp[id] || COMP_ID, top = childOrder[key] = childOrder[key] || [], at = former ? top.indexOf(former) : -1;
-      if (at >= 0) top.splice(at + 1, 0, id); else top.unshift(id);
+      var up = former ? parents[former] : undefined;
+      if (up) parents[id] = up; else delete parents[id];
+      var key = up || layerComp[id] || COMP_ID, sib = childOrder[key] = childOrder[key] || [], at = former ? sib.indexOf(former) : -1;
+      if (at >= 0) sib.splice(at + 1, 0, id); else sib.unshift(id);
     },
     getParent: function (id) { return parents[id] || ""; },
     getInFrame: function () { return 0; },
@@ -10542,6 +10544,44 @@ test("day & night: the overlay's group and layers are map parts", () => {
 // ---- Day & night in Controls ----
 const TIME_ROWS = ["Day & night · Day of year (1–365)", "Day & night · UTC time (0–24)", "Day & night · Night colour", "Day & night · Night opacity", "Day & night · Twilight (0 hard · 1 soft)",
   "Day & night · Hide", "Time label · Hide", "Time label · Colour", "Time label · Size", "Time label · Corner (0 top-left · 1 top-right · 2 bottom-left · 3 bottom-right)"];
+
+// Controls created while a layer two levels deep in the map group is selected: Cavalry puts the new component
+// next to the selection, so the fake parents it into the selection's container (the Imagery group here).
+function selectedInImagery(context, api) {
+  const G = context.GeoScene, day = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const map = fullControlsMap(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const imagery = G.findImagery(map)[0].groupId, level = api.getChildren(imagery)[0];
+  context.GeoControlPanel.sync(map);
+  G.addDayNight(map, { dayOfYear: 172, utcTime: 14.5 });
+  api.select([level]);
+  const create = api.create;
+  api.create = function (type) { const id = create.apply(api, arguments); if (type === "component") api.parent(id, imagery); return id; };
+  return { map, imagery, level };
+}
+
+test("controls: a Time controls component made with a layer two levels deep in the map selected lands at the top level, not inside the map", () => {
+  const { context, api } = buildSandbox();
+  const { map } = selectedInImagery(context, api);
+  const r = context.GeoControlPanel.sync(map);
+  assert.ok(r.components.time, "made");
+  assert.equal(api.getParent(r.components.time), "", "at the composition's top level");
+  assert.ok(api.getChildren(api.getActiveComp()).includes(r.components.time));
+  assert.equal(api.getParent(map.groupId), "", "the map group itself is not moved");
+});
+
+test("controls: a Time controls component already sitting inside the map group is moved to the top level by the next sync", () => {
+  const { context, api } = buildSandbox();
+  const map = fullControlsMap(context);
+  context.GeoControlPanel.sync(map);
+  context.GeoScene.addDayNight(map, { dayOfYear: 172, utcTime: 14.5 });
+  const time = context.GeoControlPanel.sync(map).components.time;
+  api.parent(time, map.groupId); // as if dragged into the map group in Cavalry
+  const again = context.GeoControlPanel.sync(map);
+  assert.equal(again.components.time, time, "the same component");
+  assert.equal(api.getParent(time), "", "moved back to the top level");
+});
 
 test("day & night in Controls: a Time controls component after Extract controls, with exactly the time rows, driving the four layers and the label", () => {
   const { context, api } = buildSandbox();

@@ -60,6 +60,12 @@ var GeoControlPanel = (function () {
     return byName;
   }
 
+  // True when the layer sits anywhere inside the map group (at any depth).
+  function insideMap(id, map) {
+    for (var p = id, n = 0; p && n < 50; n++) { p = api.getParent(p) || ""; if (p === map.groupId) return true; }
+    return false;
+  }
+
   // What holds the map group: its parent, or the composition itself at the top level.
   function containerOf(map) {
     var parent = "";
@@ -115,7 +121,8 @@ var GeoControlPanel = (function () {
     });
     attempt(function () {
       if (where.parent) api.parent(comp, where.parent);
-      else if (has("unParent") && api.getParent(comp)) api.unParent(comp);
+      // Cavalry's unParent moves a layer up one level only, so it repeats until the layer is at the top (guarded).
+      else if (has("unParent")) for (var n = 0; n < 20 && api.getParent(comp); n++) api.unParent(comp);
     });
     if (!has("bringForward") || !has("moveBackward") || !has("select")) return;
     attempt(function () {
@@ -155,7 +162,10 @@ var GeoControlPanel = (function () {
   // The overlay / data / extract component: found again, or made when `create` says it is needed.
   function findOrCreateGroup(map, group, create, cache) {
     return keepSelection(function () {
-      var comp = findGroupIn(containerOf(map).id, map, group, create) || findAnywhere(map, group, cache), move = false;
+      var comp = findGroupIn(containerOf(map).id, map, group, create), move = false;
+      // Found elsewhere: a user's own placement is kept, but one that landed inside the map group (at any depth,
+      // e.g. a new component made while a layer in the Imagery group was selected) goes back to the top level.
+      if (!comp) { comp = findAnywhere(map, group, cache); move = !!comp && insideMap(comp, map); }
       if (!comp && create) { comp = api.create("component", map.name + GROUP_SUFFIX[group]); move = true; }
       if (!comp) return null;
       setUserData(comp, CONTROLS_KEY, map.cameraId);
