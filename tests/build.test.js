@@ -34,6 +34,7 @@ function makeFakeApi() {
   var comp = { startFrame: 0, endFrame: 9, playbackStart: 0, playbackEnd: 9 };   // like Cavalry: frameRange follows start / end, the play range does not
   var outFrames = {};  // layerId -> out frame (a layer made in a comp ending at 9 has out frame 10)
   var frame = 0, keyframes = {}, assets = {}, nextAsset = 1;
+  var assetGroups = {}, assetGroupCalls = []; // like Cavalry: asset groups live in the Assets window; assets and comps can be parented into them
   var timers = [];
   var promoted = {};   // componentId -> [{ attribute: "layer.attr", name, notes }]
   var userData = {};   // layerId -> { key: value }
@@ -104,7 +105,7 @@ function makeFakeApi() {
     setOutFrame: function (id, f) { outFrames[id] = f; },
     // A composition's top-level layers are listed only while it is the active comp.
     getChildren: function (parentId) { return comps[parentId] && parentId !== activeComp ? [] : (childOrder[parentId] || []).slice(); },
-    getNiceName: function (id) { return niceNames[id] || id; },
+    getNiceName: function (id) { return niceNames[id] || assetGroups[id] || id; },
     // Frames and keyframes: get() returns the value of the latest key at or before the current frame.
     setFrame: function (f) { frame = f; },
     getFrame: function () { return frame; },
@@ -119,7 +120,9 @@ function makeFakeApi() {
     deleteKeyframe: function (id, attr, f) { if (keyframes[id] && keyframes[id][attr]) delete keyframes[id][attr][f]; },
     // Assets and footage.
     loadAsset: function (path) { var id = "asset#" + (nextAsset++); assets[id] = path; return id; },
-    getAssetWindowLayers: function () { return Object.keys(assets); },
+    getAssetWindowLayers: function () { return Object.keys(assets).concat(Object.keys(assetGroups)); },
+    createAssetGroup: function (name) { var id = "assetGroup#" + (nextAsset++); assetGroups[id] = name; assetGroupCalls.push(name); return id; },
+    _assetGroupCalls: assetGroupCalls,
     getAssetFilePath: function (id) { return assets[id]; },
     // Like Cavalry, adding an asset to the comp selects the new footage layer.
     addAssetToComp: function (assetId) { var id = "footageShape#" + (nextId++); niceNames[id] = String(assets[assetId]).split("/").pop(); selection = [id]; return addToComp(id); },
@@ -2138,11 +2141,11 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.ok(conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"));
   ["position", "scale", "opacity"].forEach((a) => assert.ok(conns.some((c) => c[2] === level && c[3] === a), a));
   assert.equal(context.GeoScene.findImagery(map).length, 1);
-  assert.equal(api.getAssetWindowLayers().length, 48);
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48);
   const again = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(context.GeoScene.findImagery(map).length, 1, "old imagery deleted");
   assert.equal(api.layerExists(r.groupId), false);
-  assert.equal(api.getAssetWindowLayers().length, 48, "assets reused");
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48, "assets reused");
   assert.ok(api.layerExists(again.groupId));
 });
 
@@ -11295,4 +11298,91 @@ test("hover help: every control on every page has a plain tooltip, and every Geo
     const users = controls.filter((w) => w._toolTip === texts[i]);
     assert.equal(users.length, 1, k + " is used by " + users.length + " control(s)");
   });
+});
+
+// ---- Imagery Assets group (one per map) ----------------------------------------------
+function assetIds(api) { return api.getAssetWindowLayers(false).filter((id) => api.getLayerType(id) === "asset"); }
+function assetGroupsNamed(api, name) { return api.getAssetWindowLayers(false).filter((id) => api.getLayerType(id) === "assetGroup" && api.getNiceName(id) === name); }
+
+test("Imagery group: a flat build files its assets into one group named for the map", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  const name = "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId);
+  const groups = assetGroupsNamed(api, name);
+  assert.equal(groups.length, 1);
+  const assets = assetIds(api);
+  assert.equal(assets.length, 48);
+  assets.forEach((id) => assert.equal(api.getParent(id), groups[0]));
+});
+
+test("Imagery group: a bent build files its assets and the Imagery source comp", () => {
+  const { context, api, map, src } = bentFixture();
+  const plan = context.GeoScene.planImagery(map, src, {});
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  const name = "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId);
+  const groups = assetGroupsNamed(api, name);
+  assert.equal(groups.length, 1);
+  assert.ok(assetIds(api).length > 0);
+  assetIds(api).forEach((id) => assert.equal(api.getParent(id), groups[0]));
+  const im = context.GeoScene.findImagery(map)[0];
+  assert.equal(api.getParent(im.meta.sourceComp), groups[0]);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("Imagery group: a second build reuses the group and makes no duplicate", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api._assetGroupCalls.length, 1);
+  assert.equal(assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId)).length, 1);
+});
+
+test("Imagery group: an asset the user already put in a group of their own stays there", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const path = context.GeoNet.cachedTile(context.GeoScene.itemBase(plan, plan.items[0]));
+  const mine = api.createAssetGroup("Mine");
+  const asset = api.loadAsset(path, false);
+  api.parent(asset, mine);
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  assert.equal(api.getParent(asset), mine);
+  const group = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
+  assert.equal(assetIds(api).filter((id) => api.getParent(id) === group).length, 47);
+});
+
+test("Imagery group: nothing is deleted, and an older Cavalry without asset groups still builds", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  const deleted = [];
+  const realDelete = api.deleteLayer.bind(api);
+  api.deleteLayer = (id) => { deleted.push(id); return realDelete(id); };
+  context.GeoScene.buildImagery(map, src, {}, plan);
+  context.GeoScene.buildImagery(map, src, {}, plan); // the rebuild deletes the old imagery layers, never assets
+  assert.equal(deleted.filter((id) => /^asset/.test(id)).length, 0);
+  assert.equal(assetIds(api).length, 48);
+  const old = imageryFixture();
+  delete old.api.createAssetGroup;
+  const r = old.context.GeoScene.buildImagery(old.map, old.src, {}, old.plan);
+  assert.equal(r.tiles, 48);
+});
+
+test("Imagery group: Refresh controls gathers older top-level assets and bent source comps into the group", () => {
+  const flat = imageryFixture();
+  flat.context.GeoScene.buildImagery(flat.map, flat.src, {}, flat.plan);
+  assetIds(flat.api).forEach((id) => flat.api.unParent(id)); // as a map built before the group existed
+  assert.equal(flat.api.getParent(assetIds(flat.api)[0]), "");
+  flat.context.GeoControlPanel.sync(flat.map);
+  const fg = assetGroupsNamed(flat.api, "Cavalry Geo imagery \u00b7 " + flat.api.getNiceName(flat.map.groupId));
+  assert.equal(fg.length, 1);
+  assetIds(flat.api).forEach((id) => assert.equal(flat.api.getParent(id), fg[0]));
+  flat.context.GeoControlPanel.sync(flat.map);
+  assert.equal(flat.api._assetGroupCalls.length, 1, "a second refresh makes no new group");
+
+  const { context, api, map, src } = bentFixture();
+  context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const im = context.GeoScene.findImagery(map)[0];
+  api.unParent(im.meta.sourceComp);
+  assetIds(api).forEach((id) => api.unParent(id));
+  context.GeoControlPanel.sync(map);
+  const g = assetGroupsNamed(api, "Cavalry Geo imagery \u00b7 " + api.getNiceName(map.groupId))[0];
+  assert.equal(api.getParent(im.meta.sourceComp), g);
+  assetIds(api).forEach((id) => assert.equal(api.getParent(id), g));
 });

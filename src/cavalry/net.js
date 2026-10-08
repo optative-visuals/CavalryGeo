@@ -241,6 +241,8 @@ var GeoNet = (function () {
   // ---- Imagery tiles and panel settings --------------------------------------
   function tileBase(cacheKey, z, x, y) { return assetsDir() + "/cache/tiles/" + cacheKey + "/" + z + "/" + x + "/" + y; }
   function imageBase(cacheKey, r) { return imagesDir() + "/" + cacheKey + "/" + r.z + "/" + r.x0 + "_" + r.y0 + "_" + r.x1 + "_" + r.y1; }
+  // The folders (with a trailing slash) holding the files of the imagery with this cache key.
+  function cachePrefixes(cacheKey) { return [assetsDir() + "/cache/tiles/" + cacheKey + "/", imagesDir() + "/" + cacheKey + "/"]; }
   function cachedTile(base) {
     var exts = ["jpg", "png"];
     for (var i = 0; i < exts.length; i++) if (api.filePathExists(base + "." + exts[i])) return base + "." + exts[i];
@@ -315,7 +317,7 @@ var GeoNet = (function () {
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
-    tileBase: tileBase, imageBase: imageBase, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
+    tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
   };
 })();

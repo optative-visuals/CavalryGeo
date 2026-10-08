@@ -465,6 +465,8 @@ var GeoControlPanel = (function () {
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
+    // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
+    attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {
