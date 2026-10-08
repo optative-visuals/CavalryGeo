@@ -145,7 +145,7 @@ panel, which also holds **Clear download cache**).
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
-- **Date line.** On the flat map, vector layers (world categories, streets, data maps) carry on past the date line. Zoomed right out, the frame wider than the world, they repeat side by side.
+- **Date line.** On the flat map, vector layers (world categories, streets, data maps) carry on past the date line. Zoomed right out, the frame wider than the world, they repeat side by side. Layers, pins, labels, callouts, highlights and routes made by an earlier version draw one world as before until their controls refresh (any action in the panel, or **Refresh controls**).
 - **Street categories** (Buildings, Roads, Water, Parks, Railways) download from OpenStreetMap for
   the camera's current view — zoom in before adding them. Add one street layer at a time. Once a
   layer is added (world or street), its box unticks by itself, so pressing Add layers again can't add it twice. (If nothing was found for a layer, or the add
@@ -199,8 +199,7 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
   more, the sharpest zoom level is capped and the status says so — imagery then gets softer as the
   camera zooms in past that level.
 - **Zooming:** like web maps, each sharper level fades in just before its own zoom. The imagery
-  turns with the camera. Flat imagery (built on Web Mercator) hides itself when the map is switched
-  to Equal Earth or the globe: build again there to get bent imagery.
+  turns with the camera. Imagery is planned for the projection and camera it was built on: after switching projection, press Build imagery again. Flat imagery built by an earlier version hides itself on Equal Earth and the globe.
 - **Downloads** run in the background, so Cavalry stays usable. **Cancel** stops waiting and
   leaves any earlier imagery as it was; files that finish anyway are kept, and pressing Build
   again picks them up. Background downloads need curl 7.75 or newer (built into current
@@ -229,8 +228,7 @@ Geo bends them to fit the map on every projection, flat included. Build imagery 
 - **Poles:** the images stop at about 85° north and south, so the last row is stretched out to
   fill the caps.
 - **Date line:** on the flat map, imagery carries on past the date line, so a flight across the Pacific shows no edge. Zoomed right out, the imagery repeats side by side, like the rest of the world. Imagery built by an earlier version stops at the date line until you press **Build imagery** again to rebuild it so it wraps; **Refresh controls** says so.
-- **Same as before:** the same sources, limits, saved-image reuse and Cancel. Building a flat and a
-  bent version of the same source replaces the other one.
+- **Same as before:** the same sources, limits, saved-image reuse and Cancel. Building the same source again, on any projection, replaces the earlier build, including flat imagery built by an earlier version.
 
 ## Extract and Bake
 
@@ -405,5 +403,5 @@ can't be baked: Bake skips them.
 - Data layers show Detail and Point Radius inputs they don't use, and the legend's numbers always
   use the compact format.
 - On very wide flat shots, a pin, label, callout or route can hop to the other side of the frame when the camera is about half a world away from it.
-- Routes made by older Cavalry versions without the modern scripting features (the old-style route fallback) keep their old behaviour, so a leg crossing the date line runs off the side of the frame.
+- Routes drawn the older way (made by the very first versions of Cavalry Geo, or in a Cavalry that can't make Bézier lines) keep their old behaviour: a leg crossing the date line runs off the side of the frame.
 - Flat imagery built by an earlier version stops at the date line until you press Build imagery again.

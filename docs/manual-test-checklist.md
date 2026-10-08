@@ -122,7 +122,7 @@ adding street layers.
       group and the lights show only on the night side. The Time label and the Night layer still work.
 - [ ] 19r. Night lights, flat: pan and zoom → the lights fade through the twilight with the terminator and do not show
       on the sunlit side. Zoom past 8 → the status line says NASA's data stops at zoom 8.
-- [ ] 19s. Night lights, globe and Equal Earth: without the Cavalry Geo Reproject plugin, Build stops and asks for it;
+- [ ] 19s. Night lights: without the Cavalry Geo plugin, Build stops on every projection and asks for it;
       without the plugin, Add day & night builds nothing (see NF1). With it installed, the lights bend to the rim and oval with
       no ring outside them. Flight across the date line (lon 170 to -170) → the lights stay continuous.
 - [ ] 19t. Vector map (Mapbox streets, Natural Earth only) or a custom tile link: no Night lights group is added and
@@ -389,12 +389,11 @@ Night filter is checked here.
       imagery wraps the globe, lining up with the borders; poles filled by stretching, no gaps.
 - [ ] 46b. Same on Equal Earth → imagery fills the outline, lining up with the borders.
 - [ ] 46c. Date line: a flight from longitude 170 to −170 (globe and Equal Earth) → Build imagery →
-      imagery is continuous across the date line, no seam or gap.
+      imagery is continuous across the date line, no seam or gap. (flat: see DL1)
 - [ ] 46d. Without the plugin installed, Build imagery on the globe, on Equal Earth or on Web Mercator → stops with
       "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the
       Cavalry window once, then press Build imagery again."; nothing is downloaded or built.
-- [ ] 46e. Rebuild flat ↔ bent: build on Web Mercator, switch the map to the globe and build again → the
-      flat group is replaced by the bent one; and back → the bent group and its composition are replaced.
+- [ ] 46e. Rebuild after a projection switch: build on Web Mercator, switch the map to the globe and build again → the first 'Imagery: …' group and its 'Imagery source: …' composition are replaced by the new ones (one group, one composition); and back again the same. A v0.9.0 flat build (footage layers) of the same source is replaced the same way.
 - [ ] 47. Cancel during a download → "Download cancelled. Files still downloading in the
       background are kept; nothing was built."; Build again finishes quickly. Pressing Build
       imagery while it downloads → "Imagery is already downloading — press Cancel to stop." Build again and
@@ -412,10 +411,10 @@ Imagery needs the Cavalry Geo plugin (drag the CavalryGeo_plugin folder in once)
 
 - [ ] DL1. Live check 1: New map, Web Mercator. Build imagery (EOX) and night lights (Day & night over the imagery), add a pin on Tokyo and one on Los Angeles, and make a route Tokyo → Los Angeles. Animate the camera from Tokyo to Los Angeles over the Pacific, past the date line. Play it → land, coastlines, borders, imagery and night lights run across the date line with no edge and no seam. Each pin and the route appear once, and the route takes the short way over the Pacific.
 - [ ] DL2. Live check 2: on a flat map with world layers, imagery and a pin, zoom the camera out to 0, then 1, then 2 (frame wider than the world at 1080p). The world repeats side by side, imagery included. The pin and its label appear once, on the copy nearest the camera.
-- [ ] DL3. Live check 3: play flat imagery built by this version (through the Reproject filter) and an older flat build made from footage layers (a v0.9 or v1 map not yet rebuilt). Playback is about as smooth as the old footage layers, on a normal shot and on a wide shot (zoom 0 to 2).
-- [ ] DL4. Live check 4: open a v0.9 or v1 flat map with vector layers, pins and imagery. Press Refresh controls → the vector layers and pins are upgraded (values, keys and Controls rows kept), and the note says: "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps." Before rebuilding, the imagery stops at the date line. Press Build imagery → the imagery now wraps across it.
-- [ ] DL5. Round the world: a route Tokyo → Los Angeles → London → Tokyo. Each leg takes the short way, the route is drawn once, nearest the camera, and the last leg closes the short way back to Tokyo. Draw on % (0 to 100) draws the whole route, and a traveller still moves along it.
-- [ ] DL6. Pin here on a stop past the date line: make a route with a stop near 179°E, drag the stop across the date line to about 179°W, and press Pin here. The stop stays on that spot of the map as the camera moves. If the stop's longitude is keyed, its keys still move it across the date line and the route follows.
+- [ ] DL3. Live check 3: play flat imagery built by this version (through the Reproject filter) and an older flat build made from footage layers (a map made with v0.9.0 or earlier, not yet rebuilt). Playback is about as smooth as the old footage layers, on a normal shot and on a wide shot (zoom 0 to 2).
+- [ ] DL4. Live check 4: open a flat map made with v0.9.0 or earlier, with vector layers, pins and imagery. Press Refresh controls → the vector layers and pins are upgraded (values, keys and Controls rows kept), and the note says: "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps." Before rebuilding, the imagery stops at the date line. Press Build imagery → the imagery now wraps across it.
+- [ ] DL5. Round the world: a route Tokyo → Los Angeles → London → Tokyo. Each leg takes the short way, the route is drawn once, nearest the camera, and the last leg closes the short way back to Tokyo. Animating **Route n · Travel %** from 0 to 100 draws the whole route, and a traveller (picked with **Traveller** + **Add to route**) still rides along it.
+- [ ] DL6. Pin here on a stop past the date line: make a route with a stop near 179°E, drag the stop across the date line to about 179°W, and press Pin here. The stop stays on that spot of the map as the camera moves. If you key the stop's **labelLon** on its '… position' helper (in the route's Route helpers group), the keys still move it across the date line and the route follows.
 - [ ] DL7. Highlights on Russia and on Fiji with the map centred on longitude 180: each highlight is one piece, not split at the date line, and appears once.
 
 ## Map controls
