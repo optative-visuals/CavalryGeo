@@ -18,9 +18,9 @@ var GeoStyle = (function () {
   // Each layer above the window is lighter than the one below: window, then each tab's page, then its panels.
   var WINDOW_BACKGROUND = "#282828", PAGE_BACKGROUND = "#373737", PAGE_INSET = 8;
   var PANEL_BACKGROUND = "#484848", PANEL_BORDER = "#515151";
-  // Nested corners stay parallel: outer radius = inner radius + the padding between them. Cavalry's
-  // controls are about 4 px round and sit 8 px inside a panel; panels sit 8 px (PAGE_INSET) inside a page.
-  var CONTROL_RADIUS = 4, PANEL_RADIUS = CONTROL_RADIUS + 8, PAGE_RADIUS = PANEL_RADIUS + PAGE_INSET;
+  // Nested corners stay parallel: inner radius = outer radius - the padding between them. The page keeps
+  // Cavalry's own 6 px corners; panels sit PAGE_INSET (8 px) inside it, so theirs shrink to fit (never below 0).
+  var PAGE_RADIUS = 6, PANEL_RADIUS = Math.max(0, PAGE_RADIUS - PAGE_INSET);
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {

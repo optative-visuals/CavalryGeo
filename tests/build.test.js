@@ -5471,7 +5471,7 @@ test("the window, each tab's page and its panels get lighter layer by layer", ()
   const { context, ui } = buildSandbox({ setup: installNe });
   assert.equal(ui._background, "#282828");
   assert.equal(context.sectionPages.widget._items[0]._background, "#373737");
-  assert.deepEqual(context.sectionPages.widget._items[0]._radius, [20, 20, 20, 20], "12 px panels + the 8 px page inset");
+  assert.deepEqual(context.sectionPages.widget._items[0]._radius, [6, 6, 6, 6], "Cavalry's own 6 px corners");
 });
 
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
@@ -11161,7 +11161,7 @@ test("GeoStyle.panel is a shaded rounded box with the exact look, items in order
   assert.ok(!S.isPanel(a));
   assert.equal(p._background, "#484848");
   assert.deepEqual(plain(p._border), ["#515151", 1]);
-  assert.deepEqual(plain(p._radius), [12, 12, 12, 12], "4 px controls + 8 px padding");
+  assert.deepEqual(plain(p._radius), [0, 0, 0, 0], "the page's 6 px corners minus its 8 px inset, never below 0");
   const v = p._layout;
   assert.ok(v instanceof ui.VLayout);
   assert.deepEqual(plain(v._margins), [9, 8, 9, 10]);
