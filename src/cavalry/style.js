@@ -193,9 +193,13 @@ var GeoStyle = (function () {
         current = i;
         boxes.forEach(function (box, n) { box.setHidden(n !== i); });
       };
+      // Called once after the last page: a stretch below the pages lets a coloured page end at its
+      // last panel instead of filling the window down to the bottom.
+      stack.finish = function () { maybe(view, "addStretch"); };
     } else {
       view = new ui.PageView(); // an older Cavalry without Container: every page as tall as the tallest
       stack.add = function (layout) { view.add(layout); stack.pages.push(layout); };
+      stack.finish = function () {};
       stack.setPage = function (i) {
         if (i < 0 || i >= stack.pages.length) return;
         current = i;

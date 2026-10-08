@@ -605,7 +605,7 @@ test("every button's onClick can be invoked against an empty scene without an er
   const buttonNames = [
     "refreshMapsBtn", "searchBtn", "jumpBtn", "flyBtn", "updateFlightBtn", "driftBtn", "tipsGotItBtn", "tipsBtn",
     "addLayersBtn", "clearCacheBtn",
-    "refreshLayersBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
+    "refreshLayersBtn", "findBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "refreshControlsBtn",
     "pinSearchBtn", "pinHereBtn", "labelHereBtn", "calloutHereBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addDayNightBtn",
     "routeSearchBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "createRouteBtn", "addTravellerBtn", "pinStopsBtn",
     "dataLoadBtn", "addDataBtn", "refreshDataBtn",
@@ -4153,7 +4153,7 @@ test("GeoStyle.tabBar: buttons in a dark rounded box, the selected one lighter",
 test("main actions are deep green and housekeeping buttons quiet; every panel button is 26 tall", () => {
   const { context } = buildSandbox();
   const primary = ["searchBtn", "pinSearchBtn", "routeSearchBtn", "flyBtn", "addLayersBtn", "buildImageryBtn", "tipsGotItBtn",
-    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn", "addDayNightBtn"];
+    "pinHereBtn", "labelHereBtn", "calloutHereBtn", "createRouteBtn", "addDataBtn", "addDayNightBtn", "extractBtn"];
   const quiet = ["clearCacheBtn", "clearTilesBtn", "tipsBtn"];
   const plainBtns = ["jumpBtn", "updateFlightBtn", "driftBtn", "refreshMapsBtn", "findBtn", "extractBtn", "highlightBtn", "changeEffectBtn", "bakeBtn", "cancelImageryBtn", "dataLoadBtn",
     "refreshLayersBtn", "pinCoordBtn", "labelCoordBtn", "calloutCoordBtn", "addStopBtn", "removeStopBtn", "clearStopsBtn", "addTravellerBtn", "refreshDataBtn", "imageryAttrBtn"];
@@ -5481,6 +5481,7 @@ test("Routes: the stops list and its Remove / Clear buttons sit in the Stops pan
 test("the window, each tab's page and its panels get lighter layer by layer", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   assert.equal(ui._background, "#282828");
+  assert.equal(context.sectionPages.widget._stretch, 1, "a stretch below the pages, so a page ends at its last panel");
   assert.equal(context.sectionPages.widget._items[0]._background, "#373737");
   assert.deepEqual(context.sectionPages.widget._items[0]._radius, [6, 6, 6, 6], "Cavalry's own 6 px corners");
 });

@@ -696,7 +696,7 @@ var featureQuery = new ui.LineEdit(); featureQuery.setPlaceholder("Name, e.g. Fr
 var findBtn = GeoStyle.button("Find");
 var featureList = new ui.List();
 featureList.setSelectionMode("extended");
-var extractBtn = GeoStyle.button("Extract selected");
+var extractBtn = GeoStyle.primaryButton("Extract selected");
 // Highlight: an effect, Start (opens on the playhead and moves on after each highlight, like Fly
 // here) and Duration (1 second of the comp's frames).
 function compFps() {
@@ -2023,6 +2023,7 @@ function buildUi() {
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
   sectionPages = GeoStyle.pageStack(GeoStyle.PAGE_BACKGROUND);
   sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
+  sectionPages.finish();
   sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
