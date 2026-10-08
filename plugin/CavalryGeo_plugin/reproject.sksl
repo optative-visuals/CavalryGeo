@@ -49,9 +49,9 @@ half4 main(float2 p) {
   float my = 0.0;
   float edge = 1.0;
   if (proj < 0.5) {
-    // Web Mercator: the source is this map, unrotated; one world, see-through past its top,
-    // bottom and sides (as the vector map).
-    if (abs(y + mercY(camLat)) > PI || abs(camLon + x / D2R) > 180.0) { return half4(0.0); }
+    // Web Mercator: the source is this map, unrotated; see-through past its top and bottom.
+    // Past the date line it repeats (dlon wraps below), as the source does.
+    if (abs(y + mercY(camLat)) > PI) { return half4(0.0); }
     dlon = wrapLon(x / D2R);
     my = y;
   } else if (proj < 1.5) {
