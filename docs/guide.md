@@ -39,7 +39,8 @@ The small **Tips** button at the bottom of the Map tab brings it back.
   like any layer. The default colours match the preview.
 - **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
   the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
-  the map at the first one (it reuses those results, so nothing is searched twice).
+  the map at the result you picked (the first unless you chose another; it reuses those results, so
+  nothing is searched twice, and Search keeps your pick when the text is unchanged).
   Enter also runs **Find** in the Extract panel (Layers → Extract) and **Load** in the Data link box, when
   the text changed since the last time.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press

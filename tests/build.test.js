@@ -981,10 +981,12 @@ test("Map search box: a commit never creates a map; Search then makes it from th
   assert.equal(context.maps.length, 0, "no map made by Enter");
   assert.equal(context.statusLabel.getText(), "2 result(s). Press Search to make the map at the first one.");
   assert.equal(calls.length, 1);
+  context.resultPicker.setValue(2);
   context.searchBtn.onClick();
   assert.equal(calls.length, 1, "Search reused the results");
   assert.equal(context.maps.length, 1);
   assert.equal(context.currentMap().name, "Paris");
+  assert.equal(context.resultPicker.getValue(), 2, "the pick survived");
   assert.match(context.statusLabel.getText(), /^Created map "Paris" with countries and coastlines, centred on Paris\. 2 result\(s\)/);
   context.mapPicker.setValue(context.maps.length); // New map again
   context.mapPicker.onValueChanged();
@@ -1004,7 +1006,9 @@ test("Map Search button: reuses the last results for the same text, searches aga
   assert.equal(context.statusLabel.getText(), "2 result(s). Pick one, then Jump here or Fly here.");
   context.resultPicker.setValue(2);
   mapSearch(context, "Paris");
-  assert.equal(context.resultPicker.getValue(), 1, "reusing still starts at the first result");
+  assert.equal(context.resultPicker.getValue(), 2, "reusing keeps the picked result");
+  mapSearch(context, "Rome");
+  assert.equal(context.resultPicker.getValue(), 1, "a fresh search picks the first result");
   const none = countingSearch(context, []);
   mapSearch(context, "Nowhere");
   mapSearch(context, "Nowhere");
@@ -1057,6 +1061,9 @@ test("a failing search on Enter is not repeated when the box loses focus right a
     assert.equal(calls.length, 1, "same text: nothing");
     context[btnName].onClick();
     assert.equal(calls.length, 1, "the button after a commit with the same text reuses the results");
+    context[pickerName].setValue(1);
+    context[btnName].onClick();
+    assert.equal(context[pickerName].getValue(), 1, "reusing keeps the picked result");
     assert.equal(context[resultsName].length, 2);
     assert.match(context.statusLabel.getText(), /^2 result\(s\)\. Pick one, then /);
     field.setText("Rome");

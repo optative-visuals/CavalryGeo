@@ -392,15 +392,15 @@ searchBtn.onClick = guardAction(function () {
   if (!q) throw new Error("Type a place to search for.");
   var creating = newMapSelected();
   if (q === lastMapQuery && results.length) {
-    // Same text as the last search (often an Enter just now): use those results, starting at the first.
-    resultPicker.setValue(1);
+    // Same text as the last search (often an Enter just now): use those results and keep the one picked.
+    if (resultPicker.getValue() < 1) resultPicker.setValue(1);
     previewFollowPicked();
   } else {
     mapSearchResults(q);
   }
   if (!results.length) { say("No results for \"" + q + "\"."); return; }
   if (!creating) { say(results.length + " result(s). Pick one, then Jump here or Fly here."); return; }
-  var r = results[0], name = uniqueMapName(nameField.getText().trim() || shortName(r));
+  var r = results[Math.max(resultPicker.getValue(), 1) - 1], name = uniqueMapName(nameField.getText().trim() || shortName(r));
   var made = makeMap(name, camForResult(r, projPicker.getValue()));
   var starter = addStarterLayers(made);
   var note = syncControls(made, true);
@@ -1076,10 +1076,13 @@ TAB_BUILDERS.push(function (tabs) {
 function searchInto(field, picker, memo) {
   var q = field.getText().trim();
   if (!q) throw new Error("Type a place to search for.");
-  var found = memo.q === q && memo.found.length ? memo.found : GeoNet.search(q);
+  var reuse = memo.q === q && memo.found.length;
+  var found = reuse ? memo.found : GeoNet.search(q);
+  var kept = reuse ? picker.getValue() : 0; // the same text again keeps the picked result
   memo.q = q;
   memo.found = found.slice();
   fillPlaces(picker, found);
+  if (reuse && kept > 0 && kept < found.length) picker.setValue(kept);
   if (!found.length) say("No results for \"" + q + "\".");
   return found;
 }
