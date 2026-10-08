@@ -13268,8 +13268,11 @@ test("night lights in the panel v2: Add day & night after the Night rectangle wa
   const dn = G.findDayNight(map).groupId, before = dnRec(api, dn);
   assert.equal(G.findNightLights(map).length, 1, "night lights built");
   api.deleteLayer(before.night);
+  // The "missing parts were made again" note is replaced here by the night-lights message (as in version 1); it is
+  // covered on a vector map by "day & night v2 panel: a second press that remade a missing part says so".
   context.addDayNightBtn.onClick();
   runSeen(context, api);
+  assert.equal(context.statusLabel.getText(), "Night lights added to Map (NASA Black Marble 2016, public domain).");
   const after = dnRec(api, dn), night = G.findNightLights(map);
   assert.ok(after.night && after.night !== before.night, "a new Night rectangle");
   assert.equal(night.length, 1, "one Night lights group");
