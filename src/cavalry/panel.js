@@ -1992,7 +1992,8 @@ var TIP_TARGETS = [
 ];
 TIP_TARGETS.forEach(function (t) {
   GeoStyle.tip(t[0], GeoTips.text(t[1]));
-  if (typeof ui.DropDown === "function" && t[0] instanceof ui.DropDown) GeoStyle.dropDown(t[0]); // every dropdown is in this table
+  // Every dropdown is in this table; Cavalry's widgets don't answer instanceof, so tell them by addEntry.
+  if (t[0] && typeof t[0].addEntry === "function") GeoStyle.dropDown(t[0]);
 });
 
 // ---- Other tabs are appended above this line by later tasks ---------------
