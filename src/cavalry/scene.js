@@ -194,7 +194,8 @@ var GeoScene = (function () {
   // The map's Scene Window order, never looking inside its imagery groups.
   function mapOrder(map) {
     var skip = {};
-    findImagery(map).forEach(function (im) { skip[im.groupId] = true; });
+    // Night lights sit inside Day & night and hold as many tiles as imagery: never looked inside either.
+    findAllImagery(map).forEach(function (im) { skip[im.groupId] = true; });
     return sceneOrder(map.groupId, skip);
   }
 
@@ -905,14 +906,17 @@ var GeoScene = (function () {
   }
 
   // The day imagery of this map (night lights are listed by findNightLights, never here).
-  function findImagery(map) { return findImageryWhere(map, false); }
+  function findImagery(map) { return findImageryWhere(map, "day"); }
   // The night lights of this map: the same entries, flagged meta.night.
-  function findNightLights(map) { return findImageryWhere(map, true); }
-  function findImageryWhere(map, night) {
+  function findNightLights(map) { return findImageryWhere(map, "night"); }
+  // Every imagery entry of this map, day and night, in one comp scan (callers split them by meta.night).
+  function findAllImagery(map) { return findImageryWhere(map, "all"); }
+  // which: "day", "night" or "all".
+  function findImageryWhere(map, which) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
       var meta = GeoExpression.readTag(readExpr(id, A.CAMERA_EXPR_ATTR), "GEO_META");
-      if (meta && meta.category === "imagery" && !!meta.night === night && meta.camera === map.cameraId && (typeof api.layerExists !== "function" || api.layerExists(meta.group))) {
+      if (meta && meta.category === "imagery" && (which === "all" || !!meta.night === (which === "night")) && meta.camera === map.cameraId && (typeof api.layerExists !== "function" || api.layerExists(meta.group))) {
         out.push({ driverId: id, groupId: meta.group, meta: meta });
       }
     });
@@ -993,7 +997,7 @@ var GeoScene = (function () {
   // are under the cache folders of the map's imagery (by cache key) and its bent source comps.
   function prepareImagery(map, imagery) {
     var wanted = [], byPath = null, ids = [], prefixes = [];
-    (imagery || findImagery(map)).forEach(function (im) {
+    (imagery || findAllImagery(map)).forEach(function (im) {
       if (im.meta && im.meta.bent && im.meta.sourceComp && layerThere(im.meta.sourceComp)) wanted.push(im.meta.sourceComp);
       if (im.meta && im.meta.cacheKey) prefixes = prefixes.concat(GeoNet.cachePrefixes(im.meta.cacheKey));
     });
@@ -1441,7 +1445,9 @@ var GeoScene = (function () {
     if (f) f.helpers.forEach(function (h) {
       if (!h || !layerThere(h) || !api.hasAttribute(h, at)) return;
       var driven = "?";
-      try { driven = String(api.getInConnection(h, at) || ""); } catch (e) { /* unknown: leave it alone */ }
+      if (typeof api.getInConnection === "function") {
+        try { driven = String(api.getInConnection(h, at) || ""); } catch (e) { /* unknown: leave it alone */ }
+      }
       if (driven === "") setOne(h, at, 0);
     });
     return found.length;
@@ -3195,7 +3201,7 @@ var GeoScene = (function () {
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
     REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable,
-    findImagery: findImagery, findNightLights: findNightLights, nightLightsStatus: nightLightsStatus, planNightLights: planNightLights, removeNightLights: removeNightLights, prepareNightLights: prepareNightLights, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
+    findImagery: findImagery, findNightLights: findNightLights, findAllImagery: findAllImagery, nightLightsStatus: nightLightsStatus, planNightLights: planNightLights, removeNightLights: removeNightLights, prepareNightLights: prepareNightLights, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,

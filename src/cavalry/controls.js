@@ -166,9 +166,10 @@ var GeoControlPanel = (function () {
   }
 
   // The map's layers in Scene Window order (GeoScene.sceneOrder), never looking inside imagery groups.
-  function mapOrder(map, imagery) {
+  function mapOrder(map, imagery, night) {
     var skip = {};
-    imagery.forEach(function (im) { skip[im.groupId] = true; });
+    // Night lights are skipped like imagery (they hold as many tiles) but are not listed as imagery.
+    imagery.concat(night || GeoScene.findNightLights(map)).forEach(function (im) { skip[im.groupId] = true; });
     return GeoScene.sceneOrder(map.groupId, skip);
   }
 
@@ -462,13 +463,15 @@ var GeoControlPanel = (function () {
     var cache = {}, made = findOrCreate(map, cache), V = made.valuesId;
     // Routes are numbered and given their draw helpers first, from the lists and Scene Window
     // order this sync reads once (Cavalry may select the helpers it makes: the selection is kept).
-    var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: GeoScene.findImagery(map) };
-    found.order = mapOrder(map, found.imagery);
+    var imageryAll = GeoScene.findAllImagery(map);
+    var found = { mapLayers: GeoScene.findMapLayers(map), routes: GeoScene.findRoutes(map), imagery: imageryAll.filter(function (im) { return !im.meta.night; }) };
+    found.night = imageryAll.filter(function (im) { return !!im.meta.night; });
+    found.order = mapOrder(map, found.imagery, found.night);
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
     // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
-    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery); }); });
+    if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery.concat(found.night)); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
     // again only when something was removed (readModel must not see deleted highlight shapes).
     attempt(function () {

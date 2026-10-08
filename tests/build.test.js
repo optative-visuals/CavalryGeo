@@ -12269,3 +12269,24 @@ test("planNightLights caps the zoom at 8 and sets zoomCapped only for a camera p
   const plan = low.context.GeoScene.planNightLights(imageryMap(low.context, low.api, 4));
   assert.ok(!plan.zoomCapped);
 });
+
+
+test("night lights: Controls sync and the route order never look inside the Night lights group, and Controls doesn't list it as imagery", () => {
+  const { context, api, map } = nightFixture(4);
+  const G = context.GeoScene;
+  const day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const inside = new Set();
+  (function walk(id) { inside.add(id); api.getChildren(id).forEach(walk); })(n.groupId);
+  const asked = [], real = api.getChildren;
+  api.getChildren = function (id) { asked.push(id); return real.apply(this, arguments); };
+  let r;
+  try {
+    G.prepareRoutes(map, G.findMapLayers(map), [], undefined);
+    r = context.GeoControlPanel.sync(map);
+  } finally { api.getChildren = real; }
+  assert.ok(asked.length > 0);
+  assert.deepEqual(asked.filter((id) => inside.has(id)), []);
+  assert.equal(promotedNames(api, r.componentId).filter((name) => /Night lights/.test(name)).length, 0, "no night lights row among the imagery");
+});
