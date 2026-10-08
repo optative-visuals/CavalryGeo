@@ -6878,6 +6878,94 @@ test("routes: a route inside one copy of the world keeps chained longitudes equa
   });
 });
 
+// Evaluates a route's stored stop-driver and handle expressions at a camera, as Cavalry would: the stop's own inputs
+// (labelLon, chainLon, refLon) and each handle's stored inputs, with the camera and the stops' screen positions given.
+function evalRouteAt(api, d, cam) {
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const camIns = [cam.lat, cam.lon, cam.zoom, cam.rotation, cam.projection];
+  const pos = d.stops.map((s) => run(api.get(s.position, "expression"),
+    camIns.concat([api.get(s.position, "array.5"), api.get(s.position, "array.6"), api.get(s.position, "array.7"), api.get(s.position, "array.8")])));
+  const legs = d.legs.map((l) => {
+    const a = pos[l.from], b = pos[l.to], out = { a, b };
+    [["start", l.startHandle], ["end", l.endHandle]].forEach(([w, h]) => {
+      const ins = new Array(27).fill(0);
+      for (let i = 8; i < 27; i++) ins[i] = api.get(h, "array." + i);
+      camIns.forEach((v, i) => { ins[15 + i] = v; });
+      Object.assign(ins, { 0: a[0], 1: a[1], 4: b[0], 5: b[1] });
+      out[w] = run(api.get(h, "expression"), ins);
+    });
+    return out;
+  });
+  return { pos, legs };
+}
+const PROJ_T = require("../src/core/projection.js"), CURVE_T = require("../src/core/curve.js");
+
+test("routes: round the world (London -> Tokyo -> LA -> London): the closing leg is short and joined, at every camera", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 4, "London's second visit gets its own holder");
+  assert.equal(d.legs.length, 3);
+  d.legs.forEach((l, i) => { assert.equal(l.from, i); assert.equal(l.to, i + 1); });
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg + ": " + a + " vs " + b);
+  near(api.get(d.stops[3].position, "array.7"), 359.88, "second London chained");
+  near(api.get(d.stops[0].position, "array.7"), -0.12, "first London chained");
+  const ref = (-0.12 + 359.88) / 2;
+  d.stops.forEach((s) => near(api.get(s.position, "array.8"), ref, "one refLon for the route"));
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => {
+    const aC = api.get(h, HIN("aChainLon")), bC = api.get(h, HIN("bChainLon"));
+    assert.ok(Math.abs(bC - aC) < 180, "leg takes the short way: " + aC + " -> " + bC);
+  }));
+  [0, 180, 179.9, -179.9].forEach((lon) => {
+    const cam = { lat: 20, lon, zoom: 1, rotation: 0, projection: 0 };
+    const { pos, legs } = evalRouteAt(api, d, cam);
+    const shift = PROJ_T.nearestLon(ref, lon) - ref;
+    d.legs.forEach((l, i) => {
+      const h = legs[i];
+      const h0 = d.legs[i].startHandle;
+      const want = CURVE_T.greatCircleHandles(h.a, h.b, { cam, aLon: api.get(h0, HIN("aChainLon")) + shift, aLat: api.get(h0, HIN("aLat")),
+        bLon: api.get(h0, HIN("bChainLon")) + shift, bLat: api.get(h0, HIN("bLat")), offA: [0, 0], offB: [0, 0] }, { arc: 30, lean: 0, flip: 0 });
+      const arc = CURVE_T.handles(h.a, h.b, { arc: 30, lean: 0, flip: 0 });
+      assert.notDeepEqual(h.start, arc.start, "leg " + i + " at " + lon + " is a great circle, not the arc fallback");
+      near(h.start[0], want.start[0], "leg " + i + " start x at " + lon);
+      near(h.start[1], want.start[1], "leg " + i + " start y at " + lon);
+      near(h.end[0], want.end[0], "leg " + i + " end x at " + lon);
+    });
+    // Joined: each leg ends on the screen point the next leg starts from.
+    legs.forEach((h, i) => { if (i + 1 < legs.length) { near(h.b[0], legs[i + 1].a[0], "joined x " + i); near(h.b[1], legs[i + 1].a[1], "joined y " + i); } });
+    near(pos[3][0] - pos[0][0], 2 * Math.PI * PROJ_T.worldScale(1), "the two Londons sit one world apart (in px), each on its own copy");
+  });
+});
+
+test("routes: London -> Tokyo -> London (no winding) keeps one London holder", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 };
+  const r = context.GeoScene.createRoute(map, [LON, TK, LON], { arc: 30, labels: true, shape: 0 });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 2);
+  assert.equal(d.legs[1].to, 0);
+  assert.equal(d.legs[1].from, 1);
+});
+
+test("routes: a rotated flat camera turns the stops and the great-circle handles with it", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const base = { lat: 20, lon: 0, zoom: 1, projection: 0 };
+  const flat = evalRouteAt(api, d, { ...base, rotation: 0 }), turned = evalRouteAt(api, d, { ...base, rotation: 45 });
+  const t = 45 * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  const rot = (v) => [v[0] * c - v[1] * s, v[0] * s + v[1] * c];
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ": " + a + " vs " + b);
+  flat.pos.forEach((p, k) => { const q = rot(p); near(turned.pos[k][0], q[0], "stop " + k + " x"); near(turned.pos[k][1], q[1], "stop " + k + " y"); });
+  flat.legs[0].start.forEach((v, k) => near(turned.legs[0].start[k], rot(flat.legs[0].start)[k], "start handle " + k));
+  flat.legs[0].end.forEach((v, k) => near(turned.legs[0].end[k], rot(flat.legs[0].end)[k], "end handle " + k));
+});
+
 test("routes: shape defaults to 0 (Arc)", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
