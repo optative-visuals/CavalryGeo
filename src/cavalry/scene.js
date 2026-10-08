@@ -2838,131 +2838,10 @@ var GeoScene = (function () {
     else if (typeof api.moveToBack === "function" && typeof api.select === "function") sendToBack(groupId);
   }
 
-  function makeHelperGroup(g, track) {
-    var holder = track(api.create("group", "Day & night helpers"));
-    api.parent(holder, g);
-    api.set(holder, identityTransform());
-    return holder;
-  }
-  // Night layer i (in group g) and/or its opacity helper (in holder), whichever is missing; a new one
-  // is wired to the other. Returns [layer, helper].
-  function makeNightPair(map, i, layer, helper, g, holder, day, time, colour, track) {
-    var E = GeoExpression, MA = A.MAP_ARRAY_ATTR, a = NIGHT_DEPRESSIONS[i];
-    if (!layer) {
-      layer = track(api.create(A.MAP_LAYER_TYPE, "Night " + a + "°"));
-      addInputs(layer, MA, E.NIGHT_INPUTS, { dayOfYear: day, utcTime: time, depression: a });
-      setOne(layer, A.MAP_EXPR_ATTR, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: a }));
-      connectCamera(map.cameraId, layer, MA);
-      applyStyle(layer, { fill: colour });
-    }
-    if (!helper) {
-      helper = track(api.create(A.CAMERA_LAYER_TYPE, "Night opacity " + a + "°"));
-      addInputs(helper, A.CAMERA_ARRAY_ATTR, E.NIGHT_OPACITY_INPUTS, { step: i });
-      setOne(helper, A.CAMERA_EXPR_ATTR, E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i }));
-      api.parent(helper, holder);
-    }
-    if (isNew(track, layer) || isNew(track, helper)) api.connect(helper, A.DRIVER_OUTPUT_ATTR, layer, "opacity", true);
-    if (isNew(track, layer)) { api.parent(layer, g); api.set(layer, identityTransform()); }
-    return [layer, helper];
-  }
   // Whether this Fast Blur already sits in the layer's filters (a layer's own "filters" input reads back
-  // empty; the blur's outputs list "layer.filters.N", whatever other filters the layer has).
+  // empty; the blur's outputs list "layer.filters.N", whatever other filters the layer has). Version 1 recognition uses it.
   function blurOnLayer(blur, layer) {
     try { return (api.getOutConnections(blur, "id") || []).some(function (c) { return String(c).indexOf(layer + ".filters.") === 0; }); } catch (e) { return false; }
-  }
-  // Whether this mask shape is already in the group's masks list (the group's own "masks" input reads back
-  // empty, like "filters"; the mask's outputs list "group.masks.N").
-  function maskOnGroup(mask, group) {
-    try { return (api.getOutConnections(mask, "id") || []).some(function (c) { return String(c).indexOf(group + ".masks.") === 0; }); } catch (e) { return false; }
-  }
-  // The hidden "Night mask" shape (the Earth's outline for the camera) connected into the masks of the
-  // group holding the night layers, so their blur is cut at the Earth's edge. Makes whichever is missing
-  // once; returns the mask's id. The time label sits outside the group, so the mask never clips it.
-  function ensureNightMask(map, g, mask, track) {
-    var E = GeoExpression, MA = A.MAP_ARRAY_ATTR;
-    if (!mask || !layerThere(mask)) {
-      mask = track(api.create(A.MAP_LAYER_TYPE, "Night mask"));
-      addInputs(mask, MA, E.NIGHT_MASK_INPUTS);
-      setOne(mask, A.MAP_EXPR_ATTR, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
-      connectCamera(map.cameraId, mask, MA);
-      api.parent(mask, g);
-      api.set(mask, identityTransform());
-      api.set(mask, { hidden: true });
-    }
-    if (!maskOnGroup(mask, g)) api.connect(mask, "id", g, "masks");
-    return mask;
-  }
-  // Rewrites the drawing script of each night layer and of the Night mask to the current one when it differs
-  // (layers made by an earlier version carry the old drawing); inputs, values and connections stay. Compares
-  // first, so a layer that is up to date is not written.
-  function refreshNightScripts(map, layers, mask) {
-    var E = GeoExpression;
-    function fresh(id, expr) {
-      if (!id || !layerThere(id)) return;
-      var now = String(readExpr(id, A.MAP_EXPR_ATTR) || "");
-      if (now !== expr) setOne(id, A.MAP_EXPR_ATTR, expr);
-    }
-    layers.forEach(function (id, i) { fresh(id, E.nightExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNight", depression: NIGHT_DEPRESSIONS[i] })); });
-    fresh(mask, E.nightMaskExpression(GEO_SUN_SRC, { camera: map.cameraId, category: "dayNightMask" }));
-  }
-  // Gives each opacity helper made before the lights input its lights slot (value 0; the slot is added only
-  // when missing, so night and twilight, which Controls may drive, keep their values and connections), and
-  // rewrites its script to the current one when the text differs. helpers[i] is the helper of night layer i.
-  function refreshNightHelpers(map, helpers) {
-    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, lights = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
-    helpers.forEach(function (h, i) {
-      if (!h || !layerThere(h)) return;
-      if (!api.hasAttribute(h, CA + ".2")) return; // not a camera-driven helper: left alone, no slot added on every sync
-      if (!api.hasAttribute(h, lights)) {
-        api.addDynamic(h, CA, "double");
-        try { api.renameAttribute(h, lights, "lights"); } catch (e) { /* display name only */ }
-        setOne(h, lights, 0);
-      }
-      var expr = E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i });
-      if (String(readExpr(h, A.CAMERA_EXPR_ATTR) || "") !== expr) setOne(h, A.CAMERA_EXPR_ATTR, expr);
-    });
-  }
-  // Gives the night layers their Fast Blurs and the one Night blur helper that drives them, whichever
-  // are missing (the helper's twilight follows the first opacity helper's: its Controls link, else its
-  // value). layers / helpers / blurs: the four of each (null = missing); returns { blurs, blurHelper }.
-  // Everything it makes goes through track.
-  function ensureNightBlur(map, g, layers, helpers, blurs, blurHelper, track) {
-    var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, out = { blurs: blurs.slice(), blurHelper: blurHelper && layerThere(blurHelper) ? blurHelper : null };
-    var holder = null;
-    helpers.forEach(function (h) { if (h && !holder && layerThere(h)) holder = api.getParent(h); });
-    if (!holder) holder = api.getChildren(g).filter(function (id) { return api.getNiceName(id) === "Day & night helpers"; })[0] || null;
-    if (!out.blurHelper) {
-      if (!holder) holder = makeHelperGroup(g, track);
-      var bh = track(api.create(A.CAMERA_LAYER_TYPE, "Night blur"));
-      addInputs(bh, CA, E.NIGHT_BLUR_INPUTS, { zoom: readCamera(map.cameraId).zoom });
-      setOne(bh, A.CAMERA_EXPR_ATTR, E.nightBlurExpression({ camera: map.cameraId, category: "dayNightBlur" }));
-      api.parent(bh, holder);
-      api.connect(map.cameraId, CA + ".2", bh, CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "zoom"), true);
-      var src = helpers.filter(function (h) { return h && layerThere(h); })[0];
-      if (src) {
-        var from = "", at = CA + "." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight"), to = CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight");
-        try { from = String(api.getInConnection(src, at) || ""); } catch (e) { from = ""; }
-        if (from.indexOf(".") > 0) api.connect(from.slice(0, from.indexOf(".")), from.slice(from.indexOf(".") + 1), bh, to, true);
-        else setOne(bh, to, api.get(src, at));
-      }
-      out.blurHelper = bh;
-    }
-    layers.forEach(function (layer, i) {
-      if (!layer || !layerThere(layer)) return;
-      var b = out.blurs[i] && layerThere(out.blurs[i]) ? out.blurs[i] : null;
-      if (!b) {
-        if (!holder) holder = makeHelperGroup(g, track);
-        b = track(api.create("blurFilter", "Night blur " + NIGHT_DEPRESSIONS[i] + "°"));
-        setOne(b, "amount", { x: 0, y: 0 });
-        api.parent(b, holder);
-      }
-      var driven = "";
-      try { driven = String(api.getInConnection(b, "amount") || ""); } catch (e) { driven = ""; }
-      if (!blurOnLayer(b, layer)) api.connect(b, "id", layer, "filters");
-      if (driven.indexOf(out.blurHelper + ".") !== 0) api.connect(out.blurHelper, A.DRIVER_OUTPUT_ATTR, b, "amount", true);
-      out.blurs[i] = b;
-    });
-    return out;
   }
 
   // What a layer's attribute reads from: the Controls value that drives it (its own attribute), else the layer's.
@@ -3049,7 +2928,7 @@ var GeoScene = (function () {
   // opts: { dayOfYear, utcTime, label }. Makes the overlay (version 2: one Night rectangle and its filter), or (one
   // per map) sets the existing one's time (an omitted value is left as it is), remaking a Night rectangle or filter
   // that was deleted and adding the label when asked and missing. A version 1 overlay (made before the Night layer)
-  // is updated as before, with its night layers and helpers (the upgrade to version 2 is a separate step). A time
+  // is upgraded to version 2 first (upgradeDayNight), then its time is set. A time
   // label left behind by a deleted overlay is used again (or, without the label option, removed) rather than doubled.
   // Returns { groupId, created, restored (parts remade), kept (["Day of year", "UTC time"] left alone because they are
   // animated or driven by something else), version }.
@@ -3093,36 +2972,6 @@ var GeoScene = (function () {
           api.setUserData(found.groupId, DAYNIGHT_KEY, fixed2);
         }
         return { groupId: found.groupId, created: false, restored: restored, kept: keptNames(), version: 2 };
-      }
-      if (found) {
-        var live = found.layers.filter(Boolean)[0];
-        day = given.dayOfYear != null ? given.dayOfYear : live ? Math.round(readDayNightTime(map, live, E.NIGHT_INPUTS, "dayOfYear", today.dayOfYear)) : today.dayOfYear;
-        time = given.utcTime != null ? given.utcTime : live ? readDayNightTime(map, live, E.NIGHT_INPUTS, "utcTime", today.utcTime) : today.utcTime;
-        var layers = found.layers.slice(), helpers = found.helpers.slice(), holder = null;
-        helpers.forEach(function (h) { if (h && !holder) holder = api.getParent(h); });
-        if (!holder) holder = api.getChildren(found.groupId).filter(function (id) { return api.getNiceName(id) === "Day & night helpers"; })[0] || null;
-        for (k = 0; k < layers.length; k++) {
-          if (layers[k] && helpers[k]) continue;
-          if (!holder) holder = makeHelperGroup(found.groupId, track);
-          var pair = makeNightPair(map, k, layers[k], helpers[k], found.groupId, holder, day, time, colour, track);
-          layers[k] = pair[0]; helpers[k] = pair[1];
-        }
-        var restored = made.filter(function (id) { return id !== holder; }).length;
-        var madeBefore = made.length, blur = ensureNightBlur(map, found.groupId, layers, helpers, found.blurs, found.blurHelper, track);
-        var maskId = ensureNightMask(map, found.groupId, found.mask, track);
-        refreshNightScripts(map, layers, maskId);
-        refreshNightHelpers(map, helpers);
-        label = found.label;
-        if (!label && opts.label) label = strays.length ? strays[0] : createTimeLabel(map, day, time, track);
-        found.layers.forEach(function (id) { if (id) setDayNightTime(map, id, E.NIGHT_INPUTS, given, kept); });
-        if (label && !isNew(track, label)) setDayNightTime(map, label, E.TIME_LABEL_INPUTS, given, kept);
-        if (label !== found.label || restored || made.length > madeBefore) {
-          var old = userData(found.groupId, DAYNIGHT_KEY) || {}, fixed = {};
-          Object.keys(old).forEach(function (key) { fixed[key] = old[key]; });
-          fixed.layers = layers; fixed.helpers = helpers; fixed.label = label; fixed.blurs = blur.blurs; fixed.blurHelper = blur.blurHelper; fixed.mask = maskId;
-          api.setUserData(found.groupId, DAYNIGHT_KEY, fixed);
-        }
-        return { groupId: found.groupId, created: false, restored: restored, kept: keptNames(), version: 1 };
       }
       day = given.dayOfYear != null ? given.dayOfYear : today.dayOfYear;
       time = given.utcTime != null ? given.utcTime : today.utcTime;

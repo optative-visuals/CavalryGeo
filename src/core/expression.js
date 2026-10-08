@@ -309,39 +309,11 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(FURNITURE_FADE_INPUTS) + "Math.max(0, Math.min(1, (_i0 - (_i1 - 0.5)) / 0.5)) * 100;\n";
   }
 
-  // Day & night: a night layer draws the dark side for a day of the year and a UTC time; the
-  // opacity helpers split Night opacity into four soft steps; the label prints the time.
+  // Day & night: the input lists of version 1 overlays (their night layers, opacity helpers and label), kept to read
+  // and upgrade them; the time label prints the time. The night itself is the Night rectangle with its filter.
   var NIGHT_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["depression", 0]]);
   var NIGHT_OPACITY_INPUTS = [["night", 55], ["twilight", 1], ["step", 0], ["lights", 0]];
   var TIME_LABEL_INPUTS = CAMERA_FIVE.concat([["dayOfYear", 1], ["utcTime", 12], ["compW", 1920], ["compH", 1080], ["corner", 0], ["margin", 40], ["size", 18]]);
-  function nightExpression(src, meta) {
-    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(NIGHT_INPUTS) +
-      "GeoSun.nightPath({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}, _i5, _i6, _i7, cavalry);\n";
-  }
-  // Same formula as GeoSun.stepOpacity (a unit test keeps them equal); no runtime source needed.
-  function nightOpacityExpression(meta) {
-    return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_OPACITY_INPUTS) +
-      "var _n = isFinite(Number(_i0)) ? Math.max(0, Math.min(100, Number(_i0))) : 55;\n" +
-      "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1, _s = isFinite(Number(_i2)) ? Math.round(Number(_i2)) : 0;\n" +
-      "var _l = isFinite(Number(_i3)) ? Math.max(0, Math.min(100, Number(_i3))) : 0;\n" +
-      "var _p = (_t >= 0.5 ? (1 - Math.pow(1 - _n / 100, 1 / 4)) * 100 : (_s === 0 ? _n : 0));\n" +
-      "(_s === (_t >= 0.5 ? 3 : 0) && _l > 0 ? _p + (100 - _p) * _l / 100 : _p);\n";
-  }
-  // Fast Blur amount for the night layers' blurs: the same formula as GeoSun.blurAmount (a unit test
-  // keeps them equal); the [x, y] it returns drives every blur's Amount.
-  var NIGHT_BLUR_INPUTS = [["zoom", 2], ["twilight", 1]];
-  function nightBlurExpression(meta) {
-    return writeTag("GEO_META", meta) + "\n" + inputPrelude(NIGHT_BLUR_INPUTS) +
-      "var _z = Math.max(0, Math.min(22, isFinite(Number(_i0)) ? Number(_i0) : 2));\n" +
-      "var _t = isFinite(Number(_i1)) ? Number(_i1) : 1;\n" +
-      "var _a = _t >= 0.5 ? Math.min(200, 0.5 * 6 * Math.PI / 180 * (256 * Math.pow(2, _z) / (2 * Math.PI))) : 0;\n" +
-      "[_a, _a];\n";
-  }
-  // The Earth's outline for the night mask (GeoSun.earthOutline).
-  function nightMaskExpression(src, meta) {
-    return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(CAMERA_FIVE) +
-      "GeoSun.earthOutline({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}, cavalry);\n";
-  }
   function timeLabelExpression(src, meta) {
     return writeTag("GEO_META", meta) + "\n" + src + "\n;\n" + inputPrelude(TIME_LABEL_INPUTS) +
       "GeoSun.timeLabel({lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4, dayOfYear: _i5, utcTime: _i6, compW: _i7, compH: _i8, corner: _i9, margin: _i10, size: _i11}, cavalry);\n";
@@ -349,7 +321,7 @@ var GeoExpression = (function () {
 
   return {
     NIGHT_INPUTS: NIGHT_INPUTS, NIGHT_OPACITY_INPUTS: NIGHT_OPACITY_INPUTS, TIME_LABEL_INPUTS: TIME_LABEL_INPUTS,
-    nightExpression: nightExpression, nightOpacityExpression: nightOpacityExpression, NIGHT_BLUR_INPUTS: NIGHT_BLUR_INPUTS, NIGHT_MASK_INPUTS: CAMERA_FIVE, nightBlurExpression: nightBlurExpression, nightMaskExpression: nightMaskExpression, timeLabelExpression: timeLabelExpression,
+    timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,

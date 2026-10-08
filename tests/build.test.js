@@ -17,6 +17,14 @@ test("the panel bundle compiles and embeds the runtime source", () => {
   assert.ok(src.includes("ui.show()"));
 });
 
+test("the panel bundle has none of the four-layer night drawing, and never calls api.processEvents", () => {
+  const src = buildPanel();
+  ["nightPath", "globeNight", "earthOutline", "blurAmount", "stepOpacity", "overscan", "drawRings", "densify",
+    "ensureNightBlur", "ensureNightMask", "refreshNightScripts", "refreshNightHelpers", "makeNightPair", "makeHelperGroup"]
+    .forEach((name) => assert.equal(src.includes(name), false, name + " is still in the bundle"));
+  assert.equal(/api\.processEvents\s*\(/.test(src), false);
+});
+
 // A minimal in-memory Cavalry stub: enough attribute storage, parenting and layer
 // bookkeeping for the panel's own code (GeoScene/GeoNet/panel.js) to run against,
 // without needing the real application.
@@ -10337,12 +10345,14 @@ test("Update flight on a comp starting at frame 10 starts from the recorded view
 const dnMap = controlsMap;
 const dnRec = (api, g) => plain(api.getUserDataKey(g, "geoDayNight"));
 const dnVal = (context, api, id, inputs, name) => api.get(id, "generator.array." + context.GeoExpression.inputIndex(inputs, name));
-const dnHelperVal = (context, api, id, name) => api.get(id, "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_OPACITY_INPUTS, name));
-
 // A version 1 overlay, as made before the Night layer: four night layers (with opacity helpers), a
 // helpers group with a Night blur helper and four Fast Blurs, the hidden Night mask in the group's
 // masks, and optionally a time label. Built straight through the fake API (the version 1 record
 // shape), so the version 1 paths stay tested while Add day & night makes version 2.
+// The drawing of a version 1 overlay is no longer written by the add-on. The scripts here carry the GEO_META tag the
+// code reads (and a stand-in body): the upgrade and Refresh paths read the tag and the inputs, never the drawing.
+const oldScript = (E, meta) => E.writeTag("GEO_META", meta) + "\n// version 1 drawing";
+const OLD_BLUR_INPUTS = [["zoom", 2], ["twilight", 1]];
 function makeOldDayNight(api, ctx, map, opts = {}) {
   const E = ctx.GeoExpression, src = ctx.GEO_SUN_SRC, cam = map.cameraId, dark = ctx.GeoStyles.builtIn("Dark");
   const day = opts.dayOfYear == null ? 80 : opts.dayOfYear, time = opts.utcTime == null ? 12 : opts.utcTime;
@@ -10363,23 +10373,23 @@ function makeOldDayNight(api, ctx, map, opts = {}) {
   depressions.forEach((a, i) => {
     const L = api.create("javaScriptShape", "Night " + a + "°");
     inputs(L, MA, E.NIGHT_INPUTS, { dayOfYear: day, utcTime: time, depression: a });
-    api.set(L, { "generator.expression": E.nightExpression(src, { camera: cam, category: "dayNight", depression: a }) });
+    api.set(L, { "generator.expression": oldScript(E, { camera: cam, category: "dayNight", depression: a }) });
     camera(L, MA, 5);
     api.setFill(L, true); api.set(L, { "material.materialColor": opts.colour || ctx.GeoStyles.nightColour(dark) });
     api.parent(L, g);
     const H = api.create("javaScript", "Night opacity " + a + "°");
     inputs(H, CA, E.NIGHT_OPACITY_INPUTS, { step: i, night: opts.nightOpacity, twilight: opts.twilight });
-    api.set(H, { expression: E.nightOpacityExpression({ camera: cam, category: "dayNightOpacity", step: i }) });
+    api.set(H, { expression: oldScript(E, { camera: cam, category: "dayNightOpacity", step: i }) });
     api.parent(H, holder);
     api.connect(H, "id", L, "opacity", true);
     layers.push(L); helpers.push(H);
   });
   const bh = api.create("javaScript", "Night blur");
-  inputs(bh, CA, E.NIGHT_BLUR_INPUTS, { zoom: api.get(cam, CA + ".2") });
-  api.set(bh, { expression: E.nightBlurExpression({ camera: cam, category: "dayNightBlur" }) });
+  inputs(bh, CA, OLD_BLUR_INPUTS, { zoom: api.get(cam, CA + ".2") });
+  api.set(bh, { expression: oldScript(E, { camera: cam, category: "dayNightBlur" }) });
   api.parent(bh, holder);
-  api.connect(cam, CA + ".2", bh, CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "zoom"), true);
-  api.set(bh, { [CA + "." + E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight")]: 1 });
+  api.connect(cam, CA + ".2", bh, CA + "." + E.inputIndex(OLD_BLUR_INPUTS, "zoom"), true);
+  api.set(bh, { [CA + "." + E.inputIndex(OLD_BLUR_INPUTS, "twilight")]: 1 });
   depressions.forEach((a, i) => {
     const b = api.create("blurFilter", "Night blur " + a + "°");
     api.set(b, { amount: { x: 0, y: 0 } });
@@ -10389,8 +10399,8 @@ function makeOldDayNight(api, ctx, map, opts = {}) {
     blurs.push(b);
   });
   const mask = api.create("javaScriptShape", "Night mask");
-  inputs(mask, MA, E.NIGHT_MASK_INPUTS);
-  api.set(mask, { "generator.expression": E.nightMaskExpression(src, { camera: cam, category: "dayNightMask" }) });
+  inputs(mask, MA, E.NIGHT_INPUTS.slice(0, 5));
+  api.set(mask, { "generator.expression": oldScript(E, { camera: cam, category: "dayNightMask" }) });
   camera(mask, MA, 5);
   api.parent(mask, g);
   api.set(mask, { hidden: true });
@@ -11530,49 +11540,6 @@ test("day & night v2: Add again with the time on Controls values sets those valu
 
 // ---- Day & night: the night steps blurred into a smooth gradient ----
 const filtersOf = (api, layer) => api._connections.filter((c) => c[2] === layer && String(c[3]).indexOf("filters.") === 0).map((c) => c[0]);
-const dnBlurIn = (context, name) => "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_BLUR_INPUTS, name);
-
-test("day & night blur: an overlay gets four Fast Blurs on the night layers, driven by one Night blur helper (version 1)", () => {
-  const { context, api } = buildSandbox();
-  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const r = makeOldDayNight(api, context, map, { dayOfYear: 172, utcTime: 14.5 }), rec = dnRec(api, r.groupId);
-  assert.equal(rec.blurs.length, 4);
-  assert.ok(rec.blurHelper);
-  const holder = api.getParent(rec.helpers[0]);
-  assert.equal(api.getNiceName(rec.blurHelper), "Night blur");
-  assert.equal(api.getLayerType(rec.blurHelper), "javaScript");
-  assert.equal(api.getParent(rec.blurHelper), holder);
-  assert.deepEqual(plain(E.readTag(api.get(rec.blurHelper, "expression"), "GEO_META")), { camera: map.cameraId, category: "dayNightBlur" });
-  E.NIGHT_BLUR_INPUTS.forEach((inp, k) => assert.equal(api.getCustomAttributeName(rec.blurHelper, "array." + k), inp[0]));
-  assert.equal(api.getInConnection(rec.blurHelper, dnBlurIn(context, "zoom")), map.cameraId + ".array.2");
-  assert.equal(api.getInConnection(rec.blurHelper, dnBlurIn(context, "twilight")), "");
-  assert.equal(api.get(rec.blurHelper, dnBlurIn(context, "twilight")), 1);
-  [0, 6, 12, 18].forEach((a, i) => {
-    const b = rec.blurs[i];
-    assert.equal(api.getLayerType(b), "blurFilter");
-    assert.equal(api.getNiceName(b), "Night blur " + a + "°");
-    assert.equal(api.getParent(b), holder);
-    assert.deepEqual(filtersOf(api, rec.layers[i]), [b]);
-    assert.equal(api.getInConnection(b, "amount"), rec.blurHelper + ".id");
-  });
-  const f = G.findDayNight(map);
-  assert.deepEqual(plain(f.blurs), rec.blurs); assert.equal(f.blurHelper, rec.blurHelper);
-  const parts = plain(G.dayNightParts(map));
-  rec.blurs.concat([rec.blurHelper]).forEach((id) => assert.equal(parts[id], true, id));
-});
-
-test("day & night blur: the helper's output is GeoSun.blurAmount for both axes (version 1)", () => {
-  const { context, api } = buildSandbox();
-  const map = dnMap(context), G = context.GeoScene;
-  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
-  const expr = api.get(rec.blurHelper, "expression"), vm = require("node:vm");
-  [[2, 1], [4, 1], [4, 0], [8, 1]].forEach(([zoom, twilight]) => {
-    const got = vm.runInNewContext(expr, { zoom, twilight });
-    const want = require("../src/core/sun.js").blurAmount(zoom, twilight);
-    assert.deepEqual([got[0], got[1]], [want, want]);
-  });
-});
-
 test("day & night blur: without the plugin, Refresh controls does not make a deleted blur or helper again (version 1)", () => {
   const { context, api } = buildSandbox();
   noNightType(api);
@@ -11616,19 +11583,6 @@ const dnOlderHelpers = (api, rec, map) => {
   });
   api.connect(map.cameraId, "array.0", rec.helpers[0], "array.0", true);
 };
-const dnLightsText = (E, map, i) => E.nightOpacityExpression({ camera: map.cameraId, category: "dayNightOpacity", step: i });
-
-test("day & night lights: an overlay's opacity helpers have the lights input at 0 and the current script (version 1)", () => {
-  const { context, api } = buildSandbox();
-  const map = dnMap(context), G = context.GeoScene, E = context.GeoExpression;
-  const rec = dnRec(api, makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId);
-  rec.helpers.forEach((h, i) => {
-    assert.equal(api.getCustomAttributeName(h, "array.3"), "lights");
-    assert.equal(dnHelperVal(context, api, h, "lights"), 0);
-    assert.equal(api.get(h, "expression"), dnLightsText(E, map, i));
-  });
-});
-
 test("day & night lights: without the plugin, Refresh leaves an older overlay's opacity helpers as they are (no lights input, older script) (version 1)", () => {
   const { context, api } = buildSandbox();
   noNightType(api);
@@ -11831,7 +11785,7 @@ test("day & night: without the plugin, Refresh controls leaves the night layers'
   const g = makeOldDayNight(api, context, map, { dayOfYear: 80, utcTime: 12 }).groupId, rec = dnRec(api, g);
   const EXPR = "generator.expression";
   context.GeoControlPanel.sync(map); // makes the Controls layers first
-  const old = (id) => "/*OLD*/" + api.get(id, EXPR).replace(/overscan|earthOutline|nightPath/g, "x");
+  const old = (id) => "/*OLD*/" + api.get(id, EXPR);
   rec.layers.concat([rec.mask]).forEach((id) => api.set(id, { [EXPR]: old(id) }));
   api.set(rec.layers[1], { "generator.array.5": 99 });
   const texts = rec.layers.concat([rec.mask]).map((id) => api.get(id, EXPR));
