@@ -15,9 +15,9 @@ var GeoStyle = (function () {
   var BUTTON_HEIGHT = 24, TAB_HEIGHT = 24, ICON_SIZE = 16;
   var LABEL_WIDTH = 92;
   var PANEL_INSET = 20; // a panel's horizontal margins (2 x 9) plus its border (2 x 1)
-  // A panel sits one step lighter than the script window behind it (#373737 in Cavalry), its border one more.
-  var PANEL_BACKGROUND = "#3f3f3f", PANEL_BORDER = "#484848";
-  var PAGE_BACKGROUND = "#282828", PAGE_INSET = 8; // behind the panels on every tab, so they stand out
+  // Each layer above the window is lighter than the one below: window, then each tab's page, then its panels.
+  var WINDOW_BACKGROUND = "#282828", PAGE_BACKGROUND = "#373737", PAGE_INSET = 8;
+  var PANEL_BACKGROUND = "#484848", PANEL_BORDER = "#515151";
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {
@@ -234,6 +234,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

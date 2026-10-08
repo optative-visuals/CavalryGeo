@@ -432,6 +432,7 @@ function makeFakeUi() {
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
+    setBackgroundColor: function (c) { this._background = c; },
     _root: function () { return root; }
   };
 }
@@ -5464,6 +5465,12 @@ test("Map tab: the preview follows the tab bar's width when the panel is resized
   context.sectionTabs.widget._width = 320;
   ui.onResize();
   assert.deepEqual(plain(context.preview._draw._size), [284, 160]);
+});
+
+test("the window, each tab's page and its panels get lighter layer by layer", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  assert.equal(ui._background, "#282828");
+  assert.equal(context.sectionPages.widget._items[0]._background, "#373737");
 });
 
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
@@ -11151,8 +11158,8 @@ test("GeoStyle.panel is a shaded rounded box with the exact look, items in order
   assert.ok(S.isPanel(p));
   assert.ok(!S.isPanel(new ui.Container()), "an ordinary container is not a panel");
   assert.ok(!S.isPanel(a));
-  assert.equal(p._background, "#3f3f3f");
-  assert.deepEqual(plain(p._border), ["#484848", 1]);
+  assert.equal(p._background, "#484848");
+  assert.deepEqual(plain(p._border), ["#515151", 1]);
   assert.deepEqual(plain(p._radius), [6, 6, 6, 6]);
   const v = p._layout;
   assert.ok(v instanceof ui.VLayout);

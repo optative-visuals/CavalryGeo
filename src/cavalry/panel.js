@@ -2009,6 +2009,7 @@ function showSection(name) {
 
 function buildUi() {
   ui.setTitle("Cavalry Geo");
+  if (typeof ui.setBackgroundColor === "function") ui.setBackgroundColor(GeoStyle.WINDOW_BACKGROUND);
   var layouts = {}, extra = [];
   TAB_BUILDERS.forEach(function (build) {
     build({ add: function (name, layout) {
