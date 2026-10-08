@@ -12290,3 +12290,46 @@ test("night lights: Controls sync and the route order never look inside the Nigh
   assert.deepEqual(asked.filter((id) => inside.has(id)), []);
   assert.equal(promotedNames(api, r.componentId).filter((name) => /Night lights/.test(name)).length, 0, "no night lights row among the imagery");
 });
+
+// ---- Night lights in Controls ----
+test("night lights in Controls: Night lights % starts at 100 and drives the group opacity and every helper's lights; sync reports the build due and removes the row once the night lights are gone", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context), E = context.GeoExpression;
+  assert.equal(context.GeoControlPanel.sync(map).nightLightsNeeded, false, "no day imagery yet");
+  const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const before = context.GeoControlPanel.sync(map);
+  assert.equal(before.nightLightsNeeded, true, "EOX with Day & night and no night lights");
+  assert.ok(!promotedNames(api, before.components.time).includes("Day & night · Night lights %"), "no row before the build");
+  const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.nightLightsNeeded, false);
+  assert.ok(promotedNames(api, r.components.time).includes("Day & night · Night lights %"));
+  const V = r.valuesId, slots = slotsOf(api, V), path = V + "." + slots["dn:lights"];
+  assert.equal(api.get(V, slots["dn:lights"]), 100, "seeded from the group opacity, not the helpers' 0");
+  assert.equal(api.getInConnection(n.groupId, "opacity"), path);
+  rec.helpers.forEach((h) => assert.equal(api.getInConnection(h, "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights")), path));
+  // a second sync changes nothing
+  const again = context.GeoControlPanel.sync(map);
+  assert.equal(api.get(V, slots["dn:lights"]), 100);
+  assert.equal(again.nightLightsNeeded, false);
+  // the night lights removed by hand: the row goes
+  api.deleteLayer(n.groupId);
+  const gone = context.GeoControlPanel.sync(map);
+  assert.ok(!promotedNames(api, gone.components.time).includes("Day & night · Night lights %"));
+  assert.equal(gone.nightLightsNeeded, true, "still wanted, so a build is due");
+  assert.ok(d.groupId);
+});
+
+test("night lights in Controls: a sync that removes orphaned night lights drops their row and reports no build due", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.ok(promotedNames(api, context.GeoControlPanel.sync(map).components.time).includes("Day & night · Night lights %"));
+  api.deleteLayer(d.groupId);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(n.groupId), false, "orphaned night lights removed by the refresh");
+  assert.equal(r.nightLightsNeeded, false);
+  assert.ok(!promotedNames(api, r.components.time).includes("Day & night · Night lights %"));
+  rec.helpers.forEach((h) => assert.equal(api.get(h, "array.3"), 0));
+});

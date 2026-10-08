@@ -283,9 +283,11 @@ var GeoControlPanel = (function () {
         draws: (c.draws || []).filter(Boolean).map(function (id) { return member(id, S.calloutDraw); }) };
     });
     var dn = GeoScene.findDayNight(map), dnMember = function (id, attrs) { return id ? { id: id, state: linkState(id, attrs) } : null; };
+    // The Night lights group (the top child of Day & night) drives its own opacity from the Night lights % input.
+    var nightGroup = (found.night || GeoScene.findNightLights(map))[0], lights = nightGroup && dn && api.getParent(nightGroup.groupId) === dn.groupId ? nightGroup.groupId : null;
     model.dayNight = dn ? { id: dn.groupId, layers: dn.layers.filter(Boolean).map(function (id) { return dnMember(id, S.nightLayer); }),
       helpers: dn.helpers.filter(Boolean).map(function (id) { return dnMember(id, S.nightHelper); }), blurs: dn.blurs.filter(Boolean),
-      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel) } : null;
+      blurHelper: dnMember(dn.blurHelper, S.nightBlur), mask: dn.mask, label: dnMember(dn.label, S.timeLabel), nightLights: lights ? dnMember(lights, S.nightLights) : null } : null;
     var fu = GeoScene.findFurniture(map, mapLayers);
     model.furniture = { scaleBar: fu.scaleBar ? { id: fu.scaleBar, state: linkState(fu.scaleBar, S.scaleBar) } : null, northArrow: fu.northArrow ? { id: fu.northArrow, state: linkState(fu.northArrow, S.northArrow) } : null, fade: fu.fade ? { id: fu.fade, state: linkState(fu.fade, S.furnitureFade) } : null };
     model.labels = GeoScene.findLabels(map).concat(routeLabels).sort(order).map(function (id) { return { id: id, state: linkState(id, S.label) }; });
@@ -325,7 +327,7 @@ var GeoControlPanel = (function () {
     path = api.addDynamic(valuesId, A.CAMERA_ARRAY_ATTR, INPUT_TYPES[row.type]);
     if (!path) throw new Error("Couldn't add a control value.");
     slots[row.key] = path;
-    var seed = read(row.linked[0] || row.link[0]);
+    var seed = row.start !== undefined ? row.start : read(row.linked[0] || row.link[0]);
     attempt(function () {
       if (seed === undefined || seed === null) return;
       api.set(valuesId, one(path, row.type === "color" ? A.COLOR_VALUE(hex(seed)) : row.type === "bool" ? !!seed : Number(seed)));
@@ -470,6 +472,15 @@ var GeoControlPanel = (function () {
     attempt(function () { keepSelection(function () { GeoScene.prepareRoutes(map, found.mapLayers, found.routes, found.order); }); });
     // An overlay made before the night blur gets its blurs (before the read, so Twilight links to the helper).
     attempt(function () { keepSelection(function () { GeoScene.prepareDayNight(map); }); });
+    // Night lights no longer wanted are removed (found.night is read again then); whether a night build is due is reported.
+    var nightLightsNeeded = false;
+    attempt(function () {
+      keepSelection(function () {
+        var night = GeoScene.prepareNightLights(map, imageryAll);
+        nightLightsNeeded = night.needsBuild;
+        if (night.removed > 0) found.night = GeoScene.findNightLights(map);
+      });
+    });
     // Older imagery assets (and bent source comps) are gathered into the map's Assets group.
     if (options && options.gatherImagery) attempt(function () { keepSelection(function () { GeoScene.prepareImagery(map, found.imagery.concat(found.night)); }); });
     // Highlights whose extract is gone are removed and the rest numbered; the map layers are read
@@ -512,7 +523,7 @@ var GeoControlPanel = (function () {
           row.link.forEach(function (t) {
             // A new input links only the targets already showing its value; any other target
             // was set apart on purpose, so it is marked as if the user had pressed Disconnect.
-            if (slot.created && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
+            if (slot.created && row.start === undefined && !same(row.type, slot.seed, read(t))) { record(t.layer, t.attr, rec); return; }
             if (attempt(function () { api.connect(V, path, t.layer, t.attr, true); })) record(t.layer, t.attr, rec);
           });
           wanted[p.groups[i]].push({ layer: V, attr: path, notes: row.notes || "" });
@@ -546,7 +557,7 @@ var GeoControlPanel = (function () {
     });
     var total = 0;
     GROUP_ORDER.forEach(function (g) { total += wanted[g].length; });
-    return { componentId: made.id, valuesId: V, controls: total, components: components };
+    return { componentId: made.id, valuesId: V, controls: total, components: components, nightLightsNeeded: nightLightsNeeded };
   }
 
   return { sync: sync };

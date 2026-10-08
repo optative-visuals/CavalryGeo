@@ -1418,11 +1418,13 @@ var GeoScene = (function () {
   // layers. Day imagery never lists or tears down night lights, and a night build never touches day.
 
   // Wanted: the Day & night overlay is complete and the map has satellite day imagery (see
-  // GeoSources.isSatellite). orphaned: night lights that are no longer wanted.
-  function nightLightsStatus(map) {
+  // GeoSources.isSatellite). orphaned: night lights that are no longer wanted. all (optional): the map's
+  // imagery from one findAllImagery scan, so the callers that have it don't scan the comp again.
+  function nightLightsStatus(map, all) {
     var f = findDayNight(map), dayNight = !!f && f.layers.filter(Boolean).length === 4;
-    var satellite = findImagery(map).some(function (i) { return GeoSources.isSatellite(i.meta.sourceMeta); });
-    var night = findNightLights(map), wanted = dayNight && satellite;
+    var day = all ? all.filter(function (i) { return !i.meta.night; }) : findImagery(map);
+    var satellite = day.some(function (i) { return GeoSources.isSatellite(i.meta.sourceMeta); });
+    var night = all ? all.filter(function (i) { return !!i.meta.night; }) : findNightLights(map), wanted = dayNight && satellite;
     return { dayNight: dayNight, satellite: satellite, night: night, wanted: wanted, orphaned: night.length > 0 && !wanted };
   }
 
@@ -1455,8 +1457,8 @@ var GeoScene = (function () {
 
   // The Controls refresh: removes night lights that are no longer wanted, and says whether a night build
   // is due (wanted, and none yet).
-  function prepareNightLights(map) {
-    var status = nightLightsStatus(map), removed = status.orphaned ? removeNightLights(map) : 0;
+  function prepareNightLights(map, all) {
+    var status = nightLightsStatus(map, all), removed = status.orphaned ? removeNightLights(map) : 0;
     return { removed: removed, needsBuild: status.wanted && status.night.length === 0 };
   }
 
