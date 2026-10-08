@@ -1,6 +1,8 @@
-// Great-circle maths for route legs. Pure: no projection and no Cavalry APIs, because it
-// also runs inside route layer expressions. Vectors are Earth-centred unit vectors
+// Great-circle maths for route legs. No Cavalry APIs, because it also runs inside route layer
+// expressions; routeShift needs GeoProjection.nearestLon (projection.js runs alongside it there too).
+// Vectors are Earth-centred unit vectors
 // (x toward lon 0 / lat 0, y toward lon 90°E, z toward the north pole).
+if (typeof GeoProjection === "undefined" && typeof require !== "undefined") { var GeoProjection = require("./projection.js"); }
 var GeoRoutes = (function () {
   var D2R = Math.PI / 180;
 
@@ -64,6 +66,17 @@ var GeoRoutes = (function () {
     return out;
   }
 
-  return { toVec: toVec, toLonLat: toLonLat, stepsFor: stepsFor, greatCircle: greatCircle, liftFactor: liftFactor, unwrapLons: unwrapLons };
+  // The route's stop longitudes as drawn: each leg takes the short way across the date line.
+  function chainLons(lons) { return unwrapLons(lons); }
+
+  // The whole-turn shift that puts a route's longitude midpoint (mean of its first and last chained
+  // longitudes) on the copy nearest the camera. Flat maps only.
+  function routeShift(chained, camLon) {
+    var mean = (chained[0] + chained[chained.length - 1]) / 2;
+    return GeoProjection.nearestLon(mean, camLon) - mean;
+  }
+
+  return { toVec: toVec, toLonLat: toLonLat, stepsFor: stepsFor, greatCircle: greatCircle, liftFactor: liftFactor, unwrapLons: unwrapLons,
+    chainLons: chainLons, routeShift: routeShift };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoRoutes;

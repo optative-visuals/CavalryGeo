@@ -6815,7 +6815,7 @@ test("routes: stops ride with the camera and legs are wired to them", () => {
 const HIN = (name) => "array." + GeoExpressionT.inputIndex(GeoExpressionT.HANDLE_INPUTS, name);
 const LONDON = { name: "London", lon: -0.12, lat: 51.5 }, TOKYO = { name: "Tokyo", lon: 139.7, lat: 35.7 };
 
-test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both stops' places wired in", () => {
+test("routes: shape 1 makes handle helpers with 27 inputs, the camera and both stops' places wired in", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, [LONDON, TOKYO, { name: "Cairo", lon: 31.2, lat: 30 }], { arc: 30, labels: false, shape: 1 });
@@ -6824,8 +6824,8 @@ test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both s
   d.legs.forEach((l) => {
     const a = d.stops[l.from], b = d.stops[l.to];
     [l.startHandle, l.endHandle].forEach((h) => {
-      assert.equal(api.hasAttribute(h, "array.23"), true);
-      assert.equal(api.hasAttribute(h, "array.24"), false);
+      assert.equal(api.hasAttribute(h, "array.26"), true);
+      assert.equal(api.hasAttribute(h, "array.27"), false);
       assert.equal(api.get(h, HIN("shape")), 1);
       ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((n, i) => assert.equal(IN(h, HIN(n)), map.cameraId + ".array." + i, n));
       assert.equal(IN(h, HIN("aLon")), a.position + ".array.5");
@@ -6834,6 +6834,47 @@ test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both s
       assert.equal(IN(h, HIN("bLat")), b.position + ".array.6");
       assert.match(api.get(h, "expression"), /greatCircleHandles/);
     });
+  });
+});
+
+test("routes: stops carry their chained longitude and the route's reference, handles the chained ends too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 }, NY = { name: "New York", lon: -74, lat: 40.7 };
+  const r = context.GeoScene.createRoute(map, [TK, LA, NY], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const rawLon = { Tokyo: 139.7, "Los Angeles": -118.2, "New York": -74 };
+  const chainOf = { Tokyo: 139.7, "Los Angeles": 241.8, "New York": 286 };
+  const ref = (139.7 + 286) / 2;
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg + ": " + a + " vs " + b);
+  d.stops.forEach((s) => {
+    near(api.get(s.position, "array.7"), chainOf[s.name], s.name + " chainLon");
+    near(api.get(s.position, "array.8"), ref, s.name + " refLon");
+    assert.equal(api.get(s.position, "array.5"), rawLon[s.name], s.name + " labelLon stays the stop's own longitude");
+    assert.match(api.get(s.position, "expression"), /nearestLon\(_i8/);
+  });
+  // Each handle: the chained ends of its two stops and the route's reference; aLon / bLon stay the raw longitudes (globe, Equal Earth).
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [l.startHandle, l.endHandle].forEach((h) => {
+      near(api.get(h, HIN("aChainLon")), chainOf[a.name], "aChainLon of " + a.name);
+      near(api.get(h, HIN("bChainLon")), chainOf[b.name], "bChainLon of " + b.name);
+      near(api.get(h, HIN("refLon")), ref, "refLon");
+      assert.equal(api.get(h, HIN("aLon")), rawLon[a.name], "aLon raw");
+      assert.equal(api.get(h, HIN("bLon")), rawLon[b.name], "bLon raw");
+      assert.match(api.get(h, "expression"), /_hs/);
+    });
+  });
+});
+
+test("routes: a route inside one copy of the world keeps chained longitudes equal to its own", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId);
+  d.stops.forEach((s, i) => {
+    assert.equal(api.get(s.position, "array.7"), ABC[i].lon);
+    assert.equal(api.get(s.position, "array.8"), 10);
   });
 });
 
@@ -6859,7 +6900,7 @@ test("prepareRoutes: an older route's handle helpers gain the new inputs (connec
   d.legs.forEach((l) => {
     const a = d.stops[l.from], b = d.stops[l.to];
     [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
-      assert.equal(api.hasAttribute(h, "array.23"), true);
+      assert.equal(api.hasAttribute(h, "array.26"), true);
       assert.equal(api.get(h, HIN("shape")), 0);
       assert.equal(IN(h, HIN("camLon")), map.cameraId + ".array.1");
       assert.equal(IN(h, HIN("camProjection")), map.cameraId + ".array.4");
@@ -6870,7 +6911,7 @@ test("prepareRoutes: an older route's handle helpers gain the new inputs (connec
     });
   });
   hs.forEach((h, k) => { for (let i = 0; i < 14; i++) assert.equal(api.get(h, "array." + i), old[k][i], "input " + i + " of helper " + k); });
-  const snap = () => JSON.stringify([api._connections, hs.map((h) => [api.get(h, "expression"), Array.from({ length: 24 }, (_, i) => api.get(h, "array." + i))])]);
+  const snap = () => JSON.stringify([api._connections, hs.map((h) => [api.get(h, "expression"), Array.from({ length: 27 }, (_, i) => api.get(h, "array." + i))])]);
   const before = snap();
   context.GeoScene.prepareRoutes(map);
   assert.equal(snap(), before, "a second refresh changes nothing");

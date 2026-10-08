@@ -214,7 +214,8 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
   assert.deepEqual(E.HANDLE_INPUTS, [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
     ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
-    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]]);
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0],
+    ["aChainLon", 0], ["bChainLon", 0], ["refLon", 0]]);
   // Great circle branch: shape 1 uses greatCircleHandles, shape 0 stays Arc, hand still wins.
   const bundle = require("../tools/buildlib.js").buildCurveSource();
   const gcIn = ins.concat([1, 20, 10, 3, 15, 2, 0, 51, 100, 35]);
@@ -712,4 +713,62 @@ test("routes, highlights and the legends never take a frame", () => {
   assert.ok(!E.routeLayerExpression(buildRuntimeSource(), wide, meta, {}).includes("frame: {w:"));
   assert.ok(!E.highlightLayerExpression(buildRuntimeSource(), wide, { effect: "outline" }, {}).includes("frame: {w:"));
   assert.ok(!E.legendExpression(buildDataRuntimeSource(), { range: {}, title: "" }, meta).includes("frame: {w:"));
+});
+
+test("route stop driver: flat maps move a stop by the route's shift, globe and Equal Earth project its own longitude", () => {
+  const GP = require("../src/core/projection.js");
+  const src = buildRuntimeSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const at = (lon, lat, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, lat, o); return o; };
+  const near = (a, b) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), a + " is not " + b);
+  const expr = E.routeStopDriverExpression(src, { camera: "c", category: "stopDriver" }, "array");
+  // Inputs: camLat, camLon, zoom, rotation, projection, labelLon, labelLat, chainLon, refLon.
+  // Tokyo (chained 139.69) -> Los Angeles (chained 241.76): the route's midpoint is 190.73, so the camera at 0 gets shift -360.
+  const cam0 = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 0, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(-220.31, 35.68, cam0));
+  near(run(expr, [10, 0, 2, 0, 0, -118.24, 34.05, 241.76, 190.725]), at(-118.24, 34.05, cam0));
+  // Camera at 180: the route is already nearest, so no shift.
+  const cam180 = { lat: 10, lon: 180, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 180, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(139.69, 35.68, cam180));
+  // Globe and Equal Earth ignore the chain: each stop projects its own longitude.
+  [1, 2].forEach((projection) => {
+    const cam = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection };
+    near(run(expr, [10, 0, 2, 0, projection, -118.24, 34.05, 241.76, 190.725]), at(-118.24, 34.05, cam));
+  });
+  assert.throws(() => E.routeStopDriverExpression(src, {}, "middle"), /Unknown driver return form/);
+  assert.deepEqual(E.ROUTE_STOP_INPUTS.map((i) => i[0]), E.LABEL_INPUTS.map((i) => i[0]).concat(["chainLon", "refLon"]));
+});
+
+test("route handle expression: chained stops on flat maps use their chained longitudes moved by the route's shift", () => {
+  const GP = require("../src/core/projection.js"), GC = require("../src/core/curve.js");
+  const bundle = require("../tools/buildlib.js").buildCurveSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const H = (name) => E.inputIndex(E.HANDLE_INPUTS, name);
+  assert.equal(E.HANDLE_INPUTS.length, 27);
+  assert.deepEqual(E.HANDLE_INPUTS.slice(24).map((i) => i[0]), ["aChainLon", "bChainLon", "refLon"]);
+  // First leg of Tokyo -> Los Angeles: Tokyo 139.69, LA chained 241.76; the route's midpoint 190.725 puts it on the copy at -360 from camera 0.
+  const cam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 0 };
+  const proj = GP.makeProjector(cam, true);
+  const p0 = [0, 0], p1 = [0, 0];
+  proj(-220.31, 35.68, p0); proj(-118.24, 34.05, p1);
+  const ins = new Array(27).fill(0);
+  Object.assign(ins, { 0: p0[0], 1: p0[1], 2: 0, 3: 0, 4: p1[0], 5: p1[1], 6: 0, 7: 0 });
+  Object.assign(ins, { 8: 40, 9: 20, 10: 0, 11: 0, 12: 0, 13: 0, 14: 1, 15: 20, 16: 0, 17: 1, 18: 0, 19: 0, 20: 139.69, 21: 35.68, 22: -118.24, 23: 34.05 });
+  Object.assign(ins, { 24: 139.69, 25: 241.76, 26: 190.725 });
+  const want = GC.greatCircleHandles(p0, p1, { cam, aLon: -220.31, aLat: 35.68, bLon: -118.24, bLat: 34.05, offA: [0, 0], offB: [0, 0] }, { arc: 40, lean: 20, flip: 0 });
+  const expr = (which) => E.routeHandleExpression(bundle, { camera: "c", category: "legHandle" }, which, { chained: true });
+  assert.deepEqual(run(expr("start"), ins), want.start);
+  assert.deepEqual(run(expr("end"), ins), want.end);
+  // Unchained (older routes): the same helper keeps the old expression, which ignores the chain inputs.
+  const old = E.routeHandleExpression(bundle, { camera: "c", category: "legHandle" }, "start");
+  const oldIns = ins.slice(); oldIns[24] = 0; oldIns[25] = 0; oldIns[26] = 0;
+  assert.deepEqual(run(old, ins), run(old, oldIns));
+  // Globe: the chain is ignored and the raw longitudes are used.
+  const gcam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 2 }, gproj = GP.makeProjector(gcam, true), g0 = [0, 0], g1 = [0, 0];
+  gproj(139.69, 35.68, g0); gproj(-118.24, 34.05, g1);
+  const globe = ins.slice(); globe[19] = 2; globe[15] = 20; globe[0] = g0[0]; globe[1] = g0[1]; globe[4] = g1[0]; globe[5] = g1[1];
+  const gwant = GC.greatCircleHandles(g0, g1, { cam: gcam, aLon: 139.69, aLat: 35.68, bLon: -118.24, bLat: 34.05, offA: [0, 0], offB: [0, 0] }, { arc: 40, lean: 20, flip: 0 });
+  assert.deepEqual(run(expr("start"), globe), gwant.start);
+  assert.equal(H("refLon"), 26);
+  assert.equal(H("aChainLon"), 24);
 });

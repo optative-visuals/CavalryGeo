@@ -24,7 +24,11 @@ var GeoExpression = (function () {
   var END_POINT_INPUTS = [["holderX", 0], ["holderY", 0], ["stopX", 0], ["stopY", 0]];
   var HANDLE_INPUTS = [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
     ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
-    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]];
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0],
+    ["aChainLon", 0], ["bChainLon", 0], ["refLon", 0]];
+  // New-style route stops: the label inputs plus the stop's chained longitude and the route's reference longitude (its
+  // midpoint). Flat maps move the stop by the route's shift; globe and Equal Earth project labelLon as they do for labels.
+  var ROUTE_STOP_INPUTS = LABEL_INPUTS.concat([["chainLon", 0], ["refLon", 0]]);
   var FADE_INPUTS = [["fromOpacity", 100], ["toOpacity", 100]];
   function inputIndex(inputs, name) {
     for (var i = 0; i < inputs.length; i++) if (inputs[i][0] === name) return i;
@@ -193,12 +197,29 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(END_POINT_INPUTS) + "[_i0 + _i2, _i1 + _i3];\n";
   }
 
-  function routeHandleExpression(curveSrc, meta, which) {
+  // opts.chained (new-style routes): on a flat map the great circle runs between the chained longitudes (aChainLon,
+  // bChainLon) moved by the route's shift from refLon, the same copy the stops are drawn on. Other maps use aLon / bLon.
+  function routeHandleExpression(curveSrc, meta, which, opts) {
     if (which !== "start" && which !== "end") throw new Error("Unknown handle: " + which);
-    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) +
+    var chained = !!(opts && opts.chained);
+    var pre = chained ? "var _hf = Math.round(_i19) <= 0;\n" +
+      "var _hs = _hf ? GeoProjection.nearestLon(_i26, _i16) - _i26 : 0;\n" +
+      "var _ha = _hf ? _i24 + _hs : _i20, _hb = _hf ? _i25 + _hs : _i22;\n" : "";
+    var aLon = chained ? "_ha" : "_i20", bLon = chained ? "_hb" : "_i22";
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) + pre +
       "(_i11 ? [_i12, _i13] : (_i14 >= 0.5 ? GeoCurve.greatCircleHandles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], " +
-      "{cam: {lat: _i15, lon: _i16, zoom: _i17, rotation: _i18, projection: _i19}, aLon: _i20, aLat: _i21, bLon: _i22, bLat: _i23, offA: [_i2, _i3], offB: [_i6, _i7]}, " +
+      "{cam: {lat: _i15, lon: _i16, zoom: _i17, rotation: _i18, projection: _i19}, aLon: " + aLon + ", aLat: _i21, bLon: " + bLon + ", bLat: _i23, offA: [_i2, _i3], offB: [_i6, _i7]}, " +
       "{arc: _i8, lean: _i9, flip: _i10})." + which + " : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + "));\n";
+  }
+
+  // A new-style route's stop driver: on a flat map the stop moves by the route's shift (the copy nearest the camera,
+  // from refLon), so every stop of the route moves together. Globe and Equal Earth project labelLon.
+  function routeStopDriverExpression(runtimeSrc, meta, returnForm) {
+    var ret = RETURN_FORMS[returnForm];
+    if (!ret) throw new Error("Unknown driver return form: " + returnForm);
+    return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(ROUTE_STOP_INPUTS) +
+      "var _sx = Math.round(_i4) <= 0 ? _i7 + GeoProjection.nearestLon(_i8, _i1) - _i8 : _i5;\n" +
+      "var _p = GeoRuntime.projectPoint(_sx, _i6, " + CAM + ");\n" + ret + "\n";
   }
 
   var ROUTE_DRAW_INPUTS = [["travel", 100], ["index", 0], ["count", 1]];
@@ -348,7 +369,7 @@ var GeoExpression = (function () {
     CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, MAP_LAYER_INPUTS: MAP_LAYER_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
     REGION_INPUTS: REGION_INPUTS, BUBBLE_INPUTS: BUBBLE_INPUTS, VALUE_LABEL_INPUTS: VALUE_LABEL_INPUTS,
     LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS,
-    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
+    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, ROUTE_STOP_INPUTS: ROUTE_STOP_INPUTS, routeStopDriverExpression: routeStopDriverExpression, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
     HIGHLIGHT_SHAPE_INPUTS: HIGHLIGHT_SHAPE_INPUTS, HIGHLIGHT_FADE_INPUTS: HIGHLIGHT_FADE_INPUTS,
     highlightLayerExpression: highlightLayerExpression, highlightFadeExpression: highlightFadeExpression,
     writeTag: writeTag, readTag: readTag, frameInputs: frameInputs, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,

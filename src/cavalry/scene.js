@@ -468,6 +468,11 @@ var GeoScene = (function () {
     var places = [];
     stops.forEach(function (s) { if (!places.some(function (p) { return samePlace(p, s); })) places.push(s); });
     function placeIndex(s) { for (var i = 0; i < places.length; i++) if (samePlace(places[i], s)) return i; return -1; }
+    // The route's longitudes as drawn (each leg the short way across the date line). Flat maps move the whole route
+    // by one shift, from refLon (the midpoint of its first and last stop), so every stop moves together.
+    var chained = GeoRoutes.chainLons(stops.map(function (s) { return s.lon; }));
+    var refLon = (chained[0] + chained[chained.length - 1]) / 2;
+    function chainOf(s) { for (var i = 0; i < stops.length; i++) if (samePlace(stops[i], s)) return chained[i]; return s.lon; }
     function utility(name, inputs, values, expr) {
       var id = track(api.create(A.CAMERA_LAYER_TYPE, name));
       addInputs(id, CA, inputs, values);
@@ -494,7 +499,8 @@ var GeoScene = (function () {
         api.set(label, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
         setOne(label, "position", [STOP_RADIUS + 6, STOP_RADIUS + 6]);
       }
-      var position = utility(p.name + " position", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
+      var position = utility(p.name + " position", E.ROUTE_STOP_INPUTS, { labelLon: p.lon, labelLat: p.lat, chainLon: chainOf(p), refLon: refLon },
+        E.routeStopDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
       connectCamera(map.cameraId, position, CA);
       api.connect(position, A.DRIVER_OUTPUT_ATTR, holder, "position", true);
       var visibility = utility(p.name + " visibility", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("stopVisibility")));
@@ -504,10 +510,13 @@ var GeoScene = (function () {
       api.connect(visibility, A.DRIVER_OUTPUT_ATTR, holder, "opacity", true);
       var endPoint = utility(p.name + " end point", E.END_POINT_INPUTS, {}, E.routeEndPointExpression(meta("stopEnd")));
       feed(endPoint, [[holder, "position.x"], [holder, "position.y"], [circle, "position.x"], [circle, "position.y"]]);
-      return { name: p.name, lon: p.lon, lat: p.lat, holder: holder, circle: circle, label: label, position: position, visibility: visibility, endPoint: endPoint };
+      return { name: p.name, lon: p.lon, lat: p.lat, chainLon: chainOf(p), holder: holder, circle: circle, label: label, position: position, visibility: visibility, endPoint: endPoint };
     });
 
     var cam = readCamera(map.cameraId);
+    // Where each stop starts on screen (for the first handle seeds): flat maps put it on the route's shifted copy.
+    var seedShift = GeoRoutes.routeShift(chained, cam.lon), seedFlat = Math.round(cam.projection || 0) <= 0;
+    function seedLon(s) { return seedFlat ? s.chainLon + seedShift : s.lon; }
     var legData = pairs.map(function (pair, idx) {
       var a = stopData[placeIndex(pair[0])], b = stopData[placeIndex(pair[1])];
       var name = "Leg " + (idx + 1) + ": " + a.name + " → " + b.name;
@@ -518,14 +527,15 @@ var GeoScene = (function () {
       try { setOne(line, "stroke.trim", true); setOne(line, "stroke.trimEnd", 100); } catch (e) { /* draw-on stays off */ }
       api.connect(a.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.startPosition", true);
       api.connect(b.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.endPosition", true);
-      var seed = GeoCurve.handles(GeoRuntime.projectPoint(a.lon, a.lat, cam), GeoRuntime.projectPoint(b.lon, b.lat, cam), { arc: arc, lean: 0, flip: false });
+      var seed = GeoCurve.handles(GeoRuntime.projectPoint(seedLon(a), a.lat, cam), GeoRuntime.projectPoint(seedLon(b), b.lat, cam), { arc: arc, lean: 0, flip: false });
       var sources = [[a.holder, "position.x"], [a.holder, "position.y"], [a.circle, "position.x"], [a.circle, "position.y"],
         [b.holder, "position.x"], [b.holder, "position.y"], [b.circle, "position.x"], [b.circle, "position.y"]];
       var handle = {};
       ["start", "end"].forEach(function (which) {
         var h = utility(name + " " + which + " handle", E.HANDLE_INPUTS, { arc: arc, handX: seed[which][0], handY: seed[which][1], shape: opts.shape ? 1 : 0,
-          camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection, aLon: a.lon, aLat: a.lat, bLon: b.lon, bLat: b.lat },
-          E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which));
+          camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection, aLon: a.lon, aLat: a.lat, bLon: b.lon, bLat: b.lat,
+          aChainLon: a.chainLon, bChainLon: b.chainLon, refLon: refLon },
+          E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which, { chained: true }));
         feed(h, sources);
         wireHandleExtras(map, h, a.position, b.position);
         api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
