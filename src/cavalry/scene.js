@@ -2071,7 +2071,7 @@ var GeoScene = (function () {
     numberGroups(highlightGroups(map), HIGHLIGHT_NUMBER_KEY, "Highlight");
     var number = highlightNumber(groupId), label = "Highlight " + number, m = highlightMembers(groupId), rec = m.rec;
     if (rec.effect === effect) throw new Error(label + " already uses " + target.name + ".");
-    if (!m.extract || !m.shape) throw new Error(label + "'s place is gone. Press Refresh controls (Layers tab) to tidy it away.");
+    if (!m.extract || !m.shape) throw new Error(label + "'s place is gone. Press Refresh controls (Map tab) to tidy it away.");
     var oldLine = rec.effect === "outline" || rec.effect === "pulse";
     var colour = readColour(m.shape, oldLine ? A.STROKE_COLOR_ATTR : A.FILL_COLOR_ATTR, HIGHLIGHT_COLOUR);
     // Outline draw-on and Pulse both have a width; it carries over between them (everything else starts at its default).

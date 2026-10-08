@@ -12,8 +12,8 @@ fixed before release.
       line. Clicking a tab shows that section and moves the selection; the tab text has
       no extra symbols. On Layers, clicking a category (Countries, Cities, …) or, on Data,
       a Show option gives it a green tick; click again → tick gone. Buttons (toggles
-      included) show a hover highlight. Label has a Pins / Routes switch that changes the
-      page.
+      included) show a hover highlight. Layers has an Add / Overlays / Extract switch and
+      Label a Pins / Routes switch; each changes the page.
 - [ ] 1b. Narrow the panel → the tab bar stays on one row and the tab text stays centred
       (check nothing is clipped at the narrowest width); widen it again.
 - [ ] 2. The Map dropdown shows only "New map", and there is no Create map, Drop pin or
@@ -45,7 +45,7 @@ fixed before release.
       hovering the map shows its tooltip, a result dot click picks it, resize the panel wider and narrower (preview follows both ways), Jump / Fly /
       Create map here land where the green frame showed.
 
-## Layers tab
+## Layers → Add
 
 Street downloads use the camera's *current* view, so zoom in (roughly 15–18) before
 adding street layers.
@@ -89,9 +89,9 @@ adding street layers.
 - [ ] 12. Disconnect the network (optional) and add an uncached street layer → an error
       in the status line, nothing added.
 
-## Layers → Day & night
+## Layers → Overlays: Day & night
 
-- [ ] 19m. Layers → Day & night: the day, month and UTC time boxes show today's date and the current time
+- [ ] 19m. Layers → Overlays → Day & night: the day, month and UTC time boxes show today's date and the current time
       (UTC); **Time label** is ticked. Press **Add day & night** → a "Day & night" group with four night
       layers appears, the status line says "Day & night added to <map> for ... UTC. Key its Day of year and UTC time
       in <map> Time controls.", and the night side is shaded.
@@ -121,7 +121,7 @@ adding street layers.
 - [ ] 19o5. Refresh controls on an overlay made before this version brings its drawing up to date -> the night
       reaches the rim with no ring.
 
-## Extract (Layers)
+## Extract (Layers → Extract)
 
 - [ ] 13. World map with Countries → Extract: pick the Countries layer, find "France",
       Extract → an orange France layer appears on top and stays aligned while the
@@ -164,7 +164,7 @@ adding street layers.
 - [ ] 19d. Date line: Map tab → "New map", Web Mercator, search "Taveuni, Fiji" (makes the map), set
       centerLon to 180 and zoom to ~13, Layers → Roads (Main) → roads appear on both
       sides of the frame's centre line (two downloads merged into one layer).
-- [ ] 19c. Layers tab → **Clear download cache** → the status line reports how many
+- [ ] 19c. Layers → Add → **Clear download cache** (in the Streets panel) → the status line reports how many
       files and how much space were freed; adding a street layer again re-downloads it.
 - [ ] 19e. Search "Eiffel Tower", pick the result, **Callout here** → a "Callout 1: Eiffel Tower" group:
       a boxed text label, a dot on the tower and a line joining them; the status asks you to drag the
@@ -274,7 +274,7 @@ adding street layers.
       in the Unmatched list.
 - [ ] 35. A private (not shared) sheet link → Load → the "Anyone with the link" message.
 - [ ] 36. Regions off, Bubbles + Legend on → the bubble legend shows two reference circles with their values.
-- [ ] 37. With data layers present, the Extract source list (Layers tab) doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
+- [ ] 37. With data layers present, the Extract source list (Layers → Extract) doesn't offer them; Bake on a data layer gives "Data layers can't be baked yet." (or skips it).
 - [ ] 38. A city list (e.g. "Location,Visitors" with Paris, Lyon) with "Look up unmatched names" ticked → bubbles at the cities; Refresh data keeps them.
 - [ ] 39. A World Bank download (API_…csv from data.worldbank.org, hosted at a public link) → Load detects Country Code and the year columns.
 
@@ -396,7 +396,7 @@ adding street layers.
 
 ## Scale bar and north arrow
 
-- [ ] Add scale bar and Add north arrow (Layers tab) each work once on a map; a second press says the map already has one.
+- [ ] Add scale bar and Add north arrow (Layers → Overlays) each work once on a map; a second press says the map already has one.
 - [ ] The bar's label changes as you zoom and is right (compare a known distance, e.g. two cities).
 - [ ] Units 0 / 1 / 2 (metric, imperial, both) and Style 0 / 1 (line, segmented) all draw; try all four corners.
 - [ ] Fly here from a street view out to the world view fades the bar out (below Hide below zoom).
@@ -420,8 +420,18 @@ adding street layers.
 - [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
 - [ ] **Got it** is a green button (like Search). The **Tips** button sits at the bottom of the Map tab only (nothing above the status line on the other tabs); press it → the box shows again. Close and reopen → it is still shown.
 - [ ] Create map here with the name blank twice → "Map 1", then "Map 2" (and "Map 1 Map controls" in the Scene Window). Delete Map 1, press again → the new one is "Map 1". A typed name is used as typed; the name box hint reads "Map name (blank = the place's name, or Map 1, Map 2…)".
-- [ ] Layers tab: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
-- [ ] Layers tab: the note under the Controls buttons reads "Each map's settings in one place: select "(map name) Map controls" (or its Overlay, Data and Extract controls) in the Scene Window." in full.
+- [ ] Layers → Add: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
+- [ ] The Start here box ends with the line "Every map's settings are in "(map name) Map controls" in the Scene Window." in full. **Refresh controls** is on the Map tab, under the map and projection pickers (it is no longer on Layers); with a map picked it brings that map's Controls up to date.
+
+## Panel layout and hover help
+
+- [ ] Every tab shows its controls in shaded, rounded panels, each with a small grey heading. Map: the map pickers and Refresh controls, Search, Preview, Camera, Style. Layers → Add: World · Natural Earth, Streets · OpenStreetMap. Layers → Overlays: Day & night, Map furniture. Layers → Extract: Extract, Highlight, Bake. Label → Pins: Place, Preview, At coordinates; Label → Routes: Stops, Preview, Style. Imagery: Source, Keys and links, Build. Data: Sheet, Columns, Show, Unmatched rows.
+- [ ] Layers has an **Add / Overlays / Extract** switch below the tab bar, Label a **Pins / Routes** switch. Clicking each shows its page and highlights its button. Extract selected, Highlight selected and Bake all work from the Extract page.
+- [ ] **Clear download cache** is in the Streets panel (Layers → Add), and **Refresh controls** is on the Map tab; neither is anywhere else.
+- [ ] With **New map** picked, the **Camera** panel is gone altogether (no empty box with only a heading); pick a map → it comes back with the Fly and Drift controls.
+- [ ] Labels line up: in each panel the field labels (Detail, Day, Place, Shape, Source, MapTiler key and so on) share one left edge and their boxes line up.
+- [ ] Hover help: rest the pointer on a button, a dropdown, a text box, a number box, a tick box, a category toggle (Roads) and a list (Stops) on each tab → a short tip appears for each. Tips are plain sentences with no stray symbols. Examples: Detail reads "Bundled detail works offline. High downloads 10–40 MB once."; Refresh controls reads "Brings this map's Controls (Map, Overlay, Data, Extract, Time) up to date, and upgrades layers made by older versions."
+- [ ] The tab bars and the previews have no tip of their own (the previews keep their own hint).
 
 ## Previews
 
