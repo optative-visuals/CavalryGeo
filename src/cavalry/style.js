@@ -7,10 +7,15 @@
 // for an icon left of every label, so the text sits off-centre. Nor is ui.PageView: it reserves
 // the height of its tallest page for every page, so pageStack() hides the pages it isn't showing.
 // Headings are kept in a private list so the panel's columns can leave more room before one than
-// after it, which groups a heading with the controls it introduces.
+// after it, which groups a heading with the controls it introduces. panel() wraps a group of
+// controls in one shaded, rounded box; fieldLabel() gives labelled rows a shared label column;
+// tip() sets a hover tooltip (texts live in GeoTips).
 var GeoStyle = (function () {
   var GREEN = "#33CE70", PRIMARY = "#1F8F4E", HEADING_GREY = "#8a8a8a", HEADING_COLOR = "#a6a6a6";
   var BUTTON_HEIGHT = 24, TAB_HEIGHT = 24, ICON_SIZE = 16;
+  var LABEL_WIDTH = 92;
+  var PANEL_INSET = 20; // a panel's horizontal margins (2 x 9) plus its border (2 x 1)
+  var PANEL_BACKGROUND = "#2f2f2f", PANEL_BORDER = "#383838";
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {
@@ -29,7 +34,7 @@ var GeoStyle = (function () {
 
   var headings = []; // the rows heading() made; Cavalry's objects get no extra properties
   function isHeading(item) { return headings.indexOf(item) >= 0; }
-  // An optional hint sits right after the label, in the grey note style, before the line.
+  // An optional hint sits right after the label, in the grey note style.
   function heading(text, hint) {
     var label = new ui.Label(String(text));
     maybe(label, "setFontSize", 11);
@@ -41,14 +46,43 @@ var GeoStyle = (function () {
     headings.push(h);
     h.add(label);
     if (hint) h.add(note(hint));
-    if (hasContainer()) {
-      var line = new ui.Container();
-      line.setLayout(new ui.HLayout());
-      maybe(line, "setFixedHeight", 1);
-      line.setBackgroundColor(color("Mid"));
-      h.add(line);
-    }
     return h;
+  }
+
+  var panels = []; // what panel() made (the Container, or the plain VLayout on an older Cavalry)
+  function isPanel(x) { return panels.indexOf(x) >= 0; }
+  // One shaded, rounded block holding items 4 px apart, with 8 px more before a heading that
+  // isn't first. Without ui.Container it is just the VLayout.
+  function panel(items) {
+    var v = new ui.VLayout();
+    if (hasContainer()) maybe(v, "setMargins", 9, 8, 9, 10);
+    maybe(v, "setSpaceBetween", 4);
+    items.forEach(function (w, i) {
+      if (i > 0 && isHeading(w)) maybe(v, "addSpacing", 8);
+      v.add(w);
+    });
+    var out = v;
+    if (hasContainer()) {
+      out = new ui.Container();
+      out.setLayout(v);
+      out.setBackgroundColor(PANEL_BACKGROUND);
+      maybe(out, "setBorder", PANEL_BORDER, 1);
+      maybe(out, "setRadius", 6, 6, 6, 6);
+    }
+    panels.push(out);
+    return out;
+  }
+  // The label of a "label + box" row, a fixed width so the boxes line up.
+  function fieldLabel(text) {
+    var label = new ui.Label(String(text));
+    if (typeof label.setFixedWidth === "function") label.setFixedWidth(LABEL_WIDTH);
+    else maybe(label, "setMinimumWidth", LABEL_WIDTH);
+    return label;
+  }
+  // A hover tooltip. A GeoStyle toggle keeps its button in .widget.
+  function tip(widget, text) {
+    maybe(widget && widget.widget ? widget.widget : widget, "setToolTip", text);
+    return widget;
   }
   function note(text) {
     var label = new ui.Label(text);
@@ -188,6 +222,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, heading: heading, isHeading: isHeading, note: note, frameField: frameField,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

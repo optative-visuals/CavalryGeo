@@ -391,6 +391,7 @@ function makeFakeUi() {
   function Container() { this._layout = null; }
   Container.prototype.setLayout = function (l) { this._layout = l; };
   Container.prototype.setRadius = function (a, b, c, d) { this._radius = [a, b, c, d]; };
+  Container.prototype.setBorder = function (c, w) { this._border = [c, w]; };
 
   // Like Cavalry's Draw: paths are recorded; tests fire the mouse callbacks directly.
   function Draw() { this._paths = []; this._size = [0, 0]; this._redraws = 0; }
@@ -3859,12 +3860,13 @@ test("GeoStyle.color reads Cavalry's theme, with fallbacks when it has none", ()
   assert.equal(context.GeoStyle.PRIMARY, "#1F8F4E");
 });
 
-test("GeoStyle.heading is a small light-grey sentence-case label followed by a thin line", () => {
+test("GeoStyle.heading is a small light-grey sentence-case label with no rule after it", () => {
   const { context, ui } = buildSandbox();
   const h = context.GeoStyle.heading("Search");
   assert.ok(h instanceof ui.HLayout);
   assert.equal(h._spacing, 6, "tight row");
-  const [label, line] = h._items;
+  assert.equal(h._items.length, 1, "no trailing line");
+  const label = h._items[0];
   assert.equal(label.getText(), "Search");
   assert.equal(label._fontSize, 11);
   assert.equal(label._textColor, "#a6a6a6");
@@ -3873,38 +3875,33 @@ test("GeoStyle.heading is a small light-grey sentence-case label followed by a t
   assert.ok(context.GeoStyle.isHeading(h));
   assert.ok(!context.GeoStyle.isHeading(new ui.HLayout()), "a plain row is not a heading");
   assert.ok(!context.GeoStyle.isHeading(label));
-  assert.ok(line instanceof ui.Container);
-  assert.equal(line._fixedHeight, 1);
-  assert.equal(line._background, "#3a3a3a");
   const n = context.GeoStyle.note("Free for non-commercial use");
   assert.equal(n._fontSize, 11);
   assert.equal(n._textColor, "#8a8a8a");
 });
 
-test("GeoStyle.heading with a hint adds a grey hint label between the heading and its line", () => {
+test("GeoStyle.heading with a hint adds a grey hint label after the heading", () => {
   const { context, ui } = buildSandbox();
   const h = context.GeoStyle.heading("Preview", "drag to move · double-click or + / − to zoom");
-  assert.equal(h._items.length, 3);
-  const [label, hint, line] = h._items;
+  assert.equal(h._items.length, 2);
+  const [label, hint] = h._items;
   assert.equal(label.getText(), "Preview");
   assert.equal(label._textColor, "#a6a6a6");
   assert.ok(hint instanceof ui.Label);
   assert.equal(hint.getText(), "drag to move · double-click or + / − to zoom");
   assert.equal(hint._textColor, "#8a8a8a");
   assert.equal(hint._fontSize, 11);
-  assert.ok(line instanceof ui.Container);
   assert.ok(context.GeoStyle.isHeading(h));
   const plainHeading = context.GeoStyle.heading("Search");
-  assert.equal(plainHeading._items.length, 2, "a heading without a hint is unchanged");
+  assert.equal(plainHeading._items.length, 1);
   assert.equal(plainHeading._items[0].getText(), "Search");
-  assert.ok(plainHeading._items[1] instanceof ui.Container);
 });
 
 test("Map tab: the Preview heading reads Preview (drag to move)", () => {
   const { context } = buildSandbox();
   const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview (drag to move)")[0];
   assert.ok(row, "found the Preview heading");
-  assert.equal(row._items.length, 2, "heading with no hint has 2 items: label and line");
+  assert.equal(row._items.length, 1, "heading with no hint is just the label");
   assert.equal(row._items[0].getText(), "Preview (drag to move)");
   assert.equal(row._items[0]._textColor, "#a6a6a6");
 });
@@ -11003,4 +11000,89 @@ test("day & night: Refresh controls and Add again bring the night layers' and th
   api.set(rec.layers[0], { [EXPR]: old(rec.layers[0]) });
   G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
   assert.equal(want(rec.layers[0]), wanted[0]);
+});
+
+test("GeoStyle.heading rows hold no Container at any depth", () => {
+  const { context, ui } = buildSandbox();
+  [context.GeoStyle.heading("A"), context.GeoStyle.heading("B", "a hint")].forEach((h) => {
+    walkUi(h, (n) => assert.ok(!(n instanceof ui.Container), "no rule inside a heading"));
+  });
+});
+
+test("GeoStyle.panel is a shaded rounded box with the exact look, items in order, 4 apart and 8 before a non-first heading", () => {
+  const { context, ui } = buildSandbox();
+  const S = context.GeoStyle;
+  const h1 = S.heading("One"), a = new ui.Label("a"), b = new ui.Label("b"), h2 = S.heading("Two"), c = new ui.Label("c");
+  const p = S.panel([h1, a, b, h2, c]);
+  assert.ok(p instanceof ui.Container);
+  assert.ok(S.isPanel(p));
+  assert.ok(!S.isPanel(new ui.Container()), "an ordinary container is not a panel");
+  assert.ok(!S.isPanel(a));
+  assert.equal(p._background, "#2f2f2f");
+  assert.deepEqual(plain(p._border), ["#383838", 1]);
+  assert.deepEqual(plain(p._radius), [6, 6, 6, 6]);
+  const v = p._layout;
+  assert.ok(v instanceof ui.VLayout);
+  assert.deepEqual(plain(v._margins), [9, 8, 9, 10]);
+  assert.equal(v._spacing, 4);
+  assert.deepEqual(v._items, [h1, a, b, h2, c]);
+  assert.deepEqual(plain(v._spacings), [{ at: 3, px: 8 }], "extra room only before the second heading, not the first");
+  assert.equal(S.PANEL_INSET, 20);
+  assert.equal(S.LABEL_WIDTH, 92);
+});
+
+test("GeoStyle.panel without ui.Container is the plain VLayout, and without setBorder still builds", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  const a = new ui.Label("a");
+  const p = context.GeoStyle.panel([a]);
+  assert.ok(p instanceof ui.VLayout);
+  assert.deepEqual(p._items, [a]);
+  assert.ok(context.GeoStyle.isPanel(p));
+  const { context: c2, ui: ui2 } = buildSandbox();
+  delete ui2.Container.prototype.setBorder;
+  delete ui2.Container.prototype.setRadius;
+  assert.ok(c2.GeoStyle.panel([new ui2.Label("x")]) instanceof ui2.Container);
+});
+
+test("GeoStyle.fieldLabel is a label 92 wide, falling back to a minimum width", () => {
+  const { context, ui } = buildSandbox();
+  const l = context.GeoStyle.fieldLabel("Detail");
+  assert.ok(l instanceof ui.Label);
+  assert.equal(l.getText(), "Detail");
+  assert.equal(l._fixedWidth, 92);
+  delete ui.Label.prototype.setFixedWidth;
+  const m = context.GeoStyle.fieldLabel("Easing");
+  assert.equal(m._minWidth, 92);
+});
+
+test("GeoStyle.tip sets the tooltip on a widget and on a toggle's widget, and is a no-op without setToolTip", () => {
+  const { context, ui } = buildSandbox();
+  const S = context.GeoStyle;
+  const b = new ui.Button("Go");
+  assert.equal(S.tip(b, "Does it."), b);
+  assert.equal(b._toolTip, "Does it.");
+  const t = S.toggle("Rivers", false);
+  assert.equal(S.tip(t, "Adds rivers."), t);
+  assert.equal(t.widget._toolTip, "Adds rivers.");
+  delete ui.Label.prototype.setToolTip;
+  const l = new ui.Label("x");
+  assert.doesNotThrow(() => S.tip(l, "nothing"));
+  assert.equal(l._toolTip, undefined);
+});
+
+test("GeoTips.text returns plain strings, throws for unknown keys, and no text contains <", () => {
+  const { context } = buildSandbox();
+  const T = context.GeoTips;
+  const keys = T.keys();
+  assert.ok(keys.length >= 3);
+  keys.forEach((k) => {
+    const s = T.text(k);
+    assert.equal(typeof s, "string");
+    assert.ok(s.length > 0, k);
+    assert.ok(s.indexOf("<") < 0, k + " has no <");
+  });
+  assert.throws(() => T.text("no.such.key"), /no.such.key/);
 });
