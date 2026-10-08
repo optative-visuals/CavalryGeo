@@ -17,6 +17,7 @@ var GeoStyle = (function () {
   var PANEL_INSET = 20; // a panel's horizontal margins (2 x 9) plus its border (2 x 1)
   // A panel sits one step lighter than the script window behind it (#373737 in Cavalry), its border one more.
   var PANEL_BACKGROUND = "#3f3f3f", PANEL_BORDER = "#484848";
+  var PAGE_BACKGROUND = "#282828", PAGE_INSET = 8; // behind the panels on every tab, so they stand out
   var FALLBACK = { Window: "#272727", Base: "#373737", Mid: "#3a3a3a", Shadow: "#1c1c1c", Text: "#dddddd" };
 
   function color(name) {
@@ -161,7 +162,8 @@ var GeoStyle = (function () {
 
   // Pages shown one at a time, like ui.PageView, but only as tall as the shown page: each page sits
   // in a Container that is hidden (and so takes no room) unless it's the current one.
-  function pageStack() {
+  // background (optional): a colour painted behind each page, with rounded corners.
+  function pageStack(background) {
     var stack = { pages: [] }, current = 0, view;
     if (hasContainer()) {
       view = new ui.VLayout();
@@ -169,7 +171,15 @@ var GeoStyle = (function () {
       var boxes = [];
       stack.add = function (layout) {
         var box = new ui.Container();
-        box.setLayout(layout);
+        if (background) {
+          // An 8 px inset keeps the panels off the coloured page's edges.
+          var inset = new ui.VLayout();
+          maybe(inset, "setMargins", PAGE_INSET, PAGE_INSET, PAGE_INSET, PAGE_INSET);
+          inset.add(layout);
+          box.setLayout(inset);
+          box.setBackgroundColor(background);
+          maybe(box, "setRadius", 6, 6, 6, 6);
+        } else box.setLayout(layout);
         box.setHidden(boxes.length !== current);
         view.add(box);
         boxes.push(box);
@@ -224,6 +234,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
+  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, PANEL_INSET: PANEL_INSET, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

@@ -2017,7 +2017,7 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
-  sectionPages = GeoStyle.pageStack();
+  sectionPages = GeoStyle.pageStack(GeoStyle.PAGE_BACKGROUND);
   sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
   sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
@@ -2034,7 +2034,8 @@ function buildUi() {
   function fitPreview() {
     try {
       var g = sectionTabs.widget.geometry();
-      if (g && g.width > 50 + GeoStyle.PANEL_INSET) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - GeoStyle.PANEL_INSET); });
+      var inset = GeoStyle.PANEL_INSET + 2 * GeoStyle.PAGE_INSET; // the panel's insets plus the coloured page's
+      if (g && g.width > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - inset); });
     } catch (e) { /* older Cavalry */ }
   }
   ui.onResize = fitPreview;

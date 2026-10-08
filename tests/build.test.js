@@ -545,7 +545,7 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
   assert.ok(holds(pages.pages[0], context.tipsBtn), "Tips is held by the Map page");
   assert.equal(root._stretch, 1);
-  pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout, layout, "page " + i));
+  pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout._items[0], layout, "page " + i)); // inside the coloured page's 8 px inset
   context.showSection("Imagery");
   assert.deepEqual(pages.widget._items.map((c) => c.isHidden()), [true, true, false, true, true]);
 });
@@ -5458,22 +5458,22 @@ test("Map tab: the preview follows the tab bar's width when the panel is resized
   assert.equal(typeof ui.onResize, "function");
   context.sectionTabs.widget._width = 500;
   ui.onResize();
-  assert.deepEqual(plain(context.preview._draw._size), [480, 270], "tab bar width minus the 20 px panel inset");
-  assert.deepEqual(plain(context.pinsPreview._draw._size)[0], 480);
-  assert.deepEqual(plain(context.routesPreview._draw._size)[0], 480);
+  assert.deepEqual(plain(context.preview._draw._size), [464, 261], "tab bar width minus the 20 px panel inset and the page's 2 x 8 px inset");
+  assert.deepEqual(plain(context.pinsPreview._draw._size)[0], 464);
+  assert.deepEqual(plain(context.routesPreview._draw._size)[0], 464);
   context.sectionTabs.widget._width = 320;
   ui.onResize();
-  assert.deepEqual(plain(context.preview._draw._size), [300, 169]);
+  assert.deepEqual(plain(context.preview._draw._size), [284, 160]);
 });
 
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   context.sectionTabs.widget._width = 500;
   ui.onResize();
-  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
+  assert.deepEqual(plain(context.preview._draw._size), [464, 261]);
   context.sectionTabs.widget._width = 280;
   ui.onResize();
-  assert.deepEqual(plain(context.preview._draw._size), [260, 146]);
+  assert.deepEqual(plain(context.preview._draw._size), [244, 137]);
 });
 
 test("Map tab: Refresh shows the picked map's camera as the dashed frame", () => {
