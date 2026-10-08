@@ -544,3 +544,21 @@ test("day & night v2: no label rows without a label, Night lights % only with ni
   const ids = G.ids(dnModel2({ nightLights: { id: "nlg", state: {} } }));
   ["dn", "nr", "nf", "tl", "nlg"].forEach((id) => assert.equal(ids[id], true, id));
 });
+
+test("day & night v2 with a missing filter (plugin uninstalled): plan() does not throw; the filter-only rows drop out, the rest stay", () => {
+  let p;
+  assert.doesNotThrow(() => { p = G.plan(dnModel2({ filter: null, nightLights: { id: "nlg", state: {} } })); });
+  const ls = labels(p);
+  assert.ok(ls.includes("Day & night · Night colour"));
+  assert.ok(ls.includes("Day & night · Hide"));
+  assert.ok(ls.includes("Time label · Hide") && ls.includes("Time label · Size"));
+  assert.ok(!ls.includes("Day & night · Night opacity"));
+  assert.ok(!ls.includes("Day & night · Twilight (0 hard · 1 soft)"));
+  assert.deepEqual(row(p, "Day & night · Day of year (1–365)").link, [{ layer: "tl", attr: TLAB("dayOfYear") }]);
+  assert.deepEqual(row(p, "Day & night · UTC time (0–24)").link, [{ layer: "tl", attr: TLAB("utcTime") }]);
+  assert.deepEqual(row(p, "Day & night · Night lights %").link, [{ layer: "nlg", attr: "opacity" }]);
+  assert.deepEqual(row(p, "Day & night · Night colour").link, [{ layer: "nr", attr: "material.materialColor" }]);
+  // Every emitted value row has at least one target.
+  p.rows.forEach((r) => { if (r.kind === "value") assert.ok(r.link.length + r.linked.length > 0, r.label); });
+  assert.doesNotThrow(() => G.plan(dnModel2({ filter: null, label: null })));
+});

@@ -272,8 +272,11 @@ var GeoControls = (function () {
       var nl = (v2 ? [dn.night] : dn.layers || []).filter(Boolean), nh = (dn.helpers || []).filter(Boolean), tl = dn.label, dsn = "Day & night" + SEP;
       var A = v2 ? { day: "dayOfYear", time: "utcTime", night: "nightOpacity", twilight: "twilight", lights: "lights" }
         : { day: N_DAY, time: N_TIME, night: NH_NIGHT, twilight: NH_TWILIGHT, lights: NH_LIGHTS };
-      var timeMembers = v2 ? [dn.filter] : nl, opacityMembers = v2 ? [dn.filter] : nh;
-      var twilightMembers = v2 ? [dn.filter] : (dn.blurHelper ? nh.concat([dn.blurHelper]) : nh);
+      // In version 2 nh (the helpers) is unused: the filter carries every filter-only input. A filter Cavalry dropped (plugin
+      // uninstalled) is null, so its rows lose their targets and are not emitted; the colour, hide and label rows remain.
+      var fl = v2 ? [dn.filter].filter(Boolean) : null;
+      var timeMembers = v2 ? fl : nl, opacityMembers = v2 ? fl : nh;
+      var twilightMembers = v2 ? fl : (dn.blurHelper ? nh.concat([dn.blurHelper]) : nh);
       var timeTargets = function (attr, labelAttr) {
         var t = timeMembers.map(function (m) { return { m: m, attr: attr }; });
         if (tl) t.push({ m: tl, attr: labelAttr });
