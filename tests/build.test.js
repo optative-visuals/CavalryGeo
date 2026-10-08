@@ -11641,3 +11641,113 @@ test("Imagery boxes: key, token, style, link and credit are saved when committed
     assert.equal(plain(context.GeoNet.loadSettings())[boxes[name]], "value-" + name, name + " was saved, trimmed");
   });
 });
+
+// ---- Error handling (tidy-up) ------------------------------------------------------
+function bakeTwo(context, api) {
+  const G = context.GeoScene, map = controlsMap(context);
+  const mk = (n) => G.createMapLayer(map, n, { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  const a = mk("A"), b = mk("B");
+  api.select([a, b]);
+  return [a, b];
+}
+
+test("Bake: one layer failing does not undo the others; the status counts the baked ones and gives the first error", () => {
+  const { context, api } = buildSandbox();
+  const [a, b] = bakeTwo(context, api), real = context.GeoScene.bake;
+  context.GeoScene.bake = (id) => { if (id === b) throw new Error("boom"); return real(id); };
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) at the current frame\./);
+  assert.match(context.statusLabel.getText(), / Couldn't bake 1: boom\./);
+  context.GeoScene.bake = () => { throw new Error("boom"); };
+  api.select([a, b]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: boom", "nothing baked: the error itself");
+});
+
+test("Bake: a failure while recognising route parts carries on and says so", () => {
+  const { context, api } = buildSandbox();
+  const [a] = bakeTwo(context, api);
+  context.GeoScene.findRoutes = () => { throw new Error("odd route"); };
+  api.select([a]);
+  context.bakeBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\)/);
+  assert.match(context.statusLabel.getText(), / Couldn't check for route parts: odd route\./);
+});
+
+test("Bake: only furniture selected together with highlight parts names what else was skipped", () => {
+  const { context, api } = buildSandbox({ setup: installNe });
+  const map = findFrance(context), G = context.GeoScene;
+  context.highlightBtn.onClick();
+  const h = G.findHighlights(map)[0], sb = G.addScaleBar(map);
+  api.select([sb]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked.");
+  api.select([sb, h.shape]);
+  context.bakeBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: The scale bar and north arrow follow the camera, so they can't be baked. Highlights can't be baked either.");
+});
+
+test("Extract selected: one feature failing does not undo the others; the status gives the count and the first error", () => {
+  const { context } = buildSandbox();
+  findFrance(context);
+  context.featureList.getSelection = () => ["g0", "g0"];
+  const real = context.GeoScene.extract;
+  let n = 0;
+  context.GeoScene.extract = function () { if (++n === 2) throw new Error("boom"); return real.apply(this, arguments); };
+  context.extractBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Extracted 1 feature layer\(s\)\. They follow the camera;/);
+  assert.match(context.statusLabel.getText(), / Couldn't extract 1: boom\./);
+  context.GeoScene.extract = () => { throw new Error("boom"); };
+  context.extractBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: boom");
+});
+
+test("Add layers: the large-area and heavy-layers questions go through the question helper, which copes with no dialog", () => {
+  const { context, ui } = buildSandbox({ setup: installNe });
+  createWorldMap(context);
+  context.GeoUtil.checkArea = () => ({ areaKm2: 5000, needsConfirm: true, refuse: false });
+  let downloads = 0;
+  context.GeoNet.osmLayer = () => { downloads++; return context.GeoCodec.encodeLayer({ kind: "line", features: [] }); };
+  context.checks.roads.setValue(true);
+  context.addLayersBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Error: The camera shows about 5000 km², a large area to download\./);
+  assert.equal(downloads, 0, "nothing downloaded without a way to ask");
+  const asked = withModal(ui, false);
+  context.addLayersBtn.onClick();
+  assert.equal(asked[0].title, "Large area");
+  assert.equal(context.statusLabel.getText(), "Cancelled. Zoom the camera in, or choose Main features only.");
+  assert.equal(downloads, 0);
+  // Heavy layers: asked when a dialog exists, simply added when none does.
+  context.GeoUtil.checkArea = () => ({ areaKm2: 1, needsConfirm: false, refuse: false });
+  context.checks.roads.setValue(false);
+  context.checks.countries.setValue(true);
+  context.GeoUtil.LIMITS.SCENE_WARN_BYTES = 1;
+  context.addLayersBtn.onClick();
+  assert.equal(asked[asked.length - 1].title, "Heavy layers");
+  assert.equal(context.statusLabel.getText(), "Cancelled. Nothing was added.");
+  delete ui.Modal;
+  context.addLayersBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Added \d+ layer\(s\)/);
+});
+
+test("Imagery pickers: a throwing source change is caught, and refilling the style list does not overwrite the style box", () => {
+  const { context } = buildSandbox();
+  context.styleField.setText("mine");
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  // Like a Cavalry that reports a pick whenever the list is refilled.
+  const clear = sp.clear, add = sp.addEntry;
+  sp.clear = function () { clear.call(sp); sp.onValueChanged(); };
+  sp.addEntry = function (e) { add.call(sp, e); sp.onValueChanged(); };
+  context.sourcePicker.setValue(ids.findIndex((id) => (context.GeoSources.list().find((s) => s.id === id).suggestions || []).length > 0));
+  context.sourcePicker.onValueChanged();
+  assert.ok(sp._entries.length > 0, "the style list was refilled");
+  assert.equal(context.styleField.getText(), "mine");
+  sp.clear = clear; sp.addEntry = add;
+  sp.setValue(1);
+  sp.onValueChanged();
+  assert.equal(context.styleField.getText(), sp._entries[1], "a real pick still fills the box");
+  context.licenceLabel.setText = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => context.sourcePicker.onValueChanged());
+  assert.equal(context.statusLabel.getText(), "Error: boom");
+  assert.doesNotThrow(() => { context.GeoSources.list = () => { throw new Error("bad"); }; sp.onValueChanged(); });
+});

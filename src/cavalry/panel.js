@@ -672,11 +672,15 @@ addLayersBtn.onClick = guard(function () {
     if (area.refuse) {
       throw new Error("The camera shows about " + Math.round(area.areaKm2) + " km² — too large for street data. Zoom the camera in (street layers work best around zoom 14–18).");
     }
-    if (area.needsConfirm && !new ui.Modal().showQuestion("Large area",
-        "The camera shows about " + Math.round(area.areaKm2) + " km². Downloading " +
-        (mode === "all" ? "everything" : "main features") + " for that area may be slow and heavy. Continue?")) {
-      say("Cancelled. Zoom the camera in, or choose Main features only.");
-      return;
+    if (area.needsConfirm) {
+      var areaDialog = questionDialog();
+      if (!areaDialog) throw new Error("The camera shows about " + Math.round(area.areaKm2) + " km², a large area to download. Zoom the camera in, or choose Main features only.");
+      if (!areaDialog.showQuestion("Large area",
+          "The camera shows about " + Math.round(area.areaKm2) + " km². Downloading " +
+          (mode === "all" ? "everything" : "main features") + " for that area may be slow and heavy. Continue?")) {
+        say("Cancelled. Zoom the camera in, or choose Main features only.");
+        return;
+      }
     }
   }
 
@@ -690,7 +694,9 @@ addLayersBtn.onClick = guard(function () {
     bytes += JSON.stringify(enc).length;
     fetched.push({ category: c, enc: enc });
   });
-  if (bytes > GeoUtil.LIMITS.SCENE_WARN_BYTES && !new ui.Modal().showQuestion("Heavy layers",
+  // (Without a question dialog in this Cavalry the layers are simply added.)
+  var heavyDialog = bytes > GeoUtil.LIMITS.SCENE_WARN_BYTES ? questionDialog() : null;
+  if (heavyDialog && !heavyDialog.showQuestion("Heavy layers",
       "These layers add about " + GeoUtil.formatBytes(bytes) + " to the scene file. Continue?")) {
     say("Cancelled. Nothing was added.");
     return;
@@ -824,8 +830,15 @@ extractBtn.onClick = guard(function () {
   var sel = featureList.getSelection();
   if (!sel || !sel.length) throw new Error("Select features in the list first.");
   var map = currentMap();
-  sel.forEach(function (uuid) { GeoScene.extract(map, groupsLayer, groupsEnc, groups[parseInt(String(uuid).slice(1), 10)]); });
-  say("Extracted " + sel.length + " feature layer(s). They follow the camera; style and animate them freely." + syncControls(map));
+  // One feature failing doesn't undo the others: each is tried on its own.
+  var done = 0, failed = 0, firstError = null;
+  sel.forEach(function (uuid) {
+    try { GeoScene.extract(map, groupsLayer, groupsEnc, groups[parseInt(String(uuid).slice(1), 10)]); done++; }
+    catch (e) { failed++; if (!firstError) firstError = e; }
+  });
+  if (!done) throw firstError;
+  say("Extracted " + done + " feature layer(s). They follow the camera; style and animate them freely." +
+    (failed ? " Couldn't extract " + failed + ": " + (firstError && firstError.message ? firstError.message : String(firstError)) + "." : "") + syncControls(map));
 });
 
 highlightBtn.onClick = guard(function () {
@@ -876,7 +889,7 @@ bakeBtn.onClick = guard(function () {
   var hlParts = {}, cParts = {}, dnParts = {};
   // A new-style route is made of ordinary Cavalry layers (Bézier lines, circles, helpers),
   // so its parts are skipped with a message of their own rather than counted as "other".
-  var routeParts = {};
+  var routeParts = {}, recogniseNote = "";
   try {
     GeoScene.findMaps().forEach(function (m) {
       GeoScene.findRoutes(m).forEach(function (r) {
@@ -898,7 +911,11 @@ bakeBtn.onClick = guard(function () {
       var dp = GeoScene.dayNightParts(m);
       Object.keys(dp).forEach(function (k) { dnParts[k] = true; });
     });
-  } catch (e) { /* no routes to recognise */ }
+  } catch (e) {
+    // Carry on (most selections have no route parts), but say it: a route part may then be baked as a plain layer.
+    recogniseNote = " Couldn't check for route parts: " + (e && e.message ? e.message : String(e)) + ".";
+  }
+  var bakeFailed = 0, bakeError = null;
   ids.forEach(function (id) {
     if (routeParts[id]) { skippedRoute++; return; }
     if (hlParts[id]) { skippedHighlight++; return; }
@@ -910,21 +927,24 @@ bakeBtn.onClick = guard(function () {
     if (meta.category === "dayNight" || meta.category === "dayNightMask" || meta.category === "timeLabel") { skippedDayNight++; return; }
     if (meta.category === "data") { skippedData++; return; }
     if (meta.category === "scaleBar" || meta.category === "northArrow") { skippedFurniture++; return; }
-    GeoScene.bake(id);
-    baked++;
+    // One layer failing doesn't undo the others: each is tried on its own.
+    try { GeoScene.bake(id); baked++; }
+    catch (e) { bakeFailed++; if (!bakeError) bakeError = e; }
   });
+  if (baked === 0 && bakeFailed) throw bakeError;
 
   if (baked === 0) {
+    // e.g. "Highlights and callouts", "Callouts and day & night", "Highlights, callouts and day & night"
+    var kinds = [skippedHighlight ? "highlights" : "", skippedCallout ? "callouts" : "", skippedDayNight ? "day & night" : ""].filter(Boolean);
+    var list = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0];
     if (skippedFurniture && !skippedRoute && !skippedData && !other) {
-      throw new Error("The scale bar and north arrow follow the camera, so they can't be baked.");
+      throw new Error("The scale bar and north arrow follow the camera, so they can't be baked." +
+        (kinds.length ? " " + list.charAt(0).toUpperCase() + list.slice(1) + " can't be baked either." : "") + recogniseNote);
     } else if (skippedDayNight && !skippedHighlight && !skippedCallout && !skippedRoute && !skippedData && !skippedFurniture && !other) {
       throw new Error("Day & night redraws from its time, so it can't be baked.");
     } else if ((skippedHighlight || skippedCallout) && !skippedRoute && !skippedData && !skippedFurniture && !other) {
       if (!skippedHighlight && !skippedDayNight) throw new Error("Callouts are already Cavalry layers, so there's nothing to bake.");
-      // e.g. "Highlights and callouts", "Callouts and day & night", "Highlights, callouts and day & night"
-      var kinds = [skippedHighlight ? "highlights" : "", skippedCallout ? "callouts" : "", skippedDayNight ? "day & night" : ""].filter(Boolean);
-      var list = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0];
-      throw new Error(list.charAt(0).toUpperCase() + list.slice(1) + " can't be baked.");
+      throw new Error(list.charAt(0).toUpperCase() + list.slice(1) + " can't be baked." + recogniseNote);
     } else if (skippedRoute) {
       throw new Error("Route legs and stops are already Cavalry shapes, so there's nothing to bake.");
     } else if (skippedData && !other) {
@@ -942,6 +962,8 @@ bakeBtn.onClick = guard(function () {
   if (skippedDayNight) msg += " Skipped " + skippedDayNight + " day & night part(s).";
   if (skippedFurniture) msg += " Skipped the scale bar / north arrow (they follow the camera).";
   if (other) msg += " Skipped " + other + " group(s) or other layer(s).";
+  if (bakeFailed) msg += " Couldn't bake " + bakeFailed + ": " + (bakeError && bakeError.message ? bakeError.message : String(bakeError)) + ".";
+  msg += recogniseNote;
   // Bake doesn't need a picked map; when one is picked, its Controls are brought up to date.
   if (!newMapSelected()) msg += syncControls(currentMap());
   say(msg);
@@ -1625,11 +1647,16 @@ function imageryPlanSignature(map, src, opts) {
   }
   return JSON.stringify([map.cameraId, src.id, opts, camera, GeoScene.compFrameRange(), GeoScene.compSize()]);
 }
+// Refilling the style list may make Cavalry report a pick; that must not overwrite the Map ID / style box.
+var refreshingSource = false;
 function refreshSourceUi() {
   var src = currentSource();
   licenceLabel.setText(src.licence);
-  stylePicker.clear();
-  (src.suggestions || []).forEach(function (s) { stylePicker.addEntry(s); });
+  refreshingSource = true;
+  try {
+    stylePicker.clear();
+    (src.suggestions || []).forEach(function (s) { stylePicker.addEntry(s); });
+  } finally { refreshingSource = false; }
   resetImageryPlan();
 }
 function saveImagerySettings() {
@@ -1668,12 +1695,13 @@ function runImageryTimer(intervalMs, tick) {
   f.onValueCommitted = guard(function () { saveImagerySettings(); });
 });
 refreshSourceUi();
-sourcePicker.onValueChanged = function () { refreshSourceUi(); };
-stylePicker.onValueChanged = function () {
+sourcePicker.onValueChanged = guard(function () { refreshSourceUi(); });
+stylePicker.onValueChanged = guard(function () {
+  if (refreshingSource) return; // refilling the list is not the user picking a style
   var s = currentSource().suggestions || [];
   if (s.length) styleField.setText(s[stylePicker.getValue()] || "");
   resetImageryPlan();
-};
+});
 
 // Builds in timer steps so Cavalry stays responsive: the progress bar counts tiles,
 // then the old imagery for this source is removed, a few layers per step.
