@@ -39,9 +39,11 @@ function column(items) {
   v.setMargins(0, 6, 0, 0); // flush left and right: everything shares one left edge
   if (typeof v.setSpaceBetween === "function") v.setSpaceBetween(4);
   // A heading sits close to what it introduces (4 px below) and further from what came before (about 8 px above).
+  var panelSeen = false;
   items.forEach(function (w, i) {
     if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(4);
-    if (i > 0 && GeoStyle.isPanel(w) && typeof v.addSpacing === "function") v.addSpacing(6); // 10 px between panels
+    // 10 px between panels; never above the first one (the Map tab's hidden Start here tips come before it).
+    if (GeoStyle.isPanel(w)) { if (panelSeen && typeof v.addSpacing === "function") v.addSpacing(6); panelSeen = true; }
     v.add(w);
   });
   if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
