@@ -130,6 +130,13 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(HIGHLIGHT_FADE_INPUTS) + "(1 - _i0) * 100;\n";
   }
 
+  // The input indices of a repeating layer's comp frame (compW, compH), read from its expression, or null
+  // for a layer that does not repeat (single things, routes, old layers without the frame option).
+  function frameInputs(expr) {
+    var m = /frame: \{w: _i(\d+), h: _i(\d+)\}/.exec(String(expr || ""));
+    return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+  }
+
   function readData(expr) {
     var a = expr.indexOf(DATA_OPEN);
     if (a < 0) return null;
@@ -344,7 +351,7 @@ var GeoExpression = (function () {
     END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
     HIGHLIGHT_SHAPE_INPUTS: HIGHLIGHT_SHAPE_INPUTS, HIGHLIGHT_FADE_INPUTS: HIGHLIGHT_FADE_INPUTS,
     highlightLayerExpression: highlightLayerExpression, highlightFadeExpression: highlightFadeExpression,
-    writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
+    writeTag: writeTag, readTag: readTag, frameInputs: frameInputs, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression, imageryViewExpression: imageryViewExpression,
     routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,

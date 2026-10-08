@@ -35,6 +35,7 @@ var GeoRuntime = (function () {
           pts.push(out[0], out[1]);
         }
         if (!visible || pts.length < 2) continue;
+        // A text's box is over-estimated (a full character per size unit, either side): that only ever adds copies that are off the frame.
         var copies = frame ? worldCopies(cam, shapeBox(pts, kind === "point" ? radius * scale : kind === "text" ? radius * (String(row[0]).length + 1) : 0), frame) : [0];
         for (var c = 0; c < copies.length; c++) {
           if (copies[c] === 0) drawShape(path, kind, row, pts, vis, radius, scale);

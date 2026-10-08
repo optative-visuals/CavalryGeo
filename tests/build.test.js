@@ -13688,3 +13688,42 @@ test("date line: base and data layers get the comp size and repeat; pins and old
   assert.ok(expr(d.layers.labels).includes("frame: {w: _i11, h: _i12}"));
   api.get = realGet;
 });
+
+// Date line: Bake keeps the copies a wide flat shot shows; single things and old layers bake one world.
+test("Bake: a repeating flat layer bakes every copy the comp frame shows; pins and old layers bake one world", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("Wide", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const enc = { v: 1, kind: "polygon", f: [] };
+  const japan = context.GeoCodec.encodeLayer({ kind: "polygon", features: [{ name: "J", rank: 1, rings: [[[130, 30], [146, 30], [146, 46], [130, 46], [130, 30]]] }] });
+  const shot = { lat: 0, lon: 179, zoom: 2, rotation: 0, projection: 0 };
+  const layer = G.createMapLayer(map, "Japan", japan, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.set(layer, { "generator.array.0": shot.lat, "generator.array.1": shot.lon, "generator.array.2": shot.zoom, "generator.array.3": 0, "generator.array.4": 0 });
+  const calls = [];
+  const realBuild = context.GeoRuntime.buildPath;
+  context.GeoRuntime.buildPath = function (e, cam, detail, opts) { calls.push(opts); return realBuild.apply(this, arguments); };
+  let baked = null;
+  const realEditable = api.createEditable;
+  api.createEditable = function (path, name) { baked = path; return realEditable.apply(this, arguments); };
+  try {
+    G.bake(layer);
+    assert.equal(calls[calls.length - 1].frame.w, 1920);
+    assert.equal(calls[calls.length - 1].frame.h, 1080, "the comp size is the frame");
+    const reference = realBuild.call(context.GeoRuntime, japan, shot, 100, { frame: { w: 1920, h: 1080 } }, baked.constructor);
+    assert.deepEqual(JSON.parse(JSON.stringify(baked._cmds)), JSON.parse(JSON.stringify(reference._cmds)), "baked = buildPath with the frame");
+    assert.equal(baked._cmds.filter((c) => c[0] === "moveTo").length, 2, "Japan at lon 179, zoom 2: two copies on the frame");
+
+    const pin = G.addPin(map, "Paris", 2.35, 48.85, null, true);
+    api.set(pin, { "generator.array.0": 0, "generator.array.1": 179, "generator.array.2": 2, "generator.array.3": 0, "generator.array.4": 0 });
+    G.bake(pin);
+    assert.equal(calls[calls.length - 1].frame, null, "a pin bakes one world");
+
+    api.set(layer, { "generator.expression": String(api.get(layer, "generator.expression")).replace(/, frame: \{w: _i7, h: _i8\}/, "") });
+    G.bake(layer);
+    assert.equal(calls[calls.length - 1].frame, null, "an old layer without the frame option bakes one world");
+    assert.equal(baked._cmds.filter((c) => c[0] === "moveTo").length, 1);
+  } finally {
+    context.GeoRuntime.buildPath = realBuild;
+    api.createEditable = realEditable;
+  }
+});

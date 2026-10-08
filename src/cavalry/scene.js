@@ -721,7 +721,11 @@ var GeoScene = (function () {
     var detail = v(5);
     var radius = v(6);
     var lift = meta.category === "route" ? v(7) : undefined;
-    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift }, cavalry.Path);
+    // A repeating layer (its expression names a comp frame) bakes every copy of the world the frame shows,
+    // with the comp size read from its own compW / compH inputs. Old layers, pins, labels and routes have none.
+    var fi = GeoExpression.frameInputs(readExpr(layerId, A.MAP_EXPR_ATTR)), frame = null;
+    if (fi) frame = { w: v(fi.w), h: v(fi.h) };
+    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift, frame: frame }, cavalry.Path);
     var id = api.createEditable(path, api.getNiceName(layerId) + " (baked)");
     var parent = api.getParent(layerId);
     if (parent) api.parent(id, parent);
