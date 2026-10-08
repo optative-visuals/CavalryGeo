@@ -5,6 +5,7 @@ imagery, flight routes and data maps that all move with one camera.
 
 [![Latest release](https://img.shields.io/github/v/release/optative-visuals/CavalryGeo?label=download)](https://github.com/optative-visuals/CavalryGeo/releases/latest)
 [![Licence: GPL v3](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
+[![Support my work on Ko-fi](https://img.shields.io/badge/support%20my%20work-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/optative)
 
 ![The Cavalry Geo panel with its map preview, next to a world map it built in Cavalry](docs/images/hero.jpg)
 
