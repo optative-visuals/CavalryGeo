@@ -12294,7 +12294,7 @@ test("night lights: Controls sync and the route order never look inside the Nigh
 // ---- Night lights in Controls ----
 test("night lights in Controls: Night lights % starts at 100 and drives the group opacity and every helper's lights; sync reports the build due and removes the row once the night lights are gone", () => {
   const { context, api, map, rec } = nightFixture(4);
-  const G = context.GeoScene, day = tileSource(context), E = context.GeoExpression;
+  const G = context.GeoScene, day = tileSource(context), E = context.GeoExpression, LIGHTS = "array." + E.inputIndex(E.NIGHT_OPACITY_INPUTS, "lights");
   assert.equal(context.GeoControlPanel.sync(map).nightLightsNeeded, false, "no day imagery yet");
   const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   const before = context.GeoControlPanel.sync(map);
@@ -12317,12 +12317,16 @@ test("night lights in Controls: Night lights % starts at 100 and drives the grou
   const gone = context.GeoControlPanel.sync(map);
   assert.ok(!promotedNames(api, gone.components.time).includes("Day & night · Night lights %"));
   assert.equal(gone.nightLightsNeeded, true, "still wanted, so a build is due");
+  rec.helpers.forEach((h) => {
+    assert.equal(api.getInConnection(h, LIGHTS), "", "helper lets go of the Night lights % input");
+    assert.equal(api.get(h, LIGHTS), 0, "helper lights back at 0");
+  });
   assert.ok(d.groupId);
 });
 
 test("night lights in Controls: a sync that removes orphaned night lights drops their row and reports no build due", () => {
   const { context, api, map, rec } = nightFixture(4);
-  const G = context.GeoScene, day = tileSource(context);
+  const G = context.GeoScene, day = tileSource(context), LIGHTS = "array." + context.GeoExpression.inputIndex(context.GeoExpression.NIGHT_OPACITY_INPUTS, "lights");
   const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.ok(promotedNames(api, context.GeoControlPanel.sync(map).components.time).includes("Day & night · Night lights %"));
@@ -12331,5 +12335,8 @@ test("night lights in Controls: a sync that removes orphaned night lights drops 
   assert.equal(api.layerExists(n.groupId), false, "orphaned night lights removed by the refresh");
   assert.equal(r.nightLightsNeeded, false);
   assert.ok(!promotedNames(api, r.components.time).includes("Day & night · Night lights %"));
-  rec.helpers.forEach((h) => assert.equal(api.get(h, "array.3"), 0));
+  rec.helpers.forEach((h) => {
+    assert.equal(api.getInConnection(h, LIGHTS), "", "helper lets go of the Night lights % input in the same sync");
+    assert.equal(api.get(h, LIGHTS), 0, "helper lights back at 0");
+  });
 });

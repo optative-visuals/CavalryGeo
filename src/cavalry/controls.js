@@ -418,6 +418,25 @@ var GeoControlPanel = (function () {
     attempt(function () { setUserData(comp, NOTES_KEY, next); });
   }
 
+  // The Night lights % input drives each helper's lights only while the Night lights group is there. Once the row
+  // is gone the helpers let go of the input and their lights go back to 0, so the overlay looks as before (no night
+  // lights). A keyed input stays connected and keeps its key, as retireHandleSlots does.
+  function retireLightsSlot(V, slots, helpers) {
+    var path = slots["dn:lights"];
+    if (!path || !has("disconnect")) return;
+    var keys = [], at = "array." + GeoExpression.inputIndex(GeoExpression.NIGHT_OPACITY_INPUTS, "lights"), from = V + "." + path, letGo = true;
+    try { keys = api.getKeyframeTimes(V, path) || []; } catch (e) { keys = []; }
+    if (keys.length) return;
+    helpers.forEach(function (h) {
+      var driven = "";
+      try { driven = String(api.getInConnection(h.id, at) || ""); } catch (e) { driven = ""; }
+      if (driven !== from) return;
+      if (!attempt(function () { api.disconnect(V, path, h.id, at); })) { letGo = false; return; }
+      attempt(function () { api.set(h.id, one(at, 0)); });
+    });
+    if (letGo) delete slots["dn:lights"];
+  }
+
   // Rows an older version showed for a new-style route's handles (Lean, Flip side, a leg's shape
   // by hand and handle X / Y) are no longer in the Controls. A values input still driving them
   // that isn't animated hands its value to the handle helper inputs it drives, lets go of them
@@ -503,6 +522,8 @@ var GeoControlPanel = (function () {
     // A failing row only drops its own promotion; the inputs added so far are always recorded.
     try {
       attempt(function () { retireHandleSlots(V, slots, found.routes); });
+      // No Night lights % row because the night lights are gone: the helpers let go of its input (see retireLightsSlot).
+      attempt(function () { if (!(model.dayNight && model.dayNight.nightLights)) retireLightsSlot(V, slots, model.dayNight ? model.dayNight.helpers : []); });
       p.rows.forEach(function (row, i) {
         if (row.kind === "direct") {
           attempt(function () { api.renameAttribute(row.layer, row.attr, inputLabel(row.attr, row.label)); });

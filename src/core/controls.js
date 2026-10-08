@@ -276,7 +276,8 @@ var GeoControls = (function () {
       valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(N_TIME, TL("utcTime")), { hardMin: 0, hardMax: 24 });
       value("dn:colour", "color", dsn + "Night colour", nl, FILL);
       value("dn:night", "double", dsn + "Night opacity", nh, NH_NIGHT, { hardMin: 0, hardMax: 100 });
-      // Night lights %: the Night lights group's opacity, then the helpers' lights; a new input starts at 100.
+      // Night lights %: the Night lights group's opacity, then the helpers' lights. A new input starts at 100 even if the
+      // group's opacity had been changed before the row existed (start, not the group's value, seeds it).
       if (dn.nightLights) {
         var lightTargets = [{ m: dn.nightLights, attr: "opacity" }].concat(nh.map(function (m) { return { m: m, attr: NH_LIGHTS }; }));
         valueTargets("dn:lights", "double", dsn + "Night lights %", lightTargets, { hardMin: 0, hardMax: 100 }, 100);
