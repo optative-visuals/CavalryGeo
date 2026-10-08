@@ -2940,8 +2940,9 @@ var GeoScene = (function () {
   // The Controls refresh. With the Cavalry Geo Night type an older overlay (version 1) is upgraded to version 2
   // ({ upgraded: true }). Without it an older overlay is left exactly as it is (no blur, mask, script or helper
   // top-ups) and the note says the plugin is needed to upgrade it. A version 2 overlay is only fitted; one whose
-  // filter is gone is not remade here (Add day & night does that), and the note says the plugin is needed.
+  // filter is gone is not remade here (Add day & night does that): the note says so, or says the plugin is needed.
   // Returns { upgraded, note } where note is null or the text for the Refresh controls message.
+  var DAYNIGHT_FILTER_GONE = "The Day & night filter is missing: press Add day & night to remake it.";
   var DAYNIGHT_OLD_NOTE = "This Day & night was made by an older version of Cavalry Geo, so it is left as it is. Install the Cavalry Geo plugin (drag the CavalryGeo_plugin folder from the download into the Cavalry window once), then press Refresh controls to upgrade it.";
   function prepareDayNight(map) {
     if (typeof api.setUserData !== "function" || typeof api.getLayerType !== "function") return { upgraded: false, note: null };
@@ -2949,7 +2950,8 @@ var GeoScene = (function () {
     if (!f) return { upgraded: false, note: null };
     if (f.version === 2) {
       fitNightRect(f.night);
-      return { upgraded: false, note: !f.filter && !nightAvailable() ? DAYNIGHT_MISSING : null };
+      if (f.filter) return { upgraded: false, note: null };
+      return { upgraded: false, note: nightAvailable() ? DAYNIGHT_FILTER_GONE : DAYNIGHT_MISSING };
     }
     if (nightAvailable()) { upgradeDayNight(map, f, null, null); return { upgraded: true, note: null }; }
     return { upgraded: false, note: DAYNIGHT_OLD_NOTE };

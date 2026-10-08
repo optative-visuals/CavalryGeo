@@ -11389,6 +11389,18 @@ test("day & night v2 (duplicate): the original wins over its copy; with the orig
   assert.equal(dnRec(api, b).filter, recB.filter, "and its own filter");
 });
 
+test("day & night v2: Refresh controls with the filter deleted and the plugin installed says to press Add day & night to remake it", () => {
+  const { context, api } = dayNightSandbox();
+  createWorldMap(context);
+  const map = context.currentMap(), G = context.GeoScene;
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  api.deleteLayer(rec.filter);
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.dayNightNote, "The Day & night filter is missing: press Add day & night to remake it.");
+  context.refreshControlsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /The Day & night filter is missing: press Add day & night to remake it\.$/);
+});
+
 test("day & night v2 in Controls: a Time controls component with the version 2 rows, driving the filter, the rectangle and the label", () => {
   const { context, api } = buildSandbox();
   const map = fullControlsMap(context), E = context.GeoExpression;
