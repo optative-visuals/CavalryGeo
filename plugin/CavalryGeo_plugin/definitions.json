@@ -21,4 +21,30 @@
   "UI": {
     "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"]
   }
+},{
+  "author": "cavalryGeo",
+  "type": "night",
+  "superType": "thirdPartyFilter",
+  "version": "1.0",
+  "skslFile": "night.sksl",
+  "attributes": {
+    "camLat": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camLon": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camZoom": { "type": "double", "default": 2, "min": 0, "max": 22, "step": 0.01 },
+    "camRotation": { "type": "double", "default": 0, "step": 0.1, "prefix": "°" },
+    "camProjection": { "type": "double", "default": 0, "min": 0, "max": 2, "step": 1 },
+    "dayOfYear": { "type": "double", "default": 1, "min": 1, "max": 365, "step": 1 },
+    "utcTime": { "type": "double", "default": 12, "min": 0, "max": 24, "step": 0.01 },
+    "nightOpacity": { "type": "double", "default": 55, "min": 0, "max": 100, "step": 1 },
+    "twilight": { "type": "double", "default": 1, "min": 0, "max": 1, "step": 0.01 },
+    "lights": { "type": "double", "default": 0, "min": 0, "max": 100, "step": 1 },
+    "allowViewportClipping": { "default": false },
+    "samplingQuality": { "default": 1 }
+  },
+  "triggers": {
+    "out": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]
+  },
+  "UI": {
+    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]
+  }
 }]

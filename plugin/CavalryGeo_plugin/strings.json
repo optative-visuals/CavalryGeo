@@ -16,4 +16,25 @@
       "viewOffset": ["View Offset", "Set every frame by Cavalry Geo: the centre of the imagery source's visible area."]
     }
   }
+},{
+  "type": "layerStrings",
+  "value": {
+    "author": "cavalryGeo",
+    "layerType": "night",
+    "niceName": "Cavalry Geo Night",
+    "layerInfo": "Draws the night side for Cavalry Geo's Day & night overlay. Cavalry Geo adds and connects it for you.",
+    "language": "en",
+    "attributes": {
+      "camLat": ["Camera Latitude", "Connected from the map camera."],
+      "camLon": ["Camera Longitude", "Connected from the map camera."],
+      "camZoom": ["Camera Zoom", "Connected from the map camera."],
+      "camRotation": ["Camera Rotation", "Connected from the map camera."],
+      "camProjection": ["Camera Projection", "Connected from the map camera: 0 Web Mercator, 1 Equal Earth, 2 globe."],
+      "dayOfYear": ["Day of Year", "Set from Time controls."],
+      "utcTime": ["UTC Time", "Set from Time controls."],
+      "nightOpacity": ["Night Opacity", "Set from Time controls."],
+      "twilight": ["Twilight", "Set from Time controls."],
+      "lights": ["Night Lights", "Set from Time controls."]
+    }
+  }
 }]

@@ -40,7 +40,8 @@ var GeoControls = (function () {
     scaleBar: [SB("units"), SB("style"), SB("corner"), SB("margin"), SB("maxWidth")], northArrow: [NA("style"), NA("corner"), NA("margin"), NA("size")], furnitureFade: ["array.1"],
     blur: ["amount.x", "amount.y"],
     calloutDraw: [CO_DRAW, CO_STYLE, CO_ANCHOR_DRAW], calloutBend: [CO_STYLE, CO_ANCHOR], calloutEdge: [CO_ANCHOR], calloutLine: [STROKE, WIDTH], calloutDot: [RADIUS_X, RADIUS_Y],
-    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT, NH_LIGHTS], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")], nightLights: ["opacity"]
+    nightLayer: [N_DAY, N_TIME, FILL], nightHelper: [NH_NIGHT, NH_TWILIGHT, NH_LIGHTS], nightBlur: [NH_TWILIGHT], timeLabel: [TL("dayOfYear"), TL("utcTime"), TL("size"), TL("corner")], nightLights: ["opacity"],
+    nightNight: [FILL], nightFilter: ["dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]
   };
   var SEP = " · ";
   // Which Controls component a row lives in (plan(model).groups runs parallel to its rows).
@@ -266,24 +267,33 @@ var GeoControls = (function () {
     group = "time";
     var dn = model.dayNight;
     if (dn) {
-      var nl = (dn.layers || []).filter(Boolean), nh = (dn.helpers || []).filter(Boolean), tl = dn.label, dsn = "Day & night" + SEP;
+      // Version 2: one Night rectangle (its colour) and one filter (time, opacity, twilight, lights); version 1: the night layers and helpers.
+      var v2 = dn.version === 2;
+      var nl = (v2 ? [dn.night] : dn.layers || []).filter(Boolean), nh = (dn.helpers || []).filter(Boolean), tl = dn.label, dsn = "Day & night" + SEP;
+      var A = v2 ? { day: "dayOfYear", time: "utcTime", night: "nightOpacity", twilight: "twilight", lights: "lights" }
+        : { day: N_DAY, time: N_TIME, night: NH_NIGHT, twilight: NH_TWILIGHT, lights: NH_LIGHTS };
+      // In version 2 nh (the helpers) is unused: the filter carries every filter-only input. A filter Cavalry dropped (plugin
+      // uninstalled) is null, so its rows lose their targets and are not emitted; the colour, hide and label rows remain.
+      var fl = v2 ? [dn.filter].filter(Boolean) : null;
+      var timeMembers = v2 ? fl : nl, opacityMembers = v2 ? fl : nh;
+      var twilightMembers = v2 ? fl : (dn.blurHelper ? nh.concat([dn.blurHelper]) : nh);
       var timeTargets = function (attr, labelAttr) {
-        var t = nl.map(function (m) { return { m: m, attr: attr }; });
+        var t = timeMembers.map(function (m) { return { m: m, attr: attr }; });
         if (tl) t.push({ m: tl, attr: labelAttr });
         return t;
       };
-      valueTargets("dn:day", "double", dsn + "Day of year (1–365)", timeTargets(N_DAY, TL("dayOfYear")), { hardMin: 1, hardMax: 365 });
-      valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(N_TIME, TL("utcTime")), { hardMin: 0, hardMax: 24 });
+      valueTargets("dn:day", "double", dsn + "Day of year (1–365)", timeTargets(A.day, TL("dayOfYear")), { hardMin: 1, hardMax: 365 });
+      valueTargets("dn:time", "double", dsn + "UTC time (0–24)", timeTargets(A.time, TL("utcTime")), { hardMin: 0, hardMax: 24 });
       value("dn:colour", "color", dsn + "Night colour", nl, FILL);
-      value("dn:night", "double", dsn + "Night opacity", nh, NH_NIGHT, { hardMin: 0, hardMax: 100 });
+      value("dn:night", "double", dsn + "Night opacity", opacityMembers, A.night, { hardMin: 0, hardMax: 100 });
       // Night lights %: the Night lights group's opacity, then the helpers' lights. A new input starts at 100 even if the
       // group's opacity had been changed before the row existed (start, not the group's value, seeds it).
       if (dn.nightLights) {
-        var lightTargets = [{ m: dn.nightLights, attr: "opacity" }].concat(nh.map(function (m) { return { m: m, attr: NH_LIGHTS }; }));
+        var lightTargets = [{ m: dn.nightLights, attr: "opacity" }].concat(opacityMembers.map(function (m) { return { m: m, attr: A.lights }; }));
         valueTargets("dn:lights", "double", dsn + "Night lights %", lightTargets, { hardMin: 0, hardMax: 100 }, 100);
       }
       // The Night blur helper's twilight is the same input number, so one value drives all of them.
-      value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", dn.blurHelper ? nh.concat([dn.blurHelper]) : nh, NH_TWILIGHT, choice(1));
+      value("dn:twilight", "double", dsn + "Twilight (0 hard · 1 soft)", twilightMembers, A.twilight, { hardMin: 0, hardMax: 1, step: 0.01 });
       direct(dn.id, "hidden", dsn + "Hide");
       if (tl) {
         var tn = "Time label" + SEP;
@@ -308,7 +318,7 @@ var GeoControls = (function () {
     (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
     (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); add(c.edge); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
     var dn = model.dayNight;
-    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.blurHelper, dn.mask, dn.label, dn.nightLights]).forEach(add); }
+    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.night, dn.filter, dn.blurHelper, dn.mask, dn.label, dn.nightLights]).forEach(add); }
     var fu = model.furniture || {};
     add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
     var data = model.data || {};

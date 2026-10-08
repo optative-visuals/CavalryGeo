@@ -530,7 +530,6 @@ test("highlight fade: (1 - phase) × 100", () => {
 });
 
 test("day & night expressions: inputs, tags and the bundled runtime", () => {
-  const S = require("../src/core/sun.js");
   const cam5 = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
   assert.deepEqual(E.NIGHT_INPUTS.map((i) => i[0]), cam5.concat(["dayOfYear", "utcTime", "depression"]));
   assert.deepEqual(E.NIGHT_OPACITY_INPUTS, [["night", 55], ["twilight", 1], ["step", 0], ["lights", 0]]);
@@ -540,10 +539,7 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
   const { buildSunSource } = require("../tools/buildlib.js");
   const src = buildSunSource();
   assert.ok(!/var Geo(Codec|Runtime|Routes) =/.test(src), "the sun bundle is projection + furniture + sun only");
-  const night = E.nightExpression(src, { camera: "c", category: "dayNight", depression: 6 });
-  assert.deepEqual(E.readTag(night, "GEO_META"), { camera: "c", category: "dayNight", depression: 6 });
   assert.deepEqual(E.readTag(E.timeLabelExpression("/*S*/", { camera: "c", category: "timeLabel" }), "GEO_META"), { camera: "c", category: "timeLabel" });
-  assert.deepEqual(E.readTag(E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step: 2 }), "GEO_META"), { camera: "c", category: "dayNightOpacity", step: 2 });
   class Path {
     constructor() { this.cmds = []; }
     moveTo() { this.cmds.push(["moveTo"]); }
@@ -557,21 +553,8 @@ test("day & night expressions: inputs, tags and the bundled runtime", () => {
     return Function(...names, "cavalry", "require", "return eval(" + JSON.stringify(expr) + ");")(...values, { Path }, undefined);
   };
   const withIn = (list, o) => list.map((x) => (x[0] in o ? [x[0], o[x[0]]] : x));
-  const p = run(night, withIn(E.NIGHT_INPUTS, { camZoom: 1, dayOfYear: 80, utcTime: 12, depression: 6 }));
-  assert.equal(p.cmds.filter((c) => c[0] === "close").length, 2, "the antimeridian copy is drawn");
   const lab = run(E.timeLabelExpression(src, { camera: "c", category: "timeLabel" }), withIn(E.TIME_LABEL_INPUTS, { dayOfYear: 172, utcTime: 14.5 }));
   assert.deepEqual(lab.cmds.filter((c) => c[0] === "addText").map((c) => c[1]), ["21 Jun · 14:30 UTC"]);
-  [[55, 1], [55, 0], [30, 1], [100, 1], [0, 1]].forEach(([n, t]) => [0, 1, 2, 3].forEach((step) => [0, 35, 100].forEach((lights) => {
-    const got = run(E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step }), [["night", n], ["twilight", t], ["step", step], ["lights", lights]]);
-    assert.ok(Math.abs(got - S.stepOpacity(n, t, step, lights)) < 1e-9);
-  })));
-});
-
-test("the opacity expression treats non-numbers as the defaults", () => {
-  const expr = E.nightOpacityExpression({ camera: "c", category: "dayNightOpacity", step: 0 });
-  const got = Function("night", "twilight", "step", "return eval(" + JSON.stringify(expr) + ");")(NaN, undefined, "x");
-  assert.ok(isFinite(got));
-  assert.ok(Math.abs(got - require("../src/core/sun.js").stepOpacity(55, 1, 0)) < 1e-9);
 });
 
 test("route clip helpers: trim start / trim end / fade follow GeoCurve.visibleSpan on the globe", () => {
@@ -644,34 +627,4 @@ test("traveller show helper: also hides before the leg's clip start and after it
   assert.equal(run(show, Object.assign({}, base, { drawFull: 70 })), 0, "the draw has gone past the clipped end");
   assert.equal(run(show, Object.assign({}, base, { drawFull: 40 })), 100);
   assert.equal(run(show, Object.assign({}, base, { later1: 5 })), 0);
-});
-
-test("the night blur expression is GeoSun.blurAmount, for both axes", () => {
-  const S = require("../src/core/sun.js");
-  assert.deepEqual(E.NIGHT_BLUR_INPUTS.map((i) => i[0]), ["zoom", "twilight"]);
-  assert.equal(E.inputIndex(E.NIGHT_BLUR_INPUTS, "twilight"), E.inputIndex(E.NIGHT_OPACITY_INPUTS, "twilight"));
-  const expr = E.nightBlurExpression({ camera: "c", category: "dayNightBlur" });
-  assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "dayNightBlur" });
-  [0, 1.5, 2, 4, 6.5, 8, 22, 30].forEach((zoom) => [0, 0.3, 0.5, 1, 2].forEach((twilight) => {
-    const got = vm.runInNewContext(expr, { zoom, twilight });
-    const want = S.blurAmount(zoom, twilight);
-    assert.ok(Math.abs(got[0] - want) < 1e-9 && Math.abs(got[1] - want) < 1e-9, zoom + "/" + twilight);
-  }));
-  const odd = vm.runInNewContext(expr, { zoom: NaN, twilight: undefined });
-  assert.ok(Math.abs(odd[0] - S.blurAmount(2, 1)) < 1e-9);
-});
-
-test("night mask expression: tag, camera inputs, and it draws GeoSun.earthOutline", () => {
-  const S = require("../src/core/sun.js"), vm = require("node:vm");
-  const { buildSunSource } = require("../tools/buildlib.js");
-  assert.deepEqual(E.NIGHT_MASK_INPUTS.map((i) => i[0]), ["camLat", "camLon", "camZoom", "camRotation", "camProjection"]);
-  const expr = E.nightMaskExpression(buildSunSource(), { camera: "c", category: "dayNightMask" });
-  assert.deepEqual(E.readTag(expr, "GEO_META"), { camera: "c", category: "dayNightMask" });
-  function FakePath() { this.cmds = []; }
-  ["moveTo", "lineTo", "close"].forEach((m) => { FakePath.prototype[m] = function () { this.cmds.push([m].concat(Array.prototype.slice.call(arguments))); }; });
-  [0, 1, 2].forEach((projection) => {
-    const got = vm.runInNewContext(expr, { camLat: 12, camLon: 30, camZoom: 3, camRotation: 0, camProjection: projection, cavalry: { Path: FakePath } });
-    const want = S.earthOutline({ lat: 12, lon: 30, zoom: 3, rotation: 0, projection }, { Path: FakePath });
-    assert.deepEqual(JSON.parse(JSON.stringify(got.cmds)), JSON.parse(JSON.stringify(want.cmds)), "projection " + projection);
-  });
 });

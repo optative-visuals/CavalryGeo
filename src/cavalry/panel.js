@@ -1028,7 +1028,7 @@ refreshControlsBtn.onClick = guardAction(function () {
   var names = [map.name + " Map controls"];
   [["overlay", "Overlay"], ["data", "Data"], ["extract", "Extract"], ["time", "Time"]].forEach(function (g) { if (r.components[g[0]]) names.push(g[1] + " controls"); });
   var where = names.length === 1 ? "in " + names[0] : "across " + names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".";
+  var msg = "Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + "." + (r.dayNightNote ? " " + r.dayNightNote : "");
   say(msg);
   if (r.nightLightsNeeded) startNightLights(map, msg);
 });
@@ -1272,7 +1272,7 @@ addDayNightBtn.onClick = guardAction(function () {
   var message;
   if (r.created) message = "Day & night added to " + map.name + " for " + when + ". Key its Day of year and UTC time in " + map.name + " Time controls." + syncControls(map);
   else {
-    var note = r.restored ? " Its missing night layers were made again." : "";
+    var note = r.restored ? (r.version === 2 ? " Its missing parts were made again." : " Its missing night layers were made again.") : "";
     if (r.kept && r.kept.length) note += " It kept your animated " + r.kept.join(" and ") + ".";
     message = "Day & night updated to " + when + "." + note + syncControls(map);
   }
@@ -1790,6 +1790,8 @@ function failLine(plan, text) {
 // Night lights start after Day & night (over satellite imagery) when none exist yet. A small public-domain
 // download, so no dialog and no plan signature. While another imagery job runs, they wait for Refresh controls.
 function startNightLights(map, lead) {
+  // An older overlay without the plugin is left as it is: no night lights are built for it.
+  if (GeoScene.nightLightsStatus(map).oldOverlay) { say(lead); return; }
   if (imageryState.timer) {
     // Only this map's job can bring its night lights: its night build already has them on their way, its day build chains them.
     // Another map's job doesn't, so Refresh controls adds them.
@@ -1845,7 +1847,9 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     if (st.orphaned) { GeoScene.removeNightLights(map); gone = " Night lights removed (they need satellite imagery)."; }
     var note = syncControls(map);
     // Night lights follow every completed day build while they are wanted (a rebuild replaces them), so their credit goes in too.
-    var credit = [GeoSources.attribution(src, opts), st.wanted ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
+    // An older overlay without the plugin keeps its night lights, which stay visible, so they stay credited.
+    var nightShown = st.wanted || (st.oldOverlay && st.night.length > 0);
+    var credit = [GeoSources.attribution(src, opts), nightShown ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
     var text = "Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."

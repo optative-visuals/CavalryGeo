@@ -46,7 +46,7 @@ A **Controls** layer for every map that gathers its camera, colours, layers, rou
 settings in one place, a map preview in the panel to find and frame a place before the camera
 moves, pins, labels and **callouts** (a boxed label with a line to its place) for places,
 a **Day & night** overlay that shades the night side for any date and time (over satellite
-imagery, with NASA's city lights on the night side),
+imagery, with NASA's city lights on the night side; it needs the Cavalry Geo plugin),
 **Extract** to pull one country or street into its own layer, **Highlights** (Fill in, Outline
 draw-on, Pulse and Glow on any extracted place), and **Bake** to turn any map layer into a plain
 editable shape. The panel tells you when a new version is out.
@@ -58,6 +58,8 @@ editable shape. The panel tells you when a new version is out.
 2. In Cavalry, choose **Help → Show Scripts Folder**, and drag **CavalryGeo.js** and the
    **CavalryGeo_assets** folder straight into it.
 3. Open **Scripts → CavalryGeo**. No restart needed.
+4. Drag the **CavalryGeo_plugin** folder into the Cavalry window once (needed for Day & night, and for
+   imagery on the globe and Equal Earth).
 
 Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.
 Tested with Cavalry on Windows and macOS.
