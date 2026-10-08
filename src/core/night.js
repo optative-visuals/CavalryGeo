@@ -14,7 +14,8 @@ var GeoNight = (function () {
   function clampZoom(z) { return clamp(num(z, 0), 0, GeoProjection.MAX_ZOOM); }
   function wrapLon(d) { return d - 360 * Math.floor((d + 180) / 360); }
 
-  // Web Mercator y of a latitude, and its inverse (the same maths as projection.js, which does not export them).
+  // Web Mercator y of a latitude, and its inverse: the same maths as the shader functions mercY (plugin/CavalryGeo_plugin/reproject.sksl)
+  // and invMercY (plugin/CavalryGeo_plugin/night.sksl).
   function mercY(lat) { var p = clamp(lat, -MAX_LAT, MAX_LAT) * D2R; return Math.log(Math.tan(Math.PI / 4 + p / 2)); }
   function invMercY(y) { return (2 * Math.atan(Math.exp(y)) - Math.PI / 2) / D2R; }
 

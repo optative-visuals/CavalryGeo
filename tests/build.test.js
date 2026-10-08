@@ -13459,7 +13459,7 @@ test("day & night order: a fresh build stacks the filter above the Night rectang
   assert.deepEqual(api.getChildren(dn), [r.groupId, rec.filter, rec.night], "with night lights: the lights on top");
 });
 
-test("night lights in the panel: Add day & night on an older overlay upgrades it and mattes every night tile with the Night rectangle (version 1 to 2)", () => {
+test("night lights in the panel: on a satellite map with an older overlay, Add day & night upgrades it and mattes every night tile with the Night rectangle (version 1 to 2)", () => {
   const { context, api } = buildSandbox();
   const { map } = satellitePanelMap(context, api);
   context.GeoNet.cachedTile = (base) => base + ".jpg";
