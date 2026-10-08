@@ -512,6 +512,11 @@ test("highlight shape: a large outline grows by scaling about its box centre, no
   assert.deepEqual(calls, [["boundingBox"], ["translate", -50, -25], ["scale", s, s], ["translate", 50, 25]]);
 });
 
+test("highlight shape: drawn whole (one shape, one copy) by buildPath", () => {
+  const expr = E.highlightLayerExpression("var GeoRuntime = {};", { kind: "polygon", features: [] }, { camera: "c", category: "highlight", effect: "fill" }, {});
+  assert.ok(expr.includes("{pointRadius: _i6, ellipseScale: 1, whole: true}"));
+});
+
 test("highlight shape: a failing offset still returns the plain outline", () => {
   const src = "var GeoRuntime = { buildPath: function () { return GEO_PATH; } };";
   const expr = E.highlightLayerExpression(src, { kind: "polygon", features: [] }, { camera: "c", category: "highlight", effect: "glow" }, {});

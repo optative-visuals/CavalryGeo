@@ -8770,6 +8770,15 @@ test("highlights: the effects list", () => {
   assert.deepEqual(plain(context.GeoScene.HIGHLIGHT_EFFECTS), [{ id: "fill", name: "Fill in" }, { id: "outline", name: "Outline draw-on" }, { id: "pulse", name: "Pulse" }, { id: "glow", name: "Glow" }]);
 });
 
+test("highlights: the shape is drawn whole, once, nearest the camera (no copies on a flat map)", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const rec = hlRec(api, G.createHighlight(map, extract, "fill", { start: 0, duration: 20 }));
+  const expr = api.get(rec.shape, "generator.expression");
+  assert.ok(expr.includes("ellipseScale: 1, whole: true}"), "buildPath gets whole: true");
+  assert.ok(!expr.includes("frame: {"), "a highlight gets no comp frame");
+});
+
 test("highlights: Fill in makes a numbered group directly above the extract, a filled shape from the extract's data, keyed opacity", () => {
   const { context, api } = buildSandbox();
   const { map, extract } = highlightMap(context), G = context.GeoScene;

@@ -116,7 +116,7 @@ var GeoExpression = (function () {
     var grow = meta.effect === "pulse" ? "_i7 * " + HIGHLIGHT_GROW.pulse : meta.effect === "glow" ? String(HIGHLIGHT_GROW.glow) : "0";
     return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(HIGHLIGHT_SHAPE_INPUTS) +
       DATA_OPEN + JSON.stringify(enc) + DATA_CLOSE + "\n" +
-      "var _hp = GeoRuntime.buildPath(GEO_DATA, " + CAM + ", _i5, {pointRadius: _i6, ellipseScale: " + ellipseScale + "}, cavalry.Path);\n" +
+      "var _hp = GeoRuntime.buildPath(GEO_DATA, " + CAM + ", _i5, {pointRadius: _i6, ellipseScale: " + ellipseScale + ", whole: true}, cavalry.Path);\n" +
       "var _hg = " + grow + ";\n" +
       "if (_hg > 0) { try {\n" +
       "  if (_hp.pointCount() <= " + HIGHLIGHT_OFFSET_MAX_POINTS + ") { _hp.offset(_hg, true); }\n" +

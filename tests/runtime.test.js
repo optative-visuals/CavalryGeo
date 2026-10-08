@@ -303,6 +303,57 @@ test("date line: routes, nearest single things and highlights are never copied",
   assert.equal(R.buildPath(dot, c, 100, { pointRadius: 0, nearest: true, frame: FRAME }, FakePath).ops.filter((o) => o[0] === "E").length, 1);
 });
 
+// Highlights (opts.whole): the whole shape is one piece, drawn once on the copy nearest the camera.
+const hlEnc = (rings) => C.encodeLayer({ kind: "polygon", features: [{ name: "a", rank: 1, rings: rings }] });
+const WHOLE = { whole: true };
+const FIJI_LIKE = [[177, -17], [178, -17], [-179, -18], [-178, -18], [177, -17]];
+
+test("highlight, flat: a shape straddling the date line (raw lons jump 178 to -179) is one piece, nearest the camera", () => {
+  const c = cam({ lon: -175, zoom: 2 });
+  const ops = R.buildPath(hlEnc([FIJI_LIKE]), c, 100, WHOLE, FakePath).ops;
+  assert.equal(movesOf(ops).length, 1, "one piece, no copies");
+  assert.equal(ops.filter((o) => o[0] === "Z").length, 1);
+  // The shape is the copy 177..182 east of the date line seen from -175: -183..-178 in unwrapped longitude.
+  const xs = ops.filter((o) => o[0] === "M" || o[0] === "L").map((o) => o[1]);
+  assert.ok(Math.max(...xs) - Math.min(...xs) < worldW(2), "every point within one world-width");
+  assert.ok(Math.min(...xs) >= R.projectPoint(-183, -17, c)[0] - 1e-6 && Math.max(...xs) <= R.projectPoint(-178, -17, c)[0] + 1e-6);
+});
+
+test("highlight, flat: from camera lon 0 the same shape is drawn once, in one piece, on the copy at 177..182", () => {
+  const c = cam({ lon: 0, zoom: 0 });
+  const ops = R.buildPath(hlEnc([FIJI_LIKE]), c, 100, WHOLE, FakePath).ops;
+  assert.equal(movesOf(ops).length, 1);
+  assert.equal(ops.length, 6, "M, four L, Z");
+  const xs = ops.filter((o) => o[0] === "M" || o[0] === "L").map((o) => o[1]);
+  assert.ok(Math.min(...xs) >= R.projectPoint(177, -17, c)[0] - 1e-6 && Math.max(...xs) <= R.projectPoint(182, -17, c)[0] + 1e-6);
+});
+
+test("highlight, flat: rings split at the date line (Natural Earth's Fiji) join into one piece", () => {
+  const a = [[177.3, -17], [180, -17], [180, -18], [177.3, -18], [177.3, -17]];
+  const b = [[-180, -17.5], [-179.8, -17.5], [-179.8, -18], [-180, -18], [-180, -17.5]];
+  const c = cam({ lon: 0, zoom: 2 });
+  const starts = movesOf(R.buildPath(hlEnc([a, b]), c, 100, WHOLE, FakePath).ops);
+  assert.equal(starts.length, 2);
+  nearTo(starts[1][1], R.projectPoint(180, -17.5, c)[0]);
+  assert.ok(Math.abs(starts[1][1] - starts[0][1]) < worldW(2), "the second ring sits beside the first, not a world away");
+});
+
+test("highlight, flat: a ring whose raw jump crosses 180 keeps the jump as its one closing edge", () => {
+  const ring = [[170, -70], [-170, -70], [-100, -75], [-10, -70], [80, -75], [170, -70]];
+  const ops = R.buildPath(hlEnc([ring]), cam({ lon: 0, zoom: 0 }), 100, WHOLE, FakePath).ops;
+  const pts = ops.filter((o) => o[0] === "M" || o[0] === "L");
+  assert.equal(movesOf(ops).length, 1);
+  for (let i = 1; i < pts.length; i++) assert.ok(Math.abs(pts[i][1] - pts[i - 1][1]) < 100, "no step across the map at " + i);
+  nearTo(Math.abs(pts[pts.length - 1][1] - pts[0][1]), 340 / 360 * worldW(0));
+});
+
+test("highlight: whole changes nothing on globe or Equal Earth", () => {
+  [2, 1].forEach((projection) => {
+    const c = cam({ lon: 175, zoom: 4, projection });
+    assert.deepEqual(R.buildPath(hlEnc([FIJI_LIKE]), c, 100, WHOLE, FakePath).ops, R.buildPath(hlEnc([FIJI_LIKE]), c, 100, {}, FakePath).ops);
+  });
+});
+
 test("worldCopies: [0] off flat maps and without a frame; copyOffset is one world-width along the rotated x axis", () => {
   const b = { minX: -10, maxX: 10, minY: -10, maxY: 10 };
   assert.deepEqual(R.worldCopies(cam({ projection: 2 }), b, FRAME), [0]);

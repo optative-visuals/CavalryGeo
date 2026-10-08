@@ -18,6 +18,8 @@ var GeoRuntime = (function () {
     }
     var radius = opts && opts.pointRadius != null ? opts.pointRadius : 4;
     var scale = opts && opts.ellipseScale != null ? opts.ellipseScale : 1;
+    // opts.whole (highlights) on a flat map: the layer is one shape, drawn once, in one piece.
+    if (opts && opts.whole === true && isFlat(cam)) return drawWhole(path, enc, count, cam, project, radius, scale);
     // opts.frame (the comp size) on a flat map: each shape is projected once above, then also drawn on every
     // copy of the world that reaches the frame. Without a frame, or for single things, it is drawn once.
     var frame = opts && opts.frame && !opts.nearest && isFlat(cam) ? opts.frame : null;
@@ -54,6 +56,64 @@ var GeoRuntime = (function () {
     path.moveTo(pts[0], pts[1]);
     for (var m = 2; m < pts.length; m += 2) path.lineTo(pts[m], pts[m + 1]);
     if (kind === "polygon") path.close();
+  }
+
+  // Whole shapes (highlights, flat maps): every point of the layer moves by the same whole turn, chosen so the
+  // middle of the layer's longitude extent is on the copy nearest the camera. Rings are unwrapped first (see
+  // wholeRings), so a shape that crosses the date line keeps its pieces together.
+  function drawWhole(path, enc, count, cam, project, radius, scale) {
+    var rows = [], lo = Infinity, hi = -Infinity, i, j;
+    for (i = 0; i < count; i++) {
+      var rings = wholeRings(enc.f[i]);
+      rows.push(rings);
+      for (var a = 0; a < rings.length; a++) for (j = 0; j < rings[a].length; j++) {
+        lo = Math.min(lo, rings[a][j][0]); hi = Math.max(hi, rings[a][j][0]);
+      }
+    }
+    // The shape's longitude centre (its extent's middle) decides the copy: the one nearest the camera.
+    var mid = lo === Infinity ? 0 : (lo + hi) / 2;
+    var shift = GeoProjection.nearestLon(mid, cam.lon) - mid;
+    var out = [0, 0];
+    for (i = 0; i < rows.length; i++) {
+      for (var r = 0; r < rows[i].length; r++) {
+        var pts = [], vis = [], ring = rows[i][r];
+        for (j = 0; j < ring.length; j++) {
+          vis.push(!!project(ring[j][0] + shift, ring[j][1], out));
+          pts.push(out[0], out[1]);
+        }
+        if (pts.length < 2) continue;
+        drawShape(path, enc.kind, enc.f[i], pts, vis, radius, scale);
+      }
+    }
+    return path;
+  }
+
+  // A feature's rings as [lon, lat] lists. Each ring is unwrapped so its steps stay under 180 degrees, then every
+  // ring after the first is moved by whole turns so the middle of its longitude extent is nearest the middle of
+  // the feature's first ring. Natural Earth splits shapes at the date line (Russia's Chukotka and Fiji's far
+  // islands sit at -180 in their own rings).
+  function wholeRings(row) {
+    var rings = [], ref = null;
+    for (var k = 1; k < row.length; k++) {
+      var ints = row[k], x = 0, y = 0, lons = [], lats = [];
+      for (var j = 0; j < ints.length; j += 2) { x += ints[j]; y += ints[j + 1]; lons.push(x / Q); lats.push(y / Q); }
+      if (!lons.length) continue;
+      // A ring with a raw jump across 180 (Antarctica runs along the pole) starts after the jump, so the jump is
+      // its closing edge and no other step crosses the map (the same edge the raw ring already drew).
+      for (j = 1; j < lons.length; j++) if (Math.abs(lons[j] - lons[j - 1]) > 180) break;
+      if (j < lons.length) { lons = lons.slice(j).concat(lons.slice(0, j)); lats = lats.slice(j).concat(lats.slice(0, j)); }
+      lons = GeoRoutes.unwrapLons(lons);
+      var mid = (Math.min.apply(null, lons) + Math.max.apply(null, lons)) / 2;
+      if (ref === null) ref = mid;
+      else {
+        var turn = GeoProjection.nearestLon(mid, ref) - mid;
+        for (j = 0; j < lons.length; j++) lons[j] += turn;
+      }
+      var ring = [];
+      for (j = 0; j < lons.length; j++) ring.push([lons[j], lats[j]]);
+      rings.push(ring);
+    }
+    return rings;
   }
 
   function shiftPoints(pts, off) {
