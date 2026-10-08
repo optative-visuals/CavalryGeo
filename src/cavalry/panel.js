@@ -5,12 +5,9 @@ var TAB_BUILDERS = [];
 
 var statusLabel = new ui.Label("Ready.");
 function say(msg) { statusLabel.setText(msg); console.log("[CavalryGeo] " + msg); }
-// Like say(), but also nudges Cavalry to repaint the label immediately - useful
-// right before a slow network call, so the panel doesn't look frozen while it runs.
-function sayNow(msg) {
-  say(msg);
-  if (typeof api.processEvents === "function") api.processEvents();
-}
+// Like say(), right before something slow. It no longer calls api.processEvents to repaint the label:
+// that let Cavalry run the user's other clicks inside the running action, which hung Cavalry.
+function sayNow(msg) { say(msg); }
 // Wraps a panel action. Afterwards (also after an error): Cavalry expands Scene Window groups to
 // reveal selected nested layers and no API collapses them, so a selection that now holds a nested
 // layer is put back to what it was (a top-level selection made on purpose stays); then the

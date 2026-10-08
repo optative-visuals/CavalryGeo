@@ -12056,3 +12056,8 @@ test("busy lock: clicks Cavalry held back during a long action are dropped quiet
     assert.equal(runs, 2);
   } finally { D.now = realNow; }
 });
+
+test("the panel never calls api.processEvents (running the user's clicks inside an action hung Cavalry)", () => {
+  const src = buildPanel();
+  assert.equal(/api\.processEvents\s*\(/.test(src), false);
+});

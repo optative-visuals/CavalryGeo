@@ -155,7 +155,7 @@ var GeoNet = (function () {
     var out = {};
     (names || []).forEach(function (name) {
       var hit = cached("geocode|" + name, function () {
-        while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+        while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
         lastSearch = Date.now();
         var r = get(NOMINATIM, GeoSearch.path(name));
         if (r.status !== 200) throw new Error("Place lookup failed for \"" + name + "\" (status " + r.status + "). Try again."); // never cache a failure
@@ -175,7 +175,7 @@ var GeoNet = (function () {
   function reverse(lat, lon, zoom) {
     try {
       if (Date.now() < reverseOfflineUntil) return null;
-      while (Date.now() - lastSearch < 1100) { if (typeof api.processEvents === "function") api.processEvents(); }
+      while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
       lastSearch = Date.now();
       var r = get(NOMINATIM, GeoSearch.reversePath(lat, lon, zoom), 1);
       if (r.status === -1) reverseOfflineUntil = Date.now() + REVERSE_BACKOFF_MS;
