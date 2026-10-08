@@ -13521,3 +13521,22 @@ test("night lights in the panel: the day build's credit names the NASA credit wh
   const seen = runSeen(context, api);
   assert.ok(seen.some((s) => /^Imagery built: .* Credit: .* · NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\) Adding night lights…$/.test(s)), seen.join(" | "));
 });
+
+test("night lights in the panel: a day build over an older overlay without the plugin still credits NASA Black Marble while its night lights stay", () => {
+  const { context, api } = buildSandbox();
+  const { map } = satellitePanelMap(context, api);
+  noNightType(api);
+  const G = context.GeoScene;
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(G.findNightLights(map).length, 1, "existing night lights");
+  assert.equal(G.nightLightsStatus(map).wanted, false, "not wanted: the plugin is missing");
+  assert.equal(G.nightLightsStatus(map).oldOverlay, true);
+  fakeTileDownloads(context, api);
+  context.GeoNet.cachedTile = () => null;
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  const seen = runSeen(context, api);
+  assert.ok(seen.some((s) => /^Imagery built: .* Credit: .* · NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\)/.test(s)), seen.join(" | "));
+});

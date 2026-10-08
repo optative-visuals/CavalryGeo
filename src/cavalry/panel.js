@@ -1847,7 +1847,9 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     if (st.orphaned) { GeoScene.removeNightLights(map); gone = " Night lights removed (they need satellite imagery)."; }
     var note = syncControls(map);
     // Night lights follow every completed day build while they are wanted (a rebuild replaces them), so their credit goes in too.
-    var credit = [GeoSources.attribution(src, opts), st.wanted ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
+    // An older overlay without the plugin keeps its night lights, which stay visible, so they stay credited.
+    var nightShown = st.wanted || (st.oldOverlay && st.night.length > 0);
+    var credit = [GeoSources.attribution(src, opts), nightShown ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
     var text = "Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
