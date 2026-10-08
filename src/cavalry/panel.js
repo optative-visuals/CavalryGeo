@@ -59,6 +59,7 @@ function row() {
 // the map (centred on the first result) when that entry is picked.
 var NEW_MAP = "New map";
 var maps = [], results = [];
+var cameraPanel = null; // the Camera panel, hidden whole while New map is picked
 var mapPicker = new ui.DropDown();
 var refreshMapsBtn = GeoStyle.button("Refresh");
 var nameField = new ui.LineEdit(); nameField.setPlaceholder("Map name (blank = the place's name, or Map 1, Map 2…)");
@@ -216,6 +217,9 @@ function refreshNewMapFields() {
   // Real Cavalry only documents setHidden on Button, so check before calling it.
   if (typeof nameField.setHidden === "function") nameField.setHidden(!show);
   if (typeof projPicker.setHidden === "function") projPicker.setHidden(!show);
+  // The Camera panel goes as a whole, so no empty shaded box with only its heading is left; its
+  // widgets are hidden too, which is all that happens when the panel can't be hidden itself.
+  if (cameraPanel && typeof cameraPanel.setHidden === "function") cameraPanel.setHidden(show);
   [jumpBtn, fromLabel, flyStartBox, flyStartField, toLabel, flyEndBox, flyEndField, flyBtn, flyNote, easingLabel, easingPicker, arcLabel, arcPicker, updateFlightBtn, driftLabel, driftPicker, driftBtn].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(show); });
   // With the preview gone there is no frame to make a map from; Search still does it.
   if (typeof createHereBtn.setHidden === "function") createHereBtn.setHidden(!show || !preview.available());
@@ -548,7 +552,7 @@ TAB_BUILDERS.push(function (tabs) {
       row(jumpBtn),
       createHereBtn
     ]),
-    GeoStyle.panel([
+    cameraPanel = GeoStyle.panel([
       GeoStyle.heading("Camera"),
       row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
       flyNote,
@@ -1868,20 +1872,138 @@ TAB_BUILDERS.push(function (tabs) {
   ]));
 });
 
+// ---- Hover help -----------------------------------------------------------
+// Every control gets its tooltip from GeoTips (src/cavalry/tips.js); one table pairs them.
+var TIP_TARGETS = [
+  [mapPicker, "map.picker"],
+  [refreshMapsBtn, "map.refreshMaps"],
+  [nameField, "map.name"],
+  [projPicker, "map.projection"],
+  [refreshControlsBtn, "map.refreshControls"],
+  [searchField, "map.searchField"],
+  [searchBtn, "map.search"],
+  [resultPicker, "map.results"],
+  [jumpBtn, "map.jump"],
+  [createHereBtn, "map.createHere"],
+  [flyBtn, "map.fly"],
+  [flyStartField, "map.flyFrom"],
+  [flyEndField, "map.flyTo"],
+  [easingPicker, "map.easing"],
+  [arcPicker, "map.zoomOut"],
+  [updateFlightBtn, "map.updateFlight"],
+  [driftPicker, "map.driftMove"],
+  [driftBtn, "map.drift"],
+  [mapStylePicker, "map.stylePicker"],
+  [applyStyleBtn, "map.applyStyle"],
+  [styleNameField, "map.styleName"],
+  [saveStyleBtn, "map.saveStyle"],
+  [deleteStyleBtn, "map.deleteStyle"],
+  [tipsGotItBtn, "map.tipsGotIt"],
+  [tipsBtn, "map.tips"],
+  [checks.countries, "layers.countries"],
+  [checks.states, "layers.states"],
+  [checks.coastlines, "layers.coastlines"],
+  [checks.lakes, "layers.lakes"],
+  [checks.rivers, "layers.rivers"],
+  [checks.cities, "layers.cities"],
+  [checks.buildings, "layers.buildings"],
+  [checks.roads, "layers.roads"],
+  [checks.water, "layers.water"],
+  [checks.parks, "layers.parks"],
+  [checks.railways, "layers.railways"],
+  [scalePicker, "layers.detail"],
+  [modePicker, "layers.mode"],
+  [creditCheck, "layers.credit"],
+  [addLayersBtn, "layers.add"],
+  [clearCacheBtn, "layers.clearCache"],
+  [dayNightDayField, "overlays.day"],
+  [dayNightMonthPicker, "overlays.month"],
+  [dayNightTimeField, "overlays.time"],
+  [timeLabelCheck, "overlays.timeLabel"],
+  [addDayNightBtn, "overlays.addDayNight"],
+  [addScaleBarBtn, "overlays.scaleBar"],
+  [addNorthArrowBtn, "overlays.northArrow"],
+  [layerPicker, "extract.layer"],
+  [refreshLayersBtn, "extract.refresh"],
+  [featureQuery, "extract.query"],
+  [findBtn, "extract.find"],
+  [featureList, "extract.list"],
+  [extractBtn, "extract.extract"],
+  [highlightEffectPicker, "highlight.effect"],
+  [highlightStartField, "highlight.start"],
+  [highlightLengthField, "highlight.frames"],
+  [highlightBtn, "highlight.add"],
+  [changeEffectBtn, "highlight.change"],
+  [bakeBtn, "extract.bake"],
+  [sourcePicker, "imagery.source"],
+  [maptilerKeyField, "imagery.maptilerKey"],
+  [mapboxKeyField, "imagery.mapboxKey"],
+  [styleField, "imagery.styleField"],
+  [stylePicker, "imagery.stylePicker"],
+  [customUrlField, "imagery.customLink"],
+  [customAttrField, "imagery.customCredit"],
+  [buildImageryBtn, "imagery.build"],
+  [cancelImageryBtn, "imagery.cancel"],
+  [imageryAttrBtn, "imagery.attribution"],
+  [clearTilesBtn, "imagery.clearTiles"],
+  [pinSearchField, "pins.searchField"],
+  [pinSearchBtn, "pins.search"],
+  [pinResultPicker, "pins.results"],
+  [labelText, "pins.text"],
+  [pinHereBtn, "pins.pinHere"],
+  [labelHereBtn, "pins.labelHere"],
+  [calloutHereBtn, "pins.calloutHere"],
+  [latField, "pins.lat"],
+  [lonField, "pins.lon"],
+  [pinCoordBtn, "pins.pinCoord"],
+  [labelCoordBtn, "pins.labelCoord"],
+  [calloutCoordBtn, "pins.calloutCoord"],
+  [routeSearchField, "routes.searchField"],
+  [routeSearchBtn, "routes.search"],
+  [routeResultPicker, "routes.results"],
+  [addStopBtn, "routes.addStop"],
+  [stopsList, "routes.stops"],
+  [removeStopBtn, "routes.removeStop"],
+  [clearStopsBtn, "routes.clearStops"],
+  [routeShapePicker, "routes.shape"],
+  [arcField, "routes.arcHeight"],
+  [labelsAtStops, "routes.labelsAtStops"],
+  [travellerPicker, "routes.traveller"],
+  [addTravellerBtn, "routes.addTraveller"],
+  [createRouteBtn, "routes.create"],
+  [pinStopsBtn, "routes.pinStops"],
+  [dataLinkField, "data.link"],
+  [dataLoadBtn, "data.load"],
+  [placePicker, "data.place"],
+  [valuePicker, "data.value"],
+  [yearPicker, "data.year"],
+  [prefixField, "data.prefix"],
+  [suffixField, "data.suffix"],
+  [regionsCheck, "data.regions"],
+  [bubblesCheck, "data.bubbles"],
+  [labelsCheck, "data.valueLabels"],
+  [legendCheck, "data.legend"],
+  [lookupCheck, "data.lookup"],
+  [addDataBtn, "data.add"],
+  [refreshDataBtn, "data.refresh"],
+  [dataUnmatchedList, "data.unmatched"]
+];
+TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
+
 // ---- Other tabs are appended above this line by later tasks ---------------
 
 // Sections: one tab bar above one page per section. Builders register (name, layout);
 // SECTION_ORDER sets the order (unlisted ones go last). The old section names still work in
 // showSection: Extract lives in Layers, Pins and Routes in Label.
 var SECTION_ORDER = ["Map", "Layers", "Imagery", "Label", "Data"];
-var SECTION_ALIASES = { Extract: ["Layers"], Pins: ["Label", "Pins"], Routes: ["Label", "Routes"] };
+var SECTION_ALIASES = { Extract: ["Layers", "Extract"], Pins: ["Label", "Pins"], Routes: ["Label", "Routes"] };
 var sectionNames = [], sectionTabs = null, sectionPages = null;
 function showSection(name) {
   var target = SECTION_ALIASES[name] || [name], i = sectionNames.indexOf(target[0]);
   if (i < 0) return;
   sectionTabs.select(target[0]);
   sectionPages.setPage(i);
-  if (target[1]) showLabelPage(target[1]);
+  if (target[1]) { if (target[0] === "Layers") showLayersPage(target[1]); else showLabelPage(target[1]); }
   if (name === "Map" || target[0] === "Label") { try { refreshPreviews(); } catch (e) { /* cosmetic */ } }
 }
 

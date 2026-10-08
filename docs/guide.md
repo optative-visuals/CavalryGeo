@@ -3,8 +3,10 @@
 Everything the panel does, section by section. New here? Start with the
 [quick start](../README.md#quick-start) in the README.
 
-The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Extract and
-Bake are in Layers, below Add layers; Label has its own **Pins / Routes** switch.
+The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Each section's
+controls sit in shaded panels. **Layers** has its own **Add / Overlays / Extract** switch (Add: the
+layer categories; Overlays: Day & night and Map furniture; Extract: Extract, Highlight and Bake), and
+**Label** has a **Pins / Routes** switch. Hover any control for a short tip about what it does.
 
 - [Map](#map)
 - [Layers](#layers)
@@ -37,7 +39,7 @@ The small **Tips** button at the bottom of the Map tab brings it back.
 - **Enter searches:** in the Map, Pins and Routes search boxes, pressing Enter does the same as
   the Search button. With **New map** picked, Enter only lists the results; press **Search** to make
   the map at the first one (it reuses those results, so nothing is searched twice).
-  Enter also runs **Find** in the Extract box (Layers tab) and **Load** in the Data link box, when
+  Enter also runs **Find** in the Extract panel (Layers → Extract) and **Load** in the Data link box, when
   the text changed since the last time.
 - **Moving the camera:** with a map picked, Search just finds places. Pick one and press
   **Jump here**. The first entry, **World view**, is always there and jumps back out to the whole
@@ -113,7 +115,7 @@ anything you promoted yourself stays where it is. A main component still called 
 is renamed to "Map name Map controls" then; a name you gave it yourself is kept.
 
 The list updates whenever the plugin adds something to the map. If you change the map yourself,
-press **Refresh controls** (Layers tab). Settings you promote onto the Controls layer yourself are
+press **Refresh controls** (Map tab, under the map and projection pickers). Settings you promote onto the Controls layer yourself are
 kept, after the plugin's — including settings of the map's own layers, such as a pin's Position.
 
 - **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
@@ -135,7 +137,9 @@ kept, after the plugin's — including settings of the map's own layers, such as
 
 ## Layers
 
-Turn on the categories you want (each shows a green tick) and press **Add layers**.
+The **Add** page of Layers has two panels, **World · Natural Earth** and **Streets · OpenStreetMap**.
+Turn on the categories you want (each shows a green tick) and press **Add layers** (in the Streets
+panel, which also holds **Clear download cache**).
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at medium detail, or high detail downloaded on demand.
@@ -150,7 +154,7 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 
 ### Day & night
 
-- **Day & night.** The **Day & night** section on the **Layers** tab (above Map furniture) shades the night side of the Earth for any date and time. Type a day and pick a month, give the **UTC time** in hours (0 to 24, decimals allowed: 14.5 is 14:30), and press **Add day & night**. The boxes start at today's date and the current time in UTC. The overlay is a group called "Day & night" holding four night layers, one for each step of twilight, and it follows the camera on all three projections. On the flat map the shadow keeps going past the date line, so places on the far side are covered too. On Equal Earth it stays inside the oval and follows its curved edges. On the globe you see just the night on the side facing you: its edge runs along the rim of the globe, and a view of the sunlit side shows no night at all. A map has one overlay: press the button again to set its date and time (it also adds the time label if you ticked it and it is missing, and remakes any night layer you deleted). Each night layer carries a Fast Blur driven by one "Night blur" helper, so the four twilight steps melt into a smooth gradient (about half a step wide on screen, and capped when you zoom in very close); setting **Twilight** to 0 in Time controls gives the hard-edged night again. Refresh controls adds the blur to an overlay made by an earlier version. A hidden "Night mask" layer (the outline of the Earth for the current projection) is connected into the group's masks, so the soft twilight stays inside the Earth's outline: no dark halo past the globe's rim or the edge of the Equal Earth oval. Refresh controls adds the mask to an overlay made by an earlier version. Refresh controls (and pressing Add day & night again) also brings an older overlay's night drawing up to date, which replaces any hand edit to the night layers' or Night mask's scripts. If you animated Day of year or UTC time, pressing the button again leaves your keys alone and says so.
+- **Day & night.** The **Day & night** panel on **Layers → Overlays** (above Map furniture) shades the night side of the Earth for any date and time. Type a day and pick a month, give the **UTC time** in hours (0 to 24, decimals allowed: 14.5 is 14:30), and press **Add day & night**. The boxes start at today's date and the current time in UTC. The overlay is a group called "Day & night" holding four night layers, one for each step of twilight, and it follows the camera on all three projections. On the flat map the shadow keeps going past the date line, so places on the far side are covered too. On Equal Earth it stays inside the oval and follows its curved edges. On the globe you see just the night on the side facing you: its edge runs along the rim of the globe, and a view of the sunlit side shows no night at all. A map has one overlay: press the button again to set its date and time (it also adds the time label if you ticked it and it is missing, and remakes any night layer you deleted). Each night layer carries a Fast Blur driven by one "Night blur" helper, so the four twilight steps melt into a smooth gradient (about half a step wide on screen, and capped when you zoom in very close); setting **Twilight** to 0 in Time controls gives the hard-edged night again. Refresh controls adds the blur to an overlay made by an earlier version. A hidden "Night mask" layer (the outline of the Earth for the current projection) is connected into the group's masks, so the soft twilight stays inside the Earth's outline: no dark halo past the globe's rim or the edge of the Equal Earth oval. Refresh controls adds the mask to an overlay made by an earlier version. Refresh controls (and pressing Add day & night again) also brings an older overlay's night drawing up to date, which replaces any hand edit to the night layers' or Night mask's scripts. If you animated Day of year or UTC time, pressing the button again leaves your keys alone and says so.
 
 - **Keying the date and time.** Open the map's **Time controls** and animate **Day of year (1–365)** and **UTC time (0–24)** to run the shadow across the map; they drive the night layers and the time label together. The same component has **Night colour**, **Night opacity**, **Twilight** and **Hide**. Twilight is 0 for a hard edge or 1 for a soft one that fades out in steps.
 
@@ -160,7 +164,7 @@ Turn on the categories you want (each shows a green tick) and press **Add layers
 
 ### Map furniture
 
-**Add scale bar** and **Add north arrow** (Layers tab) put them on the picked map, pinned to a corner of the frame. The scale bar always shows a round distance (metric, imperial or both) that's right at the centre of the frame as the camera moves, and fades out when you zoom out past **Hide below zoom**; the north arrow always points north. Change Units, Style (Line / Segmented; Arrow / Compass / N), Corner, Margin, Max width and Size in the map's Controls. They take the map style's text colour.
+**Add scale bar** and **Add north arrow** (Layers → Overlays, in the Map furniture panel) put them on the picked map, pinned to a corner of the frame. The scale bar always shows a round distance (metric, imperial or both) that's right at the centre of the frame as the camera moves, and fades out when you zoom out past **Hide below zoom**; the north arrow always points north. Change Units, Style (Line / Segmented; Arrow / Compass / N), Corner, Margin, Max width and Size in the map's Controls. They take the map style's text colour.
 
 The scale bar sits above the © OpenStreetMap credit when that credit is there as the bar is added; if you add a credit (or the imagery credit) later, raise the bar with its **Margin** in the Controls.
 
@@ -219,8 +223,9 @@ Geo bends them to fit the map. Build imagery notices this on its own — you don
 
 ## Extract and Bake
 
-Both are in the **Layers** section, below **Add layers** (Refresh controls and Clear download
-cache come after them).
+Both are on **Layers → Extract**, in the **Extract** and **Bake** panels; **Highlight** has its own
+panel between them. (**Refresh controls** is on the Map tab and **Clear download cache** is in the
+Streets panel on Layers → Add.)
 
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
@@ -363,7 +368,7 @@ can't be baked: Bake skips them.
 
 - Downloads are cached in `CavalryGeo_assets/cache` inside the Scripts folder
   (**Help → Show Scripts Folder** in Cavalry).
-- **Clear download cache** (Layers) deletes downloaded map data and shows how much space was
+- **Clear download cache** (Layers → Add, in the Streets panel) deletes downloaded map data and shows how much space was
   freed. It keeps imagery (built imagery points at those files) and waits until imagery has
   finished downloading and building; use **Clear imagery tiles** (Imagery) for imagery.
 - **Updates:** once a day, opening the panel asks GitHub (in the background) whether a newer

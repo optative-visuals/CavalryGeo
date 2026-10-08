@@ -590,6 +590,11 @@ test("Label has a Pins / Routes tab bar; old section names still land in the rig
   context.showSection("Extract");
   assert.equal(pages.currentPage(), 1);
   assert.equal(context.sectionTabs.selected(), "Layers");
+  assert.equal(context.layersPages.currentPage(), 2, "Extract opens the Extract sub-page");
+  assert.equal(context.layersTabs.selected(), "Extract");
+  context.layersTabs.buttons[0].onClick();
+  context.showSection("Extract");
+  assert.equal(context.layersPages.currentPage(), 2, "and does so whichever sub-page was shown last");
   context.showSection("Nowhere");
   assert.equal(pages.currentPage(), 1, "unknown names are ignored");
 });
@@ -11213,4 +11218,61 @@ test("GeoTips.text returns plain strings, throws for unknown keys, and no text c
     assert.ok(s.indexOf("<") < 0, k + " has no <");
   });
   assert.throws(() => T.text("no.such.key"), /no.such.key/);
+});
+
+
+test("Map: with New map picked the Camera panel is hidden as a whole, and comes back with a map", () => {
+  const { context } = buildSandbox();
+  const camera = panelsOf(context, context.sectionPages.pages[0])[3];
+  assert.deepEqual(plain(panelHeadings(context, camera)), ["Camera"]);
+  assert.equal(camera.isHidden(), true, "New map is picked: the panel is hidden, not just its widgets");
+  assert.equal(context.jumpBtn.isHidden(), true);
+  createWorldMap(context);
+  assert.equal(camera.isHidden(), false);
+  assert.equal(context.jumpBtn.isHidden(), false);
+  context.mapPicker.setValue(context.maps.length);
+  context.mapPicker.onValueChanged();
+  assert.equal(camera.isHidden(), true);
+});
+
+test("Map: without a hideable Camera panel, New map hides its widgets one by one", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.cameraPanel = { }; // no setHidden, like a plain VLayout
+  context.mapPicker.setValue(context.maps.length);
+  context.mapPicker.onValueChanged();
+  assert.equal(context.flyBtn.isHidden(), true);
+  assert.equal(context.driftBtn.isHidden(), true);
+  assert.equal(context.flyStartBox.isHidden(), true);
+});
+
+// ---- Hover help ---------------------------------------------------------------
+// Every control a person can use has a tooltip; every GeoTips text is used by exactly one control.
+function tippedControls(context, ui) {
+  const bars = [context.sectionTabs, context.layersTabs, context.labelTabs].reduce((a, b) => a.concat(b.buttons), []);
+  const previews = [context.preview, context.pinsPreview, context.routesPreview].filter(Boolean).map((p) => p.layout);
+  const skip = [];
+  previews.forEach((l) => walkUi(l, (n) => skip.push(n)));
+  const kinds = [ui.Button, ui.LineEdit, ui.DropDown, ui.Checkbox, ui.NumericField, ui.List];
+  const found = [];
+  allColumns(context).forEach((col) => walkUi(col, (n) => {
+    if (kinds.some((K) => n instanceof K) && bars.indexOf(n) < 0 && skip.indexOf(n) < 0 && found.indexOf(n) < 0) found.push(n);
+  }));
+  return found;
+}
+
+test("hover help: every control on every page has a plain tooltip, and every GeoTips text is used once", () => {
+  const { context, ui } = buildSandbox();
+  const controls = tippedControls(context, ui);
+  assert.ok(controls.length > 80, "found the panel's controls (" + controls.length + ")");
+  const missing = controls.filter((w) => !w._toolTip || typeof w._toolTip !== "string" || !w._toolTip.trim());
+  assert.equal(missing.length, 0, missing.length + " control(s) without a tooltip; first: " + (missing[0] && (missing[0]._text || missing[0]._placeholder || missing[0].constructor.name)));
+  controls.forEach((w) => assert.ok(w._toolTip.indexOf("<") < 0, w._toolTip));
+  const keys = context.GeoTips.keys();
+  const texts = keys.map((k) => context.GeoTips.text(k));
+  assert.equal(new Set(texts).size, texts.length, "no two keys share a text");
+  keys.forEach((k, i) => {
+    const users = controls.filter((w) => w._toolTip === texts[i]);
+    assert.equal(users.length, 1, k + " is used by " + users.length + " control(s)");
+  });
 });
