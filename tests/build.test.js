@@ -11453,3 +11453,18 @@ test("guard: an older Cavalry without getParent or select never breaks the actio
   assert.equal(ran, 1);
   assert.equal(context.statusLabel.getText(), "Ready.");
 });
+
+test("guard: nudges a redraw with the current frame once per action, also after an error", () => {
+  const { context, api } = buildSandbox();
+  api.setFrame(7);
+  const calls = [];
+  const real = api.setFrame.bind(api);
+  api.setFrame = (f) => { calls.push(f); return real(f); };
+  context.guard(() => {})();
+  assert.deepEqual(calls, [7]);
+  context.guard(() => { throw new Error("x"); })();
+  assert.deepEqual(calls, [7, 7]);
+  api.setFrame = () => { throw new Error("no redraw"); };
+  context.guard(() => {})(); // a failing nudge is ignored
+  assert.equal(context.statusLabel.getText().indexOf("no redraw"), -1);
+});
