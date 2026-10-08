@@ -31,7 +31,7 @@ function syncControls(map, select) {
   } catch (e) {
     try { GeoScene.fitFurniture(map); } catch (e3) { /* cosmetic */ }
     try { refreshPreviews(); } catch (e2) { /* cosmetic */ }
-    return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Layers tab) to try again.";
+    return " Its controls couldn't be updated: " + (e && e.message ? e.message : e) + ". Press Refresh controls (Map tab) to try again.";
   }
 }
 function column(items) {
@@ -41,6 +41,7 @@ function column(items) {
   // A heading sits close to what it introduces (4 px below) and further from what came before (about 8 px above).
   items.forEach(function (w, i) {
     if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(4);
+    if (i > 0 && GeoStyle.isPanel(w) && typeof v.addSpacing === "function") v.addSpacing(6); // 10 px between panels
     v.add(w);
   });
   if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top
@@ -81,12 +82,12 @@ var flyBtn = GeoStyle.primaryButton("Fly here");
 var flyNote = GeoStyle.note("(animates the camera to the map preview)");
 // Camera feel: how a flight eases, how far it zooms out on the way, a button to redo the flight
 // under the playhead with new choices, and Drift (a small move from the current view, From to To).
-var easingLabel = new ui.Label("Easing");
+var easingLabel = GeoStyle.fieldLabel("Easing");
 var easingPicker = new ui.DropDown();
-var arcLabel = new ui.Label("Zoom-out");
+var arcLabel = GeoStyle.fieldLabel("Zoom-out");
 var arcPicker = new ui.DropDown();
 var updateFlightBtn = GeoStyle.button("Update flight");
-var driftLabel = new ui.Label("Drift move");
+var driftLabel = GeoStyle.fieldLabel("Drift move");
 var driftPicker = new ui.DropDown();
 var driftBtn = GeoStyle.button("Drift");
 GeoFly.EASINGS.forEach(function (e) { easingPicker.addEntry(e.name); });
@@ -531,22 +532,36 @@ TAB_BUILDERS.push(function (tabs) {
   var tipsRow = row(tipsBtn);
   if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
   tabs.add("Map", column(tipsBox.concat([
-    row(mapPicker, refreshMapsBtn),
-    row(nameField, projPicker),
-    GeoStyle.heading("Search"),
-    row(searchField, searchBtn),
-    resultPicker,
-    GeoStyle.heading("Preview (drag to move)"),
-    preview.layout,
-    row(jumpBtn),
-    row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
-    flyNote,
-    row(easingLabel, easingPicker, arcLabel, arcPicker, updateFlightBtn),
-    row(driftLabel, driftPicker, driftBtn),
-    createHereBtn,
-    GeoStyle.heading("Style"),
-    row(mapStylePicker, applyStyleBtn),
-    row(styleNameField, saveStyleBtn, deleteStyleBtn),
+    GeoStyle.panel([
+      row(mapPicker, refreshMapsBtn),
+      row(nameField, projPicker),
+      refreshControlsBtn
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Search"),
+      row(searchField, searchBtn),
+      resultPicker
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Preview (drag to move)"),
+      preview.layout,
+      row(jumpBtn),
+      createHereBtn
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Camera"),
+      row(flyBtn, fromLabel, flyStartBox, toLabel, flyEndBox),
+      flyNote,
+      row(easingLabel, easingPicker),
+      row(arcLabel, arcPicker),
+      updateFlightBtn,
+      row(driftLabel, driftPicker, driftBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Style"),
+      row(mapStylePicker, applyStyleBtn),
+      row(styleNameField, saveStyleBtn, deleteStyleBtn)
+    ]),
     tipsRow
   ])));
 });
@@ -890,40 +905,73 @@ refreshControlsBtn.onClick = guard(function () {
   say("Controls updated: " + r.controls + (r.controls === 1 ? " setting " : " settings ") + where + ".");
 });
 
-// Layers holds the layer categories, then Extract and Bake.
+// Layers has three pages: Add (the layer categories), Overlays (day and night, furniture) and
+// Extract (extract, highlight, bake).
+var LAYERS_PAGES = ["Add", "Overlays", "Extract"];
+var layersTabs = null, layersPages = null;
+function showLayersPage(name) {
+  var i = LAYERS_PAGES.indexOf(name);
+  if (i < 0 || !layersPages) return;
+  layersTabs.select(name);
+  layersPages.setPage(i);
+}
 TAB_BUILDERS.push(function (tabs) {
   var toggles = function (cats) { return cats.map(function (c) { return checks[c[0]]; }); };
-  tabs.add("Layers", column([
-    GeoStyle.heading("World · Natural Earth"),
-    GeoStyle.toggleGrid(toggles(NE_CATS), 3),
-    row(new ui.Label("Detail"), scalePicker),
-    GeoStyle.heading("Streets · OpenStreetMap"),
-    GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."),
-    GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
-    modePicker,
-    row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
-    addLayersBtn,
-    GeoStyle.heading("Extract"),
-    row(layerPicker, refreshLayersBtn),
-    row(featureQuery, findBtn),
-    featureList,
-    extractBtn,
-    row(highlightEffectPicker, new ui.Label("Start:"), GeoStyle.frameField(highlightStartField), new ui.Label("Frames:"), GeoStyle.frameField(highlightLengthField)),
-    row(highlightBtn, changeEffectBtn),
-    GeoStyle.heading("Bake"),
-    bakeBtn,
-    GeoStyle.heading("Controls"),
-    GeoStyle.note("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window."),
-    refreshControlsBtn,
-    clearCacheBtn,
-    GeoStyle.heading("Day & night"),
-    row(new ui.Label("Day"), dayNightDayField, dayNightMonthPicker),
-    row(new ui.Label("UTC time (0-24)"), dayNightTimeField),
-    row(timeLabelCheck, new ui.Label("Time label")),
-    addDayNightBtn,
-    GeoStyle.heading("Map furniture"),
-    row(addScaleBarBtn, addNorthArrowBtn)
+  layersPages = GeoStyle.pageStack();
+  layersPages.add(column([
+    GeoStyle.panel([
+      GeoStyle.heading("World · Natural Earth"),
+      GeoStyle.toggleGrid(toggles(NE_CATS), 3),
+      row(GeoStyle.fieldLabel("Detail"), scalePicker)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Streets · OpenStreetMap"),
+      GeoStyle.note("Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added."),
+      GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
+      modePicker,
+      row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
+      addLayersBtn,
+      clearCacheBtn
+    ])
   ]));
+  layersPages.add(column([
+    GeoStyle.panel([
+      GeoStyle.heading("Day & night"),
+      row(GeoStyle.fieldLabel("Day"), dayNightDayField, dayNightMonthPicker),
+      row(GeoStyle.fieldLabel("UTC time (0-24)"), dayNightTimeField),
+      row(timeLabelCheck, new ui.Label("Time label")),
+      addDayNightBtn
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Map furniture"),
+      row(addScaleBarBtn, addNorthArrowBtn)
+    ])
+  ]));
+  layersPages.add(column([
+    GeoStyle.panel([
+      GeoStyle.heading("Extract"),
+      row(layerPicker, refreshLayersBtn),
+      row(featureQuery, findBtn),
+      featureList,
+      extractBtn
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Highlight"),
+      row(highlightEffectPicker, new ui.Label("Start:"), GeoStyle.frameField(highlightStartField), new ui.Label("Frames:"), GeoStyle.frameField(highlightLengthField)),
+      row(highlightBtn, changeEffectBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Bake"),
+      bakeBtn
+    ])
+  ]));
+  layersTabs = GeoStyle.tabBar(LAYERS_PAGES, function (name) { showLayersPage(name); });
+  // No margins here: the page columns already carry theirs.
+  var layersColumn = new ui.VLayout();
+  layersColumn.setMargins(0, 0, 0, 0);
+  layersColumn.add(layersTabs.widget);
+  layersColumn.add(layersPages.widget);
+  tabs.add("Layers", layersColumn);
 });
 
 // Runs a place search from a text field into a results dropdown (no "World view" entry).
@@ -1286,35 +1334,47 @@ function showLabelPage(name) {
 TAB_BUILDERS.push(function (tabs) {
   labelPages = GeoStyle.pageStack();
   labelPages.add(column([
-    GeoStyle.heading("Place"),
-    row(pinSearchField, pinSearchBtn),
-    pinResultPicker,
-    labelText,
-    row(pinHereBtn, labelHereBtn),
-    row(calloutHereBtn),
-    GeoStyle.heading("Preview (click to set the spot, drag to move)"),
-    pinsPreview.layout,
-    GeoStyle.heading("At coordinates"),
-    row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
-    row(pinCoordBtn, labelCoordBtn),
-    row(calloutCoordBtn)
+    GeoStyle.panel([
+      GeoStyle.heading("Place"),
+      row(pinSearchField, pinSearchBtn),
+      pinResultPicker,
+      labelText,
+      row(pinHereBtn, labelHereBtn),
+      row(calloutHereBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Preview (click to set the spot, drag to move)"),
+      pinsPreview.layout
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("At coordinates"),
+      row(new ui.Label("Lat"), latField, new ui.Label("Lon"), lonField),
+      row(pinCoordBtn, labelCoordBtn),
+      row(calloutCoordBtn)
+    ])
   ]));
   labelPages.add(column([
-    GeoStyle.heading("Stops"),
-    row(routeSearchField, routeSearchBtn),
-    row(routeResultPicker, addStopBtn),
-    GeoStyle.heading("Preview (click to add a stop, drag to move)"),
-    routesPreview.layout,
-    stopsList,
-    row(removeStopBtn, clearStopsBtn),
-    GeoStyle.heading("Style"),
-    row(new ui.Label("Shape"), routeShapePicker),
-    row(new ui.Label("Arc height %"), arcField),
-    row(labelsAtStops, new ui.Label("Labels at stops")),
-    row(new ui.Label("Traveller"), travellerPicker, addTravellerBtn),
-    createRouteBtn,
-    GeoStyle.note("Drag stops in the viewer, then Pin here to keep them there."),
-    pinStopsBtn
+    GeoStyle.panel([
+      GeoStyle.heading("Stops"),
+      row(routeSearchField, routeSearchBtn),
+      row(routeResultPicker, addStopBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Preview (click to add a stop, drag to move)"),
+      routesPreview.layout,
+      stopsList,
+      row(removeStopBtn, clearStopsBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Style"),
+      row(GeoStyle.fieldLabel("Shape"), routeShapePicker),
+      row(GeoStyle.fieldLabel("Arc height %"), arcField),
+      row(labelsAtStops, new ui.Label("Labels at stops")),
+      row(GeoStyle.fieldLabel("Traveller"), travellerPicker, addTravellerBtn),
+      createRouteBtn,
+      GeoStyle.note("Drag stops in the viewer, then Pin here to keep them there."),
+      pinStopsBtn
+    ])
   ]));
   labelTabs = GeoStyle.tabBar(LABEL_PAGES, function (name) { showLabelPage(name); });
   // No margins here: the page columns already carry theirs.
@@ -1429,18 +1489,27 @@ refreshDataBtn.onClick = guard(function () {
 
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Data", column([
-    GeoStyle.heading("Sheet"),
-    row(dataLinkField, dataLoadBtn),
-    GeoStyle.heading("Columns"),
-    row(new ui.Label("Place"), placePicker, new ui.Label("Value"), valuePicker),
-    row(new ui.Label("Year"), yearPicker),
-    row(prefixField, suffixField),
-    GeoStyle.heading("Show"),
-    GeoStyle.toggleGrid([regionsCheck, bubblesCheck, labelsCheck, legendCheck], 2),
-    row(lookupCheck, new ui.Label("Look up unmatched names as places (cities)")),
-    row(addDataBtn, refreshDataBtn),
-    GeoStyle.heading("Unmatched rows"),
-    dataUnmatchedList
+    GeoStyle.panel([
+      GeoStyle.heading("Sheet"),
+      row(dataLinkField, dataLoadBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Columns"),
+      row(GeoStyle.fieldLabel("Place"), placePicker),
+      row(GeoStyle.fieldLabel("Value"), valuePicker),
+      row(GeoStyle.fieldLabel("Year"), yearPicker),
+      row(prefixField, suffixField)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Show"),
+      GeoStyle.toggleGrid([regionsCheck, bubblesCheck, labelsCheck, legendCheck], 2),
+      row(lookupCheck, new ui.Label("Look up unmatched names as places (cities)")),
+      row(addDataBtn, refreshDataBtn)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Unmatched rows"),
+      dataUnmatchedList
+    ])
   ]));
 });
 
@@ -1776,19 +1845,26 @@ clearTilesBtn.onClick = guard(function () {
 
 TAB_BUILDERS.push(function (tabs) {
   tabs.add("Imagery", column([
-    GeoStyle.heading("Source"),
-    sourcePicker,
-    licenceLabel,
-    row(new ui.Label("MapTiler key"), maptilerKeyField),
-    row(new ui.Label("Mapbox token"), mapboxKeyField),
-    row(new ui.Label("Map ID / style"), styleField, stylePicker),
-    row(new ui.Label("Custom link"), customUrlField),
-    row(new ui.Label("Custom credit"), customAttrField),
-    GeoStyle.heading("Build"),
-    row(buildImageryBtn, cancelImageryBtn),
-    imageryProgress,
-    imageryAttrBtn,
-    clearTilesBtn
+    GeoStyle.panel([
+      GeoStyle.heading("Source"),
+      sourcePicker,
+      licenceLabel
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Keys and links"),
+      row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
+      row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
+      row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
+      row(GeoStyle.fieldLabel("Custom link"), customUrlField),
+      row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
+    ]),
+    GeoStyle.panel([
+      GeoStyle.heading("Build"),
+      row(buildImageryBtn, cancelImageryBtn),
+      imageryProgress,
+      imageryAttrBtn,
+      clearTilesBtn
+    ])
   ]));
 });
 
@@ -1836,7 +1912,7 @@ function buildUi() {
   function fitPreview() {
     try {
       var g = sectionTabs.widget.geometry();
-      if (g && g.width > 50) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width); });
+      if (g && g.width > 50 + GeoStyle.PANEL_INSET) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - GeoStyle.PANEL_INSET); });
     } catch (e) { /* older Cavalry */ }
   }
   ui.onResize = fitPreview;

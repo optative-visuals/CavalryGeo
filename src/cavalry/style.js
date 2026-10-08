@@ -1,5 +1,5 @@
 // The panel's look in one place, borrowed from Cavalry and Easey: Cavalry's own greys (from its
-// theme), one deep green for the main actions, small sentence-case section headings with a thin line,
+// theme), one deep green for the main actions, small sentence-case section headings,
 // toggle buttons for picking categories, and a segmented tab bar. Every button is a little taller
 // than Cavalry's default. A native button only shows its hover highlight while it has never had
 // setBackgroundColor called, so only the main actions and the tab bar are painted; toggles show
@@ -81,7 +81,8 @@ var GeoStyle = (function () {
   }
   // A hover tooltip. A GeoStyle toggle keeps its button in .widget.
   function tip(widget, text) {
-    maybe(widget && widget.widget ? widget.widget : widget, "setToolTip", text);
+    if (!widget) return widget;
+    maybe(widget.widget ? widget.widget : widget, "setToolTip", text);
     return widget;
   }
   function note(text) {

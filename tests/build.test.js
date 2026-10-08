@@ -512,6 +512,24 @@ function useCustomTiles(context) {
 // True when `layout` (or anything under it) holds `widget`.
 function holds(layout, widget) { let found = false; walkUi(layout, (n) => { if (n === widget) found = true; }); return found; }
 
+// A page column's panels (the shaded boxes), in order; and a page's items with each panel opened up.
+function panelsOf(context, col) { return col._items.filter((n) => context.GeoStyle.isPanel(n)); }
+function panelContents(p) { return p._layout ? p._layout._items : p._items; }
+function panelItems(context, col) {
+  let out = [];
+  col._items.forEach((n) => { out = out.concat(context.GeoStyle.isPanel(n) ? panelContents(n) : [n]); });
+  return out;
+}
+function panelHeadings(context, p) {
+  return panelContents(p).filter((n) => context.GeoStyle.isHeading(n)).map((n) => n._items[0].getText());
+}
+function pageHeadings(context, col) { return panelsOf(context, col).map((p) => panelHeadings(context, p)); }
+// Every page column: the Map, Imagery and Data pages, then Layers' three and Label's two.
+function allColumns(context) {
+  const pages = context.sectionPages.pages;
+  return [pages[0], pages[2], pages[4]].concat(context.layersPages.pages, context.labelPages.pages);
+}
+
 test("buildPanel() runs against stub ui/api: a five-section tab bar above a page per section", () => {
   const { ui, context } = buildSandbox();
   const root = ui._root();
@@ -637,8 +655,8 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.pinBtn, undefined);
   assert.equal(context.centreBtn, undefined);
   const texts = [];
-  (function walk(n) { if (n instanceof ui.Button) texts.push(n.getText()); (n._items || []).forEach(walk); })(context.sectionPages.pages[0]);
-  assert.deepEqual(texts, ["Got it", "Refresh", "Search", "Jump here", "Fly here", "Update flight", "Drift", "Create map here", "Apply to map", "Save as style", "Delete style", "Tips"]);
+  walkUi(context.sectionPages.pages[0], (n) => { if (n instanceof ui.Button) texts.push(n.getText()); });
+  assert.deepEqual(texts, ["Got it", "Refresh", "Refresh controls", "Search", "Jump here", "Create map here", "Fly here", "Update flight", "Drift", "Apply to map", "Save as style", "Delete style", "Tips"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -847,7 +865,7 @@ test("Map tab: Start begins at the playhead and End 100 frames later; From: and 
   assert.equal(context.flyEndField.getValue(), 112);
   assert.equal(context.fromLabel.getText(), "From:");
   assert.equal(context.toLabel.getText(), "To:");
-  const rows = context.sectionPages.pages[0]._items.filter((n) => n instanceof ui.HLayout);
+  const rows = panelItems(context, context.sectionPages.pages[0]).filter((n) => n instanceof ui.HLayout);
   const jumpRow = rows.filter((n) => holds(n, context.jumpBtn))[0];
   const flyRow = rows.filter((n) => holds(n, context.flyBtn))[0];
   assert.deepEqual(jumpRow._items, [context.jumpBtn], "Jump here has a row of its own");
@@ -857,8 +875,9 @@ test("Map tab: Start begins at the playhead and End 100 frames later; From: and 
     const texts = []; walkUi(box, (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
     assert.deepEqual(texts, ["F"], "each box is marked with an F");
   });
-  const items = context.sectionPages.pages[0]._items;
-  assert.ok(items.indexOf(jumpRow) + 1 === items.indexOf(flyRow), "the Fly row follows the Jump row");
+  const items = panelItems(context, context.sectionPages.pages[0]);
+  assert.ok(holds(panelsOf(context, context.sectionPages.pages[0])[3], flyRow), "the Fly row sits in the Camera panel");
+  assert.ok(items.indexOf(flyRow) > items.indexOf(jumpRow), "the Fly row follows the Jump row");
   assert.equal(context.flyStartField._fixedWidth, 48);
   assert.equal(context.flyEndField._fixedWidth, 48);
   const quiet = buildSandbox().context;
@@ -891,7 +910,7 @@ test("Map tab: a note under the Fly row says what Fly here does, and hides with 
   const { context, ui } = buildSandbox();
   assert.equal(context.flyNote.getText(), "(animates the camera to the map preview)");
   assert.equal(context.flyNote._textColor, "#8a8a8a");
-  const items = context.sectionPages.pages[0]._items;
+  const items = panelItems(context, context.sectionPages.pages[0]);
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
   assert.ok(items.indexOf(flyRow) >= 0 && items[items.indexOf(flyRow) + 1] === context.flyNote, "the note sits right after the Fly row");
   assert.equal(context.flyNote.isHidden(), true, "hidden with no map");
@@ -3899,11 +3918,20 @@ test("GeoStyle.heading with a hint adds a grey hint label after the heading", ()
 
 test("Map tab: the Preview heading reads Preview (drag to move)", () => {
   const { context } = buildSandbox();
-  const row = context.sectionPages.pages[0]._items.filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview (drag to move)")[0];
+  const row = panelItems(context, context.sectionPages.pages[0]).filter((n) => context.GeoStyle.isHeading(n) && n._items[0].getText() === "Preview (drag to move)")[0];
   assert.ok(row, "found the Preview heading");
   assert.equal(row._items.length, 1, "heading with no hint is just the label");
   assert.equal(row._items[0].getText(), "Preview (drag to move)");
   assert.equal(row._items[0]._textColor, "#a6a6a6");
+});
+
+test("GeoStyle.tip ignores a missing widget and tips a toggle's button", () => {
+  const { context } = buildSandbox();
+  assert.equal(context.GeoStyle.tip(null, "x"), null);
+  assert.equal(context.GeoStyle.tip(undefined, "x"), undefined);
+  const t = context.GeoStyle.toggle("A", false);
+  assert.equal(context.GeoStyle.tip(t, "hello"), t);
+  assert.equal(t.widget._toolTip, "hello");
 });
 
 test("GeoStyle.frameField is a rounded dark box holding a grey F and the field", () => {
@@ -4135,26 +4163,166 @@ test("every section page packs its controls at the top; nested layouts get no st
   const { ui, context } = buildSandbox();
   const pages = context.sectionPages.pages;
   assert.equal(pages.length, 5);
-  // Label's page is the outer column (tab bar + a PageView of two stretched columns).
+  // Layers' and Label's pages are an outer column (tab bar + a page stack of stretched columns).
   pages.forEach((p, i) => {
-    if (i === 3) {
-      assert.equal(p._stretch, undefined, "the Label wrapper has none");
-      assert.equal(p._items[1], context.labelPages.widget);
-      context.labelPages.pages.forEach((c) => assert.equal(c._stretch, 1));
+    if (i === 1 || i === 3) {
+      const stack = i === 1 ? context.layersPages : context.labelPages;
+      assert.equal(p._stretch, undefined, "the wrapper has none");
+      assert.equal(p._items[1], stack.widget);
+      stack.pages.forEach((c) => assert.equal(c._stretch, 1));
     } else assert.equal(p._stretch, 1, "page " + i);
   });
-  walkUi(pages[1], (n) => { if (n instanceof ui.VLayout && n !== pages[1]) assert.equal(n._stretch, undefined, "toggle grid"); });
+  const allowed = [pages[1], context.layersPages.widget].concat(context.layersPages.pages);
+  walkUi(pages[1], (n) => { if (n instanceof ui.VLayout && allowed.indexOf(n) < 0) assert.equal(n._stretch, undefined, "panel / toggle grid"); });
 });
 
-test("each section has grey headings in order", () => {
+test("each section has its panels, with their headings, in order", () => {
   const { context } = buildSandbox();
   const pages = context.sectionPages.pages;
-  const headings = (layout) => { const out = []; walkUi(layout, (n) => { if (n._textColor === "#a6a6a6" && n._fontSize === 11) out.push(n.getText()); }); return out; };
-  assert.deepEqual(headings(pages[0]), ["Start here", "Search", "Preview (drag to move)", "Style"]);
-  assert.deepEqual(headings(pages[1]), ["World · Natural Earth", "Streets · OpenStreetMap", "Extract", "Bake", "Controls", "Day & night", "Map furniture"]);
-  assert.deepEqual(headings(pages[2]), ["Source", "Build"]);
-  assert.deepEqual(headings(pages[3]), ["Place", "Preview (click to set the spot, drag to move)", "At coordinates", "Stops", "Preview (click to add a stop, drag to move)", "Style"]);
-  assert.deepEqual(headings(pages[4]), ["Sheet", "Columns", "Show", "Unmatched rows"]);
+  assert.deepEqual(pageHeadings(context, pages[0]), [[], ["Search"], ["Preview (drag to move)"], ["Camera"], ["Style"]]);
+  const lp = context.layersPages.pages;
+  assert.deepEqual(pageHeadings(context, lp[0]), [["World · Natural Earth"], ["Streets · OpenStreetMap"]]);
+  assert.deepEqual(pageHeadings(context, lp[1]), [["Day & night"], ["Map furniture"]]);
+  assert.deepEqual(pageHeadings(context, lp[2]), [["Extract"], ["Highlight"], ["Bake"]]);
+  assert.deepEqual(pageHeadings(context, pages[2]), [["Source"], ["Keys and links"], ["Build"]]);
+  assert.deepEqual(pageHeadings(context, context.labelPages.pages[0]), [["Place"], ["Preview (click to set the spot, drag to move)"], ["At coordinates"]]);
+  assert.deepEqual(pageHeadings(context, context.labelPages.pages[1]), [["Stops"], ["Preview (click to add a stop, drag to move)"], ["Style"]]);
+  assert.deepEqual(pageHeadings(context, pages[4]), [["Sheet"], ["Columns"], ["Show"], ["Unmatched rows"]]);
+  // Start here (the tips box) sits above the Map tab's panels; no heading is called Controls.
+  const firstPanel = pages[0]._items.findIndex((n) => context.GeoStyle.isPanel(n));
+  const above = []; pages[0]._items.slice(0, firstPanel).forEach((n) => walkUi(n, (m) => { if (typeof m.getText === "function") above.push(m.getText()); }));
+  assert.ok(above.indexOf("Start here") >= 0);
+  walkUi(context.sectionPages.widget, (n) => { if (context.GeoStyle.isHeading(n)) assert.notEqual(n._items[0].getText(), "Controls"); });
+});
+
+test("no heading has a rule: a heading row holds only labels", () => {
+  const { context, ui } = buildSandbox();
+  let seen = 0;
+  walkUi(context.sectionPages.widget, (n) => {
+    if (!context.GeoStyle.isHeading(n)) return;
+    seen++;
+    n._items.forEach((c) => assert.ok(c instanceof ui.Label, "a heading item is a label"));
+  });
+  assert.ok(seen >= 15, "headings were found");
+});
+
+test("panels sit 10 px apart in a page column (4 + 6) and each packs its items 4 apart, 8 more before a later heading", () => {
+  const { context } = buildSandbox();
+  const columns = allColumns(context);
+  assert.equal(columns.length, 8);
+  let panels = 0;
+  columns.forEach((col, c) => {
+    assert.equal(col._spacing, 4, "column " + c);
+    const spacings = col._spacings || [];
+    const firstPanel = col._items.findIndex((n) => context.GeoStyle.isPanel(n));
+    col._items.forEach((item, i) => {
+      if (!context.GeoStyle.isPanel(item)) return;
+      panels++;
+      const mine = spacings.filter((s) => s.at === i);
+      if (i === firstPanel && i === 0) assert.equal(mine.length, 0, "column " + c + ": a first panel gets no extra space");
+      else if (i !== firstPanel) assert.deepEqual(plain(mine), [{ at: i, px: 6 }], "column " + c + " panel at " + i);
+      const inner = item._layout;
+      assert.equal(inner._spacing, 4, "panel spacing");
+      panelContents(item).forEach((w, j) => {
+        const gaps = (inner._spacings || []).filter((s) => s.at === j);
+        if (context.GeoStyle.isHeading(w) && j > 0) assert.deepEqual(plain(gaps), [{ at: j, px: 8 }], "later heading in a panel");
+        else assert.equal(gaps.length, 0);
+      });
+    });
+  });
+  assert.ok(panels >= 22, "panels were found: " + panels);
+});
+
+test("content sits on one left edge: page columns have only a top margin and content rows have none", () => {
+  const { context, ui } = buildSandbox();
+  const columns = allColumns(context);
+  let rows = 0;
+  const visit = (node, c) => {
+    if (!node || typeof node !== "object") return;
+    if (node instanceof ui.Container) { if (context.GeoStyle.isPanel(node)) visit(node._layout, c); return; } // frame boxes keep their own padding
+    if (node instanceof ui.HLayout && !context.GeoStyle.isHeading(node)) {
+      rows++;
+      assert.deepEqual(plain(node._margins), [0, 0, 0, 0], "a content row in column " + c);
+    }
+    (node._items || []).forEach((n) => visit(n, c));
+  };
+  columns.forEach((col, c) => {
+    assert.deepEqual(plain(col._margins), [0, 6, 0, 0], "column " + c);
+    col._items.forEach((n) => visit(n, c));
+  });
+  assert.ok(rows > 10, "content rows were found");
+  columns.forEach((col) => panelsOf(context, col).forEach((p) => assert.deepEqual(plain(p._layout._margins), [9, 8, 9, 10])));
+});
+
+test("Layers has a tab bar Add / Overlays / Extract that switches its pages and opens on Add", () => {
+  const { context } = buildSandbox();
+  assert.deepEqual(plain(context.LAYERS_PAGES), ["Add", "Overlays", "Extract"]);
+  assert.equal(context.layersTabs.selected(), "Add");
+  assert.equal(context.layersPages.currentPage(), 0);
+  assert.equal(context.layersPages.pageCount(), 3);
+  context.layersTabs.buttons[2].onClick();
+  assert.equal(context.layersTabs.selected(), "Extract");
+  assert.equal(context.layersPages.currentPage(), 2);
+  context.layersTabs.buttons[1].onClick();
+  assert.equal(context.layersPages.currentPage(), 1);
+  context.layersTabs.buttons[0].onClick();
+  assert.equal(context.layersPages.currentPage(), 0);
+  // The wrapper page holds the tab bar and the page stack.
+  assert.ok(holds(context.sectionPages.pages[1], context.layersTabs.widget) && holds(context.sectionPages.pages[1], context.layersPages.widget));
+});
+
+test("buttons that moved: Refresh controls is in the Map tab's first panel, Clear download cache in the Streets panel", () => {
+  const { context } = buildSandbox();
+  const mapPanels = panelsOf(context, context.sectionPages.pages[0]);
+  assert.ok(holds(mapPanels[0], context.refreshControlsBtn) && holds(mapPanels[0], context.mapPicker) && holds(mapPanels[0], context.projPicker));
+  const streets = panelsOf(context, context.layersPages.pages[0])[1];
+  assert.ok(holds(streets, context.clearCacheBtn) && holds(streets, context.addLayersBtn));
+  assert.ok(!holds(context.layersPages.widget, context.refreshControlsBtn), "no longer on Layers");
+  const cleared = [];
+  context.GeoNet.clearCache = () => { cleared.push(1); return { files: 2, bytes: 2048 }; };
+  context.clearCacheBtn.onClick();
+  assert.equal(cleared.length, 1);
+  assert.match(context.statusLabel.getText(), /^Download cache cleared: 2 file\(s\)/);
+});
+
+test("labelled rows use fieldLabel (fixed width 92): Map, Layers, Imagery, Label and Data", () => {
+  const { context, ui } = buildSandbox();
+  const W = context.GeoStyle.LABEL_WIDTH;
+  assert.equal(W, 92);
+  const rowLabel = (col, text) => {
+    const found = [];
+    walkUi(col, (n) => { if (n instanceof ui.HLayout && n._items[0] instanceof ui.Label && n._items[0].getText() === text) found.push(n); });
+    assert.equal(found.length, 1, text);
+    assert.equal(found[0]._items[0]._fixedWidth, W, text + " label width");
+    return found[0];
+  };
+  const mapPage = context.sectionPages.pages[0];
+  assert.deepEqual(rowLabel(mapPage, "Easing")._items, [context.easingLabel, context.easingPicker]);
+  assert.deepEqual(rowLabel(mapPage, "Zoom-out")._items, [context.arcLabel, context.arcPicker]);
+  assert.deepEqual(rowLabel(mapPage, "Drift move")._items, [context.driftLabel, context.driftPicker, context.driftBtn]);
+  [context.easingLabel, context.arcLabel, context.driftLabel].forEach((l) => assert.equal(l._fixedWidth, W));
+  const add = context.layersPages.pages[0], over = context.layersPages.pages[1];
+  assert.ok(holds(rowLabel(add, "Detail"), context.scalePicker));
+  assert.ok(holds(rowLabel(over, "Day"), context.dayNightDayField) && holds(rowLabel(over, "Day"), context.dayNightMonthPicker));
+  assert.ok(holds(rowLabel(over, "UTC time (0-24)"), context.dayNightTimeField));
+  const img = context.sectionPages.pages[2];
+  [["MapTiler key", "maptilerKeyField"], ["Mapbox token", "mapboxKeyField"], ["Map ID / style", "styleField"], ["Custom link", "customUrlField"], ["Custom credit", "customAttrField"]].forEach((x) => assert.ok(holds(rowLabel(img, x[0]), context[x[1]]), x[0]));
+  const routes = context.labelPages.pages[1];
+  [["Shape", "routeShapePicker"], ["Arc height %", "arcField"], ["Traveller", "travellerPicker"]].forEach((x) => assert.ok(holds(rowLabel(routes, x[0]), context[x[1]]), x[0]));
+  const data = context.sectionPages.pages[4];
+  [["Place", "placePicker"], ["Value", "valuePicker"], ["Year", "yearPicker"]].forEach((x) => {
+    const r = rowLabel(data, x[0]);
+    assert.deepEqual(r._items.slice(1), [context[x[1]]], x[0] + " is alone on its row");
+  });
+});
+
+test("Highlight has its own panel on the Extract page, with its effect row and buttons", () => {
+  const { context } = buildSandbox();
+  const ex = panelsOf(context, context.layersPages.pages[2]);
+  assert.deepEqual(ex.map((p) => panelHeadings(context, p)[0]), ["Extract", "Highlight", "Bake"]);
+  [context.highlightEffectPicker, context.highlightBtn, context.changeEffectBtn].forEach((w) => assert.ok(holds(ex[1], w)));
+  [context.layerPicker, context.featureQuery, context.featureList, context.extractBtn].forEach((w) => assert.ok(holds(ex[0], w)));
+  assert.ok(holds(ex[2], context.bakeBtn));
 });
 
 // ---- Label previews ----
@@ -4305,54 +4473,11 @@ test("Pins search shows its results on the Pins preview; clicking a result dot p
   assert.equal(context.pinResultPicker.getValue(), 0);
 });
 
-test("every page column packs items 4 apart and puts 4 before each heading that isn't first", () => {
-  const { context } = buildSandbox();
-  // The Label section's page is just the tab bar over the two Label pages, which are the columns.
-  const labelSection = context.sectionPages.pages.find((p) => holds(p, context.labelPages.widget));
-  const columns = context.sectionPages.pages.filter((p) => p !== labelSection).concat(context.labelPages.pages);
-  assert.equal(columns.length, 6);
-  let headingCount = 0;
-  columns.forEach((col, c) => {
-    assert.equal(col._spacing, 4, "column " + c);
-    const spacings = col._spacings || [];
-    col._items.forEach((item, i) => {
-      const isHeading = item._items && item._items[0] && item._items[0]._textColor === "#a6a6a6" && item._items[0]._fontSize === 11;
-      const mine = spacings.filter((s) => s.at === i);
-      if (!isHeading) return assert.equal(mine.length, 0, "column " + c + " item " + i + " is not a heading");
-      headingCount++;
-      if (i === 0) assert.equal(mine.length, 0, "column " + c + ": a first heading gets no space before it");
-      else assert.deepEqual(plain(mine), [{ at: i, px: 4 }], "column " + c + " heading at " + i);
-    });
-  });
-  assert.ok(headingCount >= 14, "headings were found");
-});
-
-test("content sits on one left edge: page columns have only a top margin and content rows have none", () => {
-  const { context, ui } = buildSandbox();
-  const labelSection = context.sectionPages.pages.find((p) => holds(p, context.labelPages.widget));
-  const columns = context.sectionPages.pages.filter((p) => p !== labelSection).concat(context.labelPages.pages);
-  assert.equal(columns.length, 6);
-  let rows = 0;
-  const visit = (node, c) => {
-    if (!node || typeof node !== "object" || node instanceof ui.Container) return; // tab bar / heading rule keep their own padding
-    if (node instanceof ui.HLayout && !context.GeoStyle.isHeading(node)) {
-      rows++;
-      assert.deepEqual(plain(node._margins), [0, 0, 0, 0], "a content row in column " + c);
-    }
-    (node._items || []).forEach((n) => visit(n, c));
-  };
-  columns.forEach((col, c) => {
-    assert.deepEqual(plain(col._margins), [0, 6, 0, 0], "column " + c);
-    visit(col, c);
-  });
-  assert.ok(rows > 10, "content rows were found");
-});
-
 test("layer categories and data Show options are toggle buttons; yes/no settings stay checkboxes", () => {
   const { context, ui } = buildSandbox({ setup: withIcons });
   const pages = context.sectionPages.pages;
   const toggleTexts = (layout) => { const out = []; walkUi(layout, (n) => { if (n instanceof ui.Button && n._image) out.push(n.getText()); }); return out; };
-  assert.deepEqual(toggleTexts(pages[1]),
+  assert.deepEqual(toggleTexts(context.layersPages.pages[0]),
     [" Countries", " States", " Coastlines", " Lakes", " Rivers", " Cities", " Buildings", " Roads", " Water", " Parks", " Railways"]);
   assert.deepEqual(toggleTexts(pages[4]), [" Coloured regions", " Bubbles", " Value labels", " Legend"]);
   assert.equal(context.regionsCheck.getValue(), true);
@@ -5113,15 +5238,13 @@ test("preview options: double-click zoom can be turned off; frame off hides the 
 // ---- Preview in the Map tab ----------------------------------------------------------
 function mapPageHas(context, widget) { return holds(context.sectionPages.pages[0], widget); }
 
-test("Map tab: the preview sits between Search and the Jump here row, with no Camera heading", () => {
+test("Map tab: the preview sits in its own panel under Search, then Jump here and Create map here", () => {
   const { context } = buildSandbox({ setup: installNe });
-  const items = context.sectionPages.pages[0]._items;
-  const texts = items.map((w) => (w._items && w._items[0] && w._items[0].getText ? w._items[0].getText() : null));
-  const iSearch = texts.indexOf("Search"), iPreview = texts.indexOf("Preview (drag to move)");
-  const iJump = items.findIndex((w) => holds(w, context.jumpBtn));
-  assert.ok(iSearch >= 0 && iSearch < iPreview && iPreview < iJump);
-  assert.equal(texts.indexOf("Camera"), -1, "no Camera heading");
-  assert.ok(items.indexOf(context.preview.layout) === iPreview + 1 && iJump === iPreview + 2, "the Jump here row follows the preview directly");
+  const panels = panelsOf(context, context.sectionPages.pages[0]);
+  assert.deepEqual(panels.map((p) => panelHeadings(context, p)[0]), [undefined, "Search", "Preview (drag to move)", "Camera", "Style"]);
+  const items = panelContents(panels[2]);
+  assert.equal(items[1], context.preview.layout, "the preview follows its heading");
+  assert.ok(holds(items[2], context.jumpBtn) && items[3] === context.createHereBtn);
   assert.ok(mapPageHas(context, context.preview._draw));
 });
 
@@ -5328,20 +5451,22 @@ test("Map tab: picking a result centres the preview on it; picking World view fo
 test("Map tab: the preview follows the tab bar's width when the panel is resized", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
   assert.equal(typeof ui.onResize, "function");
-  context.sectionTabs.widget._width = 480;
+  context.sectionTabs.widget._width = 500;
   ui.onResize();
-  assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
-  context.sectionTabs.widget._width = 300;
+  assert.deepEqual(plain(context.preview._draw._size), [480, 270], "tab bar width minus the 20 px panel inset");
+  assert.deepEqual(plain(context.pinsPreview._draw._size)[0], 480);
+  assert.deepEqual(plain(context.routesPreview._draw._size)[0], 480);
+  context.sectionTabs.widget._width = 320;
   ui.onResize();
   assert.deepEqual(plain(context.preview._draw._size), [300, 169]);
 });
 
 test("Map tab: the preview shrinks back when the panel gets narrower", () => {
   const { context, ui } = buildSandbox({ setup: installNe });
-  context.sectionTabs.widget._width = 480;
+  context.sectionTabs.widget._width = 500;
   ui.onResize();
   assert.deepEqual(plain(context.preview._draw._size), [480, 270]);
-  context.sectionTabs.widget._width = 260;
+  context.sectionTabs.widget._width = 280;
   ui.onResize();
   assert.deepEqual(plain(context.preview._draw._size), [260, 146]);
 });
@@ -5371,7 +5496,9 @@ test("Map tab Style: the section sits at the bottom of the Map tab, built-ins li
   assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
   assert.equal(context.mapStylePicker.getValue(), 0);
   const items = context.sectionPages.pages[0]._items;
-  const last = items.slice(-4, -1); // the Tips row closes the tab
+  const stylePanel = items[items.length - 2]; // the Tips row closes the tab
+  assert.ok(context.GeoStyle.isPanel(stylePanel));
+  const last = panelContents(stylePanel);
   assert.ok(context.GeoStyle.isHeading(last[0]));
   assert.ok(holds(last[1], context.mapStylePicker) && holds(last[1], context.applyStyleBtn));
   assert.ok(holds(last[2], context.styleNameField) && holds(last[2], context.saveStyleBtn) && holds(last[2], context.deleteStyleBtn));
@@ -6153,7 +6280,7 @@ test("controls: Bake updates the picked map's Controls, and doesn't need a picke
   assert.deepEqual(calls, [map.cameraId]);
   context.GeoControlPanel.sync = () => { throw new Error("boom"); };
   context.bakeBtn.onClick();
-  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+  assert.match(context.statusLabel.getText(), /^Baked 1 layer\(s\) .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Map tab\) to try again\.$/);
 });
 
 test("controls: without user data, sync says this Cavalry can't do it", () => {
@@ -6193,12 +6320,12 @@ test("controls: a failed update keeps the action and says how to retry", () => {
   context.pinCoordBtn.onClick();
   const map = context.GeoScene.findMaps()[0];
   assert.equal(context.GeoScene.findMapLayers(map).filter((l) => l.meta.category === "pin").length, 1);
-  assert.match(context.statusLabel.getText(), /^Pin added at .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Layers tab\) to try again\.$/);
+  assert.match(context.statusLabel.getText(), /^Pin added at .*\. Its controls couldn't be updated: boom\. Press Refresh controls \(Map tab\) to try again\.$/);
 });
 
-test("controls: Refresh controls lives on the Layers tab and (re)builds the Controls", () => {
+test("controls: Refresh controls lives on the Map tab and (re)builds the Controls", () => {
   const { context, api } = buildSandbox();
-  assert.ok(holds(context.sectionPages.pages[1], context.refreshControlsBtn));
+  assert.ok(holds(context.sectionPages.pages[0], context.refreshControlsBtn));
   context.refreshControlsBtn.onClick();
   assert.equal(context.statusLabel.getText(), NO_MAP);
   createWorldMap(context);
@@ -8775,14 +8902,14 @@ test("Start here: widgets without setHidden don't break the panel", () => {
   assert.equal(settingsOf(api).showTips, false);
 });
 
-test("no panel text contains < (Cavalry reads it as a tag), and the Controls note has the new wording", () => {
+test("no panel text contains < (Cavalry reads it as a tag), and the Controls note is gone", () => {
   const { context, ui } = buildSandbox();
   const texts = [];
   walkUi(ui._root(), (n) => { if (n instanceof ui.Label) texts.push(n.getText()); });
   walkUi(ui._root(), (n) => { if (n instanceof ui.Button) texts.push(n.getText()); });
   assert.ok(texts.length > 30, "labels were found");
   texts.forEach((t) => assert.ok(!/</.test(t), "text with <: " + t));
-  assert.ok(texts.indexOf("Each map's settings in one place: select \"(map name) Map controls\" (or its Overlay, Data and Extract controls) in the Scene Window.") >= 0);
+  assert.ok(!texts.some((t) => /Each map's settings in one place/.test(t)));
 });
 
 // ---- Highlights: change effect in place ----------------------------------------------
@@ -9701,12 +9828,13 @@ const nearly = (a, b) => { assert.equal(a.length, b.length); a.forEach((p, i) =>
 
 test("Map tab: Easing / Zoom-out and Drift rows sit right after the Fly row with the exact choices", () => {
   const { context, ui } = buildSandbox();
-  const items = context.sectionPages.pages[0]._items;
+  const items = panelContents(panelsOf(context, context.sectionPages.pages[0])[3]);
   const flyRow = items.filter((n) => n instanceof ui.HLayout && holds(n, context.flyBtn))[0];
   const i = items.indexOf(flyRow);
   assert.equal(items[i + 1], context.flyNote);
-  assert.ok(holds(items[i + 2], context.easingPicker) && holds(items[i + 2], context.arcPicker) && holds(items[i + 2], context.updateFlightBtn));
-  assert.ok(holds(items[i + 3], context.driftPicker) && holds(items[i + 3], context.driftBtn));
+  assert.ok(holds(items[i + 2], context.easingPicker) && holds(items[i + 3], context.arcPicker));
+  assert.equal(items[i + 4], context.updateFlightBtn);
+  assert.ok(holds(items[i + 5], context.driftPicker) && holds(items[i + 5], context.driftBtn));
   assert.equal(context.easingLabel.getText(), "Easing");
   assert.equal(context.arcLabel.getText(), "Zoom-out");
   assert.equal(context.driftLabel.getText(), "Drift move");
