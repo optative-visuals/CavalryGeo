@@ -2740,16 +2740,29 @@ var GeoScene = (function () {
     var at = A.CAMERA_ARRAY_ATTR + "." + GeoExpression.inputIndex(GeoExpression.NIGHT_OPACITY_INPUTS, "lights");
     return (f.helpers || []).filter(Boolean).map(function (h) { return { id: h, attr: at }; });
   }
+  // The rank of one day & night group, compared item by item (ranksAbove): whether its record names at least one of its own
+  // members; the share of the expected members its record names (version 1: 8, the 4 layers and 4 helpers; version 2: 2, the
+  // Night rectangle and filter); then the share it adopted. Both versions are on this one scale, so the score never depends
+  // on the version.
+  function dayNightRank(m, v2) {
+    var expected = v2 ? 2 : 8;
+    return [m.recorded > 0 ? 1 : 0, m.recorded / expected, m.adopted / expected];
+  }
+  // True when rank a sorts above rank b (the first item that differs decides; equal ranks are not above).
+  function ranksAbove(a, b) {
+    for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
+    return false;
+  }
   // The day & night group of this map: { version: 2, groupId, night, filter, label } (night or filter null when gone),
   // or for a version 1 group { version: 1, groupId, layers, helpers, blurs, blurHelper, mask, label, holder }. With more
-  // than one group (a duplicate), the one whose record names its own members wins, then the one owning the most members
-  // of its own; a tie goes to the top one. A copy's record is pointed at the members it adopted.
+  // than one group (a duplicate), the one whose record names its own members wins (dayNightRank), a tie going to the top one.
+  // The ranking is the same for both versions (see dayNightRank), so an upgraded original still beats its old copy.
   function findDayNight(map) {
     var best = null;
     dayNightGroups(map).forEach(function (g) {
       var rec = userData(g, DAYNIGHT_KEY) || {}, v2 = rec.version === 2;
-      var m = v2 ? dayNightMembersV2(map, g, rec) : dayNightMembers(map, g, rec), score = 2 * m.recorded + m.adopted;
-      if (!best || score > best.score) best = { g: g, rec: rec, m: m, score: score, v2: v2 };
+      var m = v2 ? dayNightMembersV2(map, g, rec) : dayNightMembers(map, g, rec), rank = dayNightRank(m, v2);
+      if (!best || ranksAbove(rank, best.rank)) best = { g: g, rec: rec, m: m, rank: rank, v2: v2 };
     });
     if (!best) return null;
     var g = best.g, rec = best.rec, m = best.m;

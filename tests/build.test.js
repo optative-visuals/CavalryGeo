@@ -10824,6 +10824,21 @@ test("day & night (duplicate): an empty copy with the original's record is never
   assert.equal(G.findDayNight(map).groupId, a);
 });
 
+test("day & night (duplicate): a Refresh upgrades the original, and the upgraded original stays the one the Time controls drive", () => {
+  const { context, api } = buildSandbox();
+  const map = dnMap(context), G = context.GeoScene;
+  const { a, b } = duplicateDayNight(api, context, map);
+  assert.equal(G.findDayNight(map).groupId, a, "the original wins before the first Refresh");
+  context.syncControls(map);
+  assert.equal(G.findDayNight(map).groupId, a, "the original is the winner after the first Refresh");
+  assert.equal(G.findDayNight(map).version, 2, "and the original is now version 2");
+  assert.equal(dnRec(api, a).version, 2);
+  assert.equal(dnRec(api, b).version, undefined, "the copy is left as it was");
+  context.syncControls(map);
+  assert.equal(G.findDayNight(map).groupId, a, "the original is still the winner after a second Refresh");
+  assert.equal(G.findDayNight(map).version, 2);
+});
+
 test("day & night: Add with every night layer deleted upgrades the overlay to the Night rectangle and filter, with the time (version 1 to 2)", () => {
   const { context, api } = buildSandbox();
   const map = dnMap(context), G = context.GeoScene;
