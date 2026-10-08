@@ -42,8 +42,8 @@ function column(items) {
   var panelSeen = false;
   items.forEach(function (w, i) {
     if (i > 0 && GeoStyle.isHeading(w) && typeof v.addSpacing === "function") v.addSpacing(4);
-    // 10 px between panels; never above the first one (the Map tab's hidden Start here tips come before it).
-    if (GeoStyle.isPanel(w)) { if (panelSeen && typeof v.addSpacing === "function") v.addSpacing(6); panelSeen = true; }
+    // 5 px between panels (4 + 1); never above the first one (the Map tab's hidden Start here tips come before it).
+    if (GeoStyle.isPanel(w)) { if (panelSeen && typeof v.addSpacing === "function") v.addSpacing(1); panelSeen = true; }
     v.add(w);
   });
   if (typeof v.addStretch === "function") v.addStretch(); // controls pack at the top

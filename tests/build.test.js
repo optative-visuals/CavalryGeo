@@ -4212,7 +4212,7 @@ test("no heading has a rule: a heading row holds only labels", () => {
   assert.ok(seen >= 15, "headings were found");
 });
 
-test("panels sit 10 px apart in a page column (4 + 6) and each packs its items 4 apart, 8 more before a later heading", () => {
+test("panels sit 5 px apart in a page column (4 + 1) and each packs its items 4 apart, 8 more before a later heading", () => {
   const { context } = buildSandbox();
   const columns = allColumns(context);
   assert.equal(columns.length, 8);
@@ -4225,8 +4225,8 @@ test("panels sit 10 px apart in a page column (4 + 6) and each packs its items 4
       if (!context.GeoStyle.isPanel(item)) return;
       panels++;
       const mine = spacings.filter((s) => s.at === i);
-      if (i === firstPanel && i === 0) assert.equal(mine.length, 0, "column " + c + ": a first panel gets no extra space");
-      else if (i !== firstPanel) assert.deepEqual(plain(mine), [{ at: i, px: 6 }], "column " + c + " panel at " + i);
+      if (i === firstPanel) assert.equal(mine.length, 0, "column " + c + ": a first panel gets no extra space, even after hidden tips");
+      else if (i !== firstPanel) assert.deepEqual(plain(mine), [{ at: i, px: 1 }], "column " + c + " panel at " + i);
       const inner = item._layout;
       assert.equal(inner._spacing, 4, "panel spacing");
       panelContents(item).forEach((w, j) => {
