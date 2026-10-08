@@ -210,3 +210,8 @@ test("buildPath with nearest: a single point across the date line is drawn on th
   const plainOps = R.buildPath(enc, cam({ lon: -179.9 }), 100, { pointRadius: 0 }, FakePath).ops;
   assert.ok(Math.abs(plainOps[0][1]) > 128, "without nearest the point is still drawn on the far copy");
 });
+
+test("projectNearest treats a negative projection as Mercator, like makeProjector", () => {
+  const c = cam({ lon: 179.9, projection: -1 });
+  assert.deepEqual(R.projectNearest(179.5, 10, c), R.projectPoint(P.nearestLon(179.5, 179.9), 10, c));
+});

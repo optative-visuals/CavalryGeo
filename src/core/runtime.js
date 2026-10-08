@@ -7,6 +7,7 @@ var GeoRuntime = (function () {
 
   function buildPath(enc, cam, detail, opts, PathCtor) {
     var path = new PathCtor();
+    // opts.nearest folds each point separately, so it is only for point and text layers (single things).
     var project = (opts && opts.nearest) ? nearestProjector(cam) : GeoProjection.makeProjector(cam);
     var d = Math.max(0, Math.min(100, Number(detail) || 0));
     var count = Math.ceil(d / 100 * enc.f.length);
@@ -122,7 +123,7 @@ var GeoRuntime = (function () {
 
   // A projector that, on flat maps, folds each longitude onto the copy nearest the camera first.
   function nearestProjector(cam) {
-    var project = GeoProjection.makeProjector(cam), flat = Math.round(cam.projection || 0) === 0;
+    var project = GeoProjection.makeProjector(cam), flat = Math.max(0, Math.min(2, Math.round(cam.projection || 0))) === 0;
     return function (lon, lat, out) { return project(flat ? GeoProjection.nearestLon(lon, cam.lon) : lon, lat, out); };
   }
 

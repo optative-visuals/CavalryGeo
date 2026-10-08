@@ -9543,6 +9543,25 @@ test("nearest copy: pins, labels and callout places use projectNearest; route st
   assert.ok(pin && text);
 });
 
+test("old-style route stops keep the global placement; standalone pins and labels use the nearest copy", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins, labels) is what this checks
+  const G = context.GeoScene, map = calloutMap(context);
+  const standalone = G.addPin(map, "Solo", 179.5, 0);
+  const r = G.createRoute(map, [{ name: "A", lon: 170, lat: 0 }, { name: "B", lon: -170, lat: 0 }], { lift: 30, pins: true, labels: true });
+  const pins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
+  assert.equal(pins.length, 2);
+  pins.forEach((id) => {
+    const expr = String(api.get(id, "generator.expression"));
+    assert.ok(!expr.includes("GeoRuntime.projectNearest(") && !expr.includes("nearest: true"), "old-route pin keeps the global placement");
+  });
+  const labelDriver = api._connections.map((c) => Array.from(c)).find((c) => c[3] === "position" && String(api.getNiceName(c[2])) === "A");
+  assert.ok(labelDriver, "old-route stop label has a position driver");
+  const labelExpr = String(api.get(labelDriver[0], "expression"));
+  assert.ok(!labelExpr.includes("GeoRuntime.projectNearest(") && labelExpr.includes("GeoRuntime.projectPoint("), "old-route label keeps the global placement");
+  assert.ok(String(api.get(standalone, "generator.expression")).includes("nearest: true"), "a standalone pin uses the nearest copy");
+});
+
 test("callouts: createCallout makes a numbered group with every member named and parented", () => {
   const { context, api } = buildSandbox();
   const map = calloutMap(context), G = context.GeoScene;

@@ -154,9 +154,10 @@ var GeoScene = (function () {
     return enc;
   }
 
-  function addPin(map, name, lon, lat, parentId) {
+  // nearest (default true): the pin sits on the copy nearest the camera; false keeps the old global placement (old-style route stops).
+  function addPin(map, name, lon, lat, parentId, nearest) {
     var enc = GeoCodec.encodeLayer({ kind: "point", features: [{ name: name, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, true);
+    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, nearest !== false);
   }
 
   function createRouteLeg(map, parentId, name, enc, lift) {
@@ -388,8 +389,8 @@ var GeoScene = (function () {
     stops.forEach(function (s) {
       if (seen.some(function (p) { return samePlace(p, s); })) return;
       seen.push(s);
-      if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId);
-      if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId);
+      if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId, false);
+      if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId, false);
     });
     if (typeof api.setUserData === "function") {
       // The helpers made are always recorded. One that can't be wired is deleted again (by
@@ -722,7 +723,8 @@ var GeoScene = (function () {
     return id;
   }
 
-  function createLabel(map, text, lon, lat, parentId) {
+  // nearest (default true): as addPin; false for old-style route stop labels, which are drawn unwrapped.
+  function createLabel(map, text, lon, lat, parentId, nearest) {
     var parent = parentId || map.groupId;
     if (A.LABEL_MODE === "driver") {
       var textId = api.create(A.TEXT_LAYER_TYPE, text);
@@ -730,7 +732,7 @@ var GeoScene = (function () {
       applyStyle(textId, layerStyle(map, "label"));
       var driverId = api.create(A.CAMERA_LAYER_TYPE, text + " position");
       addInputs(driverId, A.CAMERA_ARRAY_ATTR, GeoExpression.LABEL_INPUTS, { labelLon: lon, labelLat: lat });
-      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN, { nearest: true }));
+      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN, { nearest: nearest !== false }));
       connectCamera(map.cameraId, driverId, A.CAMERA_ARRAY_ATTR);
       api.connect(driverId, A.DRIVER_OUTPUT_ATTR, textId, "position", true);
       // A second helper sets the text's opacity: 0 when its place is behind the globe.
@@ -748,7 +750,7 @@ var GeoScene = (function () {
       return textId;
     }
     var enc = GeoCodec.encodeLayer({ kind: "text", features: [{ name: text, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, true);
+    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, nearest !== false);
   }
 
   // Newly created layers land on top of the group, which can bury an existing pin,
