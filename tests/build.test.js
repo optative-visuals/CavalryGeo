@@ -12466,3 +12466,54 @@ test("night lights in the panel: the imagery credit includes the NASA credit whe
   context.imageryAttrBtn.onClick();
   assert.match(context.statusLabel.getText(), /NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\)/);
 });
+test("night lights in the panel: when planning night lights throws, Add day & night keeps its message and says why", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  context.GeoScene.planNightLights = () => { throw new Error("Too many images."); };
+  context.addDayNightBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Day & night updated to .*. Night lights didn't download: Too many images. Build imagery or Refresh controls tries again.$/);
+  assert.equal(api._timers.some((t) => t.active), false);
+});
+
+test("night lights in the panel: when planning night lights throws after a day build, the build message keeps its result", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.GeoNet.cachedTile = () => null;
+  context.GeoScene.addDayNight(context.currentMap(), { dayOfYear: 80, utcTime: 12 });
+  context.GeoScene.planNightLights = () => { throw new Error("Too many images."); };
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  runSeen(context, api);
+  assert.match(context.statusLabel.getText(), /^Imagery built: .* Night lights didn't download: Too many images. Build imagery or Refresh controls tries again.$/);
+  assert.equal(api._timers.some((t) => t.active), false);
+});
+
+test("night lights in the panel: Add day & night while the night download runs says only its message", () => {
+  const { context, api } = buildSandbox();
+  satellitePanelMap(context, api);
+  captureTileUrls(context, api);
+  context.addDayNightBtn.onClick();
+  context.addDayNightBtn.onClick();
+  assert.match(context.statusLabel.getText(), /^Day & night updated to /);
+  assert.doesNotMatch(context.statusLabel.getText(), /Refresh controls then|will follow/);
+  runSeen(context, api);
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map /);
+});
+
+test("night lights in the panel: Add day & night while a day build runs says night lights follow it", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  fakeTileDownloads(context, api);
+  context.GeoNet.cachedTile = () => null;
+  context.GeoScene.addDayNight(context.currentMap(), { dayOfYear: 80, utcTime: 12 });
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  context.addDayNightBtn.onClick();
+  // Night lights are not wanted until the day imagery is built, so the running build adds them at its end.
+  assert.match(context.statusLabel.getText(), /^Day & night updated to /);
+  runSeen(context, api);
+  assert.match(context.statusLabel.getText(), /^Night lights added to Map /);
+});

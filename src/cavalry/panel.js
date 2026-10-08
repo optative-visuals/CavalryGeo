@@ -1738,8 +1738,9 @@ function itemNoun(plan) { return plan.mode === "images" ? "images" : "tiles"; }
 function ImageryTimerCallbacks() {
   this.onTimeout = function () {
     try { if (imageryState.tick) imageryState.tick(); } catch (e) {
+      var night = imageryState.night, msg = e && e.message ? e.message : e;
       stopImageryTimer(); resetImageryPlan();
-      say("Error: " + (e && e.message ? e.message : e));
+      say(night ? "Night lights didn't download: " + msg + " Build imagery or Refresh controls tries again." : "Error: " + msg);
     }
     if (!imageryState.timer) followActiveComp(false, true); // the job just ended: catch up silently, so its result message stays
   };
@@ -1786,12 +1787,18 @@ function failLine(plan, text) {
 // download, so no dialog and no plan signature. While another imagery job runs, they wait for Refresh controls.
 function startNightLights(map, lead) {
   if (imageryState.timer) {
-    say(lead + " Night lights will be added when the current imagery job ends — press Refresh controls then.");
+    // Night lights already on their way, or a day build that will chain them when it ends.
+    say(imageryState.night ? lead : lead + " Night lights will follow when the current imagery job ends.");
     return;
   }
-  var plan = GeoScene.planNightLights(map);
-  plan.sig = null;
-  startImageryDownload(map, GeoSources.night(), {}, plan);
+  try {
+    var plan = GeoScene.planNightLights(map);
+    plan.sig = null;
+    startImageryDownload(map, GeoSources.night(), {}, plan);
+  } catch (e) {
+    stopImageryTimer(); resetImageryPlan();
+    say(lead + " Night lights didn't download: " + (e && e.message ? e.message : e) + " Build imagery or Refresh controls tries again.");
+  }
 }
 
 function startImageryBuild(map, src, opts, plan, missing, failed) {
@@ -1817,7 +1824,7 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
       var nightNote = syncControls(map);
       say("Night lights added to " + map.name + " (NASA Black Marble 2016, public domain)." +
         (plan.zoomCapped ? " Night lights use zoom 8, NASA's most detailed, so close-ups are softer." : "") +
-        (failed ? " " + failed + " tile(s) didn't download. Build imagery or Refresh controls tries again." : "") + nightNote);
+        (failed ? " " + failed + " tile(s) didn't download — delete the Night lights group (inside Day & night) and press Refresh controls to try again." : "") + nightNote);
       return;
     }
     // A street style (not satellite) makes night lights orphaned: they go. Satellite with Day & night and none yet: they follow.
@@ -1830,9 +1837,8 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
       " Credit: " + GeoSources.attribution(src, opts) + note + gone;
     if (st.wanted && !st.night.length) {
-      var lead = text + " Adding night lights…";
-      say(lead);
-      startNightLights(map, lead);
+      say(text + " Adding night lights…");
+      startNightLights(map, text);
     } else say(text);
   });
 }
@@ -2011,13 +2017,13 @@ cancelImageryBtn.onClick = guardAction(function () {
   followActiveComp(false);
 }, false, true);
 
-
 imageryAttrBtn.onClick = guardAction(function () {
   disarmClearTiles();
-  var src = currentSource(), map = currentMap(), text = GeoSources.attribution(src, sourceOptions(src));
+  var src = currentSource(), text = GeoSources.attribution(src, sourceOptions(src));
+  if (!text) throw new Error("Type a credit for the custom tiles first.");
+  var map = currentMap();
   // Night lights, when the map has any, are credited too.
   if (GeoScene.findNightLights(map).length) text = [text, GeoSources.night().attribution].filter(Boolean).join(" · ");
-  if (!text) throw new Error("Type a credit for the custom tiles first.");
   GeoScene.createImageryCredit(map, text);
   say("Added the imagery credit: " + text);
 });
