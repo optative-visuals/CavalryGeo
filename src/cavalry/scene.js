@@ -1216,6 +1216,9 @@ var GeoScene = (function () {
     // Night lights: each night tile (or the bent reference) is matted by the four night layers, so it
     // shows only where they are dark. Nothing happens for day imagery (mattes is empty).
     function matte(id) { mattes.forEach(function (m) { api.connect(m, "id", id, "trackMattes"); }); }
+    // Cavalry hides a layer when it becomes a matte, so the four night layers are shown again once the build
+    // is done with them (completed, cancelled or failed). The Night mask is not one of them and stays hidden.
+    function showMattes() { mattes.forEach(function (m) { if (layerThere(m)) setHidden(m, false); }); }
 
     // Measured in Cavalry: any step that loads an asset is followed by a ~3.6 s rescan of
     // all assets, however many it loaded, so every tile's asset is loaded in the first step.
@@ -1328,6 +1331,7 @@ var GeoScene = (function () {
         });
       });
       if (bent) for (var k = 1; k < VIEW_DRIVERS.length; k++) viewDriver(k);
+      showMattes();
       setHidden(outer, false);
       if (!night) sendImageryToBack(map); // night lights stay on top of their Day & night group
       try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
@@ -1380,6 +1384,7 @@ var GeoScene = (function () {
         // A failed build or discard tears the new (partial) group down in one call and
         // leaves the old imagery alone. A failed cleanup keeps the finished new imagery.
         if (phase !== "cleanup") {
+          try { showMattes(); } catch (e2) { /* already failing */ }
           if (outer) { try { deleteIfThere(outer); } catch (e2) { /* already failing */ } }
           if (filter) { try { deleteIfThere(filter); } catch (e2) { /* already failing */ } }
           if (sourceComp) { try { api.deleteLayer(sourceComp); } catch (e2) { /* already failing */ } }
@@ -1396,6 +1401,7 @@ var GeoScene = (function () {
     function cancel() {
       if (phase === "discard" || phase === "cancelled") return true;
       if (phase !== "tiles" && phase !== "drivers") return false;
+      try { showMattes(); } catch (e) { /* cosmetic: the layers are left as they are */ }
       var mine = { groupId: outer, meta: bent ? { bent: true, sourceComp: sourceComp } : null };
       pending = outer && layerThere(outer) ? teardownEntries(mine, mapComp) : [];
       phase = pending.length ? "discard" : "cancelled";

@@ -200,6 +200,8 @@ function makeFakeApi() {
       connections.push([a, b, c, d]);
       // Like Cavalry: a layer that feeds a duplicator's shapes list is hidden.
       if (d === "shapes" && b === "id") ensure(a).hidden = true;
+      // Like Cavalry: a layer connected as a track matte is hidden (its own visibility is set back by hand).
+      if (b === "id" && /^trackMattes\.\d+$/.test(d)) ensure(a).hidden = true;
     },
     disconnect: function (a, b, c, d) {
       for (var i = connections.length - 1; i >= 0; i--) { var k = connections[i]; if (k[0] === a && k[1] === b && k[2] === c && k[3] === d) connections.splice(i, 1); }
@@ -12235,6 +12237,43 @@ test("night lights: a night build without Day & night throws the message and lea
   assert.throws(() => G.buildImagery(map, context.GeoSources.night(), {}, plan),
     (e) => e.message === "Night lights need a Day & night overlay — press Add day & night first.");
   assert.deepEqual(api.getChildren(map.groupId), kidsBefore);
+  assert.equal(G.findNightLights(map).length, 0);
+});
+
+// Cavalry hides a layer when it becomes a track matte, so the build sets the four night layers visible again
+// (the Night mask is a different layer and stays hidden).
+test("night lights: a flat build leaves the four night layers shown (Cavalry hid them as mattes) and the Night mask hidden", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(rec.layers.length, 4);
+  rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown"));
+  assert.equal(api.get(G.findDayNight(map).mask, "hidden"), true, "Night mask stays hidden");
+});
+
+test("night lights: a bent build leaves the four night layers shown and the Night mask hidden", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("World", { lat: 0, lon: 170, zoom: 3, rotation: 0, projection: 2 });
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const rec = dnRec(api, G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId);
+  G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(rec.layers.length, 4);
+  rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown"));
+  assert.equal(api.get(G.findDayNight(map).mask, "hidden"), true, "Night mask stays hidden");
+});
+
+test("night lights: a cancelled night build leaves the four night layers shown", () => {
+  const { context, api, map, rec } = nightFixture(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  job.step(0); // the group and its first tile are in, so the first layer is already a matte
+  assert.equal(api.get(rec.layers[0], "hidden"), true, "a matte source is hidden mid-build");
+  job.cancel();
+  stepToEnd(job, 0);
+  rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown after cancel"));
   assert.equal(G.findNightLights(map).length, 0);
 });
 
