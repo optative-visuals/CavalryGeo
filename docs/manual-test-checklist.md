@@ -110,7 +110,7 @@ adding street layers.
 - [ ] 19o3. Day & night: on the globe, zoom in so the soft edge of the night reaches the rim → the shading stops
       cleanly at the rim, with no dark halo outside the globe. On Equal Earth the same at the oval's edge. The Time label is
       not clipped, and the group holds no "Night mask" layer.
-- [ ] 19p. Select a night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
+- [ ] 19p. Select the Night layer or the Time label → **Bake** says "Day & night redraws from its time, so it can't be
       baked."; Extract's layer list does not show them.
 - [ ] 19o4. Day & night (twilight on): no light ring just inside the globe's rim, the Equal Earth oval or the flat
       map edge on the night side.
@@ -123,8 +123,7 @@ adding street layers.
 - [ ] 19r. Night lights, flat: pan and zoom → the lights fade through the twilight with the terminator and do not show
       on the sunlit side. Zoom past 8 → the status line says NASA's data stops at zoom 8.
 - [ ] 19s. Night lights, globe and Equal Earth: without the Cavalry Geo Reproject plugin, Build stops and asks for it;
-      on a bent map without the plugin, Add day & night keeps its message and the status reads "Night lights didn't
-      download: …needs the Cavalry Geo Reproject plugin…". With it installed, the lights bend to the rim and oval with
+      without the plugin, Add day & night builds nothing (see NF1). With it installed, the lights bend to the rim and oval with
       no ring outside them. Flight across the date line (lon 170 to -170) → the lights stay continuous.
 - [ ] 19t. Vector map (Mapbox streets, Natural Earth only) or a custom tile link: no Night lights group is added and
       the classic darkening stays.
@@ -150,10 +149,10 @@ Night filter is checked here.
       the download into the Cavalry window once, then press Add day & night again." Install the plugin, press
       **Add day & night** again → the "Day & night" group builds with one "Night" layer.
 - [ ] NF2. The Night filter compiles: no shader error in the status line or the Cavalry window, and the Night layer
-      shades the night side on flat, Equal Earth and globe. Live check 2: the terminator sits in the same place as the
+      shades the night side on flat, Equal Earth and globe. Live check 2a: the terminator sits in the same place as the
       old 0° edge on all three projections, at several dates, rotations and zooms (compare with a v0.9 overlay at the
       same date and view if one is handy).
-- [ ] NF3. Live check 2: the twilight curve feels right. With Twilight at 1 the edge darkens fast just past the terminator
+- [ ] NF3. Live check 2b: the twilight curve feels right. With Twilight at 1 the edge darkens fast just past the terminator
       and reaches full Night opacity about 18° below the horizon, with no visible bands. Twilight 0 → hard edge; 0.5 →
       a narrower band. The slider moves in 0.01 steps. If the feel is wrong, change TAU in
       plugin/CavalryGeo_plugin/night.sksl and in src/core/night.js (both together), rebuild, and repeat this item.

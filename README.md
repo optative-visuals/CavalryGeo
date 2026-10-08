@@ -58,6 +58,8 @@ editable shape. The panel tells you when a new version is out.
 2. In Cavalry, choose **Help → Show Scripts Folder**, and drag **CavalryGeo.js** and the
    **CavalryGeo_assets** folder straight into it.
 3. Open **Scripts → CavalryGeo**. No restart needed.
+4. Drag the **CavalryGeo_plugin** folder into the Cavalry window once (needed for Day & night, and for
+   imagery on the globe and Equal Earth).
 
 Updating? Replace CavalryGeo.js, and merge the new CavalryGeo_assets folder into the old one (on a Mac, hold Option while dragging and choose Merge) so your downloaded maps and imagery stay. Your settings (keys, saved styles) are kept elsewhere, in Cavalry's app-data folder, so an update never touches them.
 Tested with Cavalry on Windows and macOS.

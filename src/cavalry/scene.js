@@ -2571,11 +2571,12 @@ var GeoScene = (function () {
   }
 
   // ---- Day & night ---------------------------------------------------------------------------
-  // One overlay per map: a group "Day & night" in the map group holding four night layers (one per
-  // twilight depression, since a Cavalry shape has a single opacity) and a helpers group with one
-  // opacity helper per layer, plus a Fast Blur per layer (all four driven by one "Night blur" helper)
-  // that smooths the steps into a gradient, and a hidden "Night mask" (the Earth's outline) in the group's masks. An optional "Time label" sits in the map group like map
-  // furniture. The group's user data records every member (geoDayNight).
+  // One overlay per map: a group "Day & night" in the map group holding one plain rectangle "Night"
+  // (sized to the composition, its fill is the Night colour) with the Cavalry Geo Night filter on it,
+  // which works out the twilight for every pixel. Night lights (satellite maps) sit above it in their
+  // own group, matted by the Night layer. Overlays made by version 1 (four night layers, helpers, Fast
+  // Blur and a Night mask) are recognised here so they can be upgraded. An optional "Time label" sits
+  // in the map group like map furniture. The group's user data records every member (geoDayNight).
   var DAYNIGHT_KEY = "geoDayNight", TIME_LABEL_NAME = "Time label", NIGHT_DEPRESSIONS = [0, 6, 12, 18];
   // Version 2: one plain rectangle "Night" (its fill is the Night colour; its user data tags it) with the Cavalry Geo Night filter on it.
   // NIGHT_RECT_KEY is not DAYNIGHT_KEY on purpose: the rectangle must not be taken for a day & night group by dayNightGroups.
