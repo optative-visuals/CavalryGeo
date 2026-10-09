@@ -44,23 +44,41 @@ var GeoSources = (function () {
   }
   function fill(template, z, x, y) { return template.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y); }
   function style(src, opts) { return String((opts && opts.style) || "").trim() || src.defaultStyle || ""; }
+  // A custom link must start with http(s):// and contain {z}, {x} and {y}.
+  function validTemplate(t) {
+    return /^https?:\/\//.test(t) && t.indexOf("{z}") >= 0 && t.indexOf("{x}") >= 0 && t.indexOf("{y}") >= 0;
+  }
+  // An empty link is missing; a link that is there but malformed has to be fixed.
+  function badTemplateText(t) {
+    return t ? "The custom tile link must start with https:// and contain {z}, {x} and {y}: fix it in \u2699 Settings."
+      : "Needs a custom tile link: set it in \u2699 Settings.";
+  }
   function customTemplate(opts) {
     var t = String((opts && opts.template) || "").trim();
-    if (!/^https?:\/\//.test(t) || t.indexOf("{z}") < 0 || t.indexOf("{x}") < 0 || t.indexOf("{y}") < 0) {
-      throw new Error("Paste a tile link that starts with https:// and contains {z}, {x} and {y}.");
-    }
+    if (!validTemplate(t)) throw new Error(badTemplateText(t));
     return t;
+  }
+  // What a source still needs from Settings before it can be used, or null when nothing is missing.
+  function missingSetting(src, opts) {
+    opts = opts || {};
+    if (src.id === "maptiler" && !opts.key) return "Needs a MapTiler key: set it in \u2699 Settings.";
+    if (src.id === "mapbox" && !opts.key) return "Needs a Mapbox token: set it in \u2699 Settings.";
+    if (src.id === "custom") {
+      var t = String(opts.template || "").trim();
+      if (!validTemplate(t)) return badTemplateText(t);
+    }
+    return null;
   }
 
   function tileUrl(src, opts, z, x, y) {
     opts = opts || {};
     if (src.id === "maptiler") {
-      if (!opts.key) throw new Error("Paste your MapTiler key first (free at maptiler.com).");
+      if (!opts.key) throw new Error(missingSetting(src, opts));
       var map = style(src, opts);
       return "https://api.maptiler.com/maps/" + encodeURIComponent(map) + "/256/" + z + "/" + x + "/" + y + "@2x.jpg?key=" + encodeURIComponent(opts.key);
     }
     if (src.id === "mapbox") {
-      if (!opts.key) throw new Error("Paste your Mapbox access token first (free at mapbox.com).");
+      if (!opts.key) throw new Error(missingSetting(src, opts));
       var st = style(src, opts);
       if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(st)) throw new Error("Mapbox styles look like mapbox/satellite-v9.");
       return "https://api.mapbox.com/styles/v1/" + st + "/tiles/256/" + z + "/" + x + "/" + y + "@2x?access_token=" + encodeURIComponent(opts.key);
@@ -121,7 +139,7 @@ var GeoSources = (function () {
     return false;
   }
 
-  return { list: list, night: night, isSatellite: isSatellite, byId: byId, tileUrl: tileUrl, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
+  return { list: list, night: night, isSatellite: isSatellite, byId: byId, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
     attribution: attribution, providerName: providerName, extForContentType: extForContentType, extForUrl: extForUrl,
     usesImages: usesImages, imageUrl: imageUrl };
 })();

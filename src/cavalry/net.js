@@ -315,22 +315,149 @@ var GeoNet = (function () {
     return (raw === null ? null : parseSettings(raw)) || {};
   }
   function saveSettings(obj) { ensureDir(settingsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
-  // Merges patch's keys into settings.json, keeping every other key.
-  function updateSettings(patch) {
+  // The settings to change and save back: an unreadable file is copied to .bak and starts again.
+  function editableSettings() {
     var raw = readSettingsRaw(), s = raw === null ? {} : parseSettings(raw);
     if (!s) {
       // The file is there but unreadable: keep a copy before it is replaced.
       s = {};
       if (raw !== null && raw !== "") { try { ensureDir(settingsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
     }
+    return s;
+  }
+  // Merges patch's keys into settings.json, keeping every other key.
+  function updateSettings(patch) {
+    var s = editableSettings();
     Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
     saveSettings(s);
     return s;
+  }
+  // Deletes the given keys from settings.json, keeping every other key.
+  function removeSettings(keys) {
+    var s = editableSettings();
+    (keys || []).forEach(function (k) { delete s[k]; });
+    saveSettings(s);
+    return s;
+  }
+
+  // Opens a folder, or a link, with the system's own handler; true when the request went out. Needs
+  // runDetachedProcess: explorer on Windows (app data on a drive letter), open elsewhere. A link goes unchanged.
+  function openPath(target) {
+    if (typeof api.runDetachedProcess !== "function") return false;
+    try {
+      var t = String(target), isLink = /^[a-z][a-z0-9+.-]*:\/\//i.test(t);
+      var windows = /^[A-Za-z]:\//.test(settingsDir());
+      if (windows && !isLink) t = t.replace(/\//g, "\\");
+      api.runDetachedProcess(windows ? "explorer" : "open", [t]);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ---- Map style files: one JSON file per saved style in the "Map styles" folder --------
+  function stylesDir() { return settingsDir() + "/" + GeoStyleFiles.FOLDER; }
+  // Style files need a Cavalry that can list folders. Without one, saved styles stay in settings.json.
+  function filesSupported() { return typeof api.listDirectoryPaths === "function" || typeof api.listDirectory === "function"; }
+  // The entries of a folder listing with forward slashes. listDirectoryPaths gives full paths; listDirectory may
+  // give bare names, which are put in dir.
+  function listFiles(dir) {
+    var list = typeof api.listDirectoryPaths === "function" ? api.listDirectoryPaths(dir) : api.listDirectory(dir);
+    return (list || []).map(function (p) {
+      var s = String(p).replace(/\\/g, "/");
+      return s.indexOf("/") < 0 ? dir + "/" + s : s;
+    });
+  }
+  // The .json files in the style folder, in path order (the folder is made if it is missing).
+  function listStyleFiles() {
+    var dir = stylesDir();
+    ensureDir(dir);
+    return listFiles(dir).filter(function (p) { return /\.json$/i.test(p); }).sort();
+  }
+  function readText(path) {
+    try { return String(api.readFromFile(path)); } catch (e) { return ""; } // unreadable: skipped by readAll
+  }
+  // Reads the style folder: { styles, skipped, paths, reasons, names } (see GeoStyleFiles.readAll). Paths are
+  // read with forward slashes, in path order, so the first of two same-named files is the one kept.
+  function readStyleFiles() {
+    if (!filesSupported()) return GeoStyleFiles.readAll([]);
+    return GeoStyleFiles.readAll(listStyleFiles().map(function (p) { return { path: p, text: readText(p) }; }));
+  }
+  // Writes a style to its file and returns the path. A style already in the folder is written over its own
+  // file; a new one takes "<name>.json", or "<name> 2.json", "<name> 3.json"... when that name holds another
+  // file, so no other file is ever overwritten.
+  // keepExisting (a move at start-up): when the style's own file is there but the listing missed it, that file is
+  // kept as it is, so a second start doesn't add a "<name> 2.json" copy.
+  function writeStyleFile(style, keepExisting) {
+    var known = readStyleFiles().paths[style.name.toLowerCase()], path = known;
+    if (!path) {
+      var key = style.name.toLowerCase(), dir = stylesDir(), base = GeoStyleFiles.fileName(style.name).replace(/\.json$/, ""), n = 1;
+      ensureDir(dir);
+      path = dir + "/" + base + ".json";
+      while (api.filePathExists(path)) {
+        var held = GeoStyleFiles.fromText(readText(path));
+        if (held && held.name.toLowerCase() === key) { // the listing missed this style's own file
+          if (keepExisting) return path;
+          break;
+        }
+        n++;
+        path = dir + "/" + base + " " + n + ".json";
+      }
+    }
+    api.writeToFile(path, GeoStyleFiles.toText(style), true);
+    // A write that leaves no file (a folder Cavalry refuses to write to) is an error, so the style isn't dropped.
+    if (!api.filePathExists(path)) throw new Error("Couldn't write " + path + ".");
+    return path;
+  }
+  // Removes the style with this name from settings.json's "mapStyles" (the key goes when none is left).
+  function dropSettingsStyle(name) {
+    var s = loadSettings(), key = String(name).trim().toLowerCase();
+    if (!("mapStyles" in s)) return;
+    var keep = GeoStyleFiles.movePlan(s).filter(function (st) { return st.name.toLowerCase() !== key; });
+    if (keep.length) updateSettings({ mapStyles: keep }); else removeSettings(["mapStyles"]);
+  }
+  // Deletes the saved style with this name: every file in the folder that holds it (a name can be on two files
+  // when one was copied in by hand), and its settings.json entry when it has one. Throws when this Cavalry can't
+  // delete files, or a file is still there afterwards. Returns the first file's path ("" if none).
+  function deleteStyleFile(name) {
+    var key = String(name).trim().toLowerCase(), paths = [];
+    // A folder that can't be listed still lets the settings entry go (no file path is known then).
+    try {
+      if (filesSupported()) paths = listStyleFiles().filter(function (p) {
+        var s = GeoStyleFiles.fromText(readText(p));
+        return !!s && s.name.toLowerCase() === key;
+      });
+    } catch (e) { paths = []; }
+    paths.forEach(function (path) {
+      if (typeof api.deleteFilePath !== "function") throw new Error("This Cavalry can't delete files: delete " + path + " by hand.");
+      api.deleteFilePath(path);
+      if (api.filePathExists(path)) throw new Error("Couldn't delete " + path + ": it may be open elsewhere.");
+    });
+    dropSettingsStyle(name);
+    return paths[0] || "";
+  }
+  // Moves the styles in settings.json ("mapStyles") into style files, once. A style whose name is already a file
+  // keeps that file (the folder wins). Each style is then looked for in the folder again: only the ones that are
+  // there leave settings.json, so a style that could not be written stays there for the next start. Nothing moves
+  // when this Cavalry can't list folders. Returns how many were moved.
+  function moveStylesToFiles() {
+    if (!filesSupported()) return 0;
+    var s = loadSettings(), plan = GeoStyleFiles.movePlan(s);
+    if (!plan.length && !("mapStyles" in s)) return 0;
+    var listed = readStyleFiles().paths;
+    plan.forEach(function (style) {
+      if (listed[style.name.toLowerCase()]) return;
+      try { writeStyleFile(style, true); } catch (e) { /* stays in settings.json, checked below */ }
+    });
+    var there = readStyleFiles().paths;
+    var keep = plan.filter(function (style) { return !there[style.name.toLowerCase()]; });
+    if (keep.length) { if (keep.length < plan.length) updateSettings({ mapStyles: keep }); }
+    else if ("mapStyles" in s) removeSettings(["mapStyles"]);
+    return plan.length - keep.length;
   }
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
-    loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
+    loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings, removeSettings: removeSettings,
+    openPath: openPath, settingsDir: settingsDir, stylesDir: stylesDir, filesSupported: filesSupported, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
   };
 })();

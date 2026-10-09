@@ -434,6 +434,9 @@ function makeFakeUi() {
   Draw.prototype.redraw = function () { this._redraws++; };
   Draw.prototype.useHoverEvents = function (on) { this._hover = !!on; }; // like Cavalry: moves with no button held only fire when on
   Container.prototype.geometry = function () { return { x: 0, y: 0, width: this._width || 320, height: 24 }; };
+  // Like Cavalry: a container can show itself as a popover under a point (the cog's settings).
+  Container.prototype.showAsPopover = function (x, y) { this._popoverAt = [x, y]; };
+  Container.prototype.setPreferredPopoverSide = function (s) { this._side = s; };
 
   // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
   // with withModal().
@@ -465,6 +468,8 @@ function makeFakeUi() {
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
+    // Like Cavalry's save dialog: a path, or "" when cancelled. A test sets _saveAnswer.
+    chooseFileToSave: function () { return this._saveAnswer || ""; },
     // Like Cavalry: objects with onCompChanged / onSceneChanged (and more) are called back by the app.
     addCallbackObject: function (o) { (this._callbackObjects = this._callbackObjects || []).push(o); },
     setBackgroundColor: function (c) { this._background = c; },
@@ -560,26 +565,27 @@ function panelHeadings(context, p) {
   return panelContents(p).filter((n) => context.GeoStyle.isHeading(n)).map((n) => n._items[0].getText());
 }
 function pageHeadings(context, col) { return panelsOf(context, col).map((p) => panelHeadings(context, p)); }
-// Every page column: the Map, Imagery and Data pages, then Layers' three and Label's two.
+// Every page column: the Map, Imagery and Data pages, then Layers' three, Label's two and the settings column.
 function allColumns(context) {
   const pages = context.sectionPages.pages;
-  return [pages[0], pages[2], pages[4]].concat(context.layersPages.pages, context.labelPages.pages);
+  return [pages[0], pages[2], pages[4]].concat(context.layersPages.pages, context.labelPages.pages, [context.settingsColumn]);
 }
 
 test("buildPanel() runs against stub ui/api: a five-section tab bar above a page per section", () => {
   const { ui, context } = buildSandbox();
   const root = ui._root();
   assert.ok(root, "buildUi should have called ui.add(root)");
-  const bar = root._items[0], pages = context.sectionPages;
-  assert.ok(bar instanceof ui.Container, "the tab bar is a rounded box");
+  const pages = context.sectionPages;
+  assert.ok(root._items[0]._items[0] instanceof ui.Container, "the tab bar is a rounded box");
   assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"]);
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
-  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips lives on the Map tab).
+  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips is in the settings' Preferences).
   assert.equal(root._items.length, 3);
-  assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
-  assert.ok(holds(pages.pages[0], context.tipsBtn), "Tips is held by the Map page");
+  assert.deepEqual(root._items[0]._items, [context.sectionTabs.widget, context.cogBtn], "the cog sits right of the tab bar");
+  assert.deepEqual(root._items.slice(1), [pages.widget, context.statusLabel]);
+  assert.ok(holds(context.settingsColumn, context.tipsBtn), "Tips is in Preferences");
   assert.equal(root._stretch, 1);
   pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout._items[0], layout, "page " + i)); // inside the coloured page's 8 px inset
   context.showSection("Imagery");
@@ -697,7 +703,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   walkUi(context.sectionPages.pages[0], (n) => { if (n instanceof ui.Button) texts.push(n.getText()); });
-  assert.deepEqual(texts, ["Got it", "Refresh", "Refresh controls", "Search", "Jump here", "Create map here", "Fly here", "Update flight", "Drift", "Apply to map", "Save as style", "Delete style", "Tips"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Refresh controls", "Search", "Jump here", "Create map here", "Fly here", "Update flight", "Drift", "Apply to map", "Save as style", "Delete style"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -4058,14 +4064,54 @@ test("Imagery tab: missing and rejected keys", () => {
   createWorldMap(context);
   context.sourcePicker.setValue(2); // MapTiler
   context.buildImageryBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Paste your MapTiler key first/);
+  assert.equal(context.statusLabel.getText(), "Error: Needs a MapTiler key: set it in \u2699 Settings.");
   context.maptilerKeyField.setText("bad");
   fakeTileDownloads(context, api, 403);
   context.buildImageryBtn.onClick();
   context.buildImageryBtn.onClick();
   runTimers(api);
-  assert.match(context.statusLabel.getText(), /MapTiler rejected your key/);
+  assert.equal(context.statusLabel.getText(), "MapTiler rejected your key — check it in \u2699 Settings.");
   assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});
+
+test("Imagery tab: the key hint sits under the source picker and clears once the key or link is set", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const imagery = context.sectionPages.pages[2];
+  assert.ok(holds(imagery, context.keyHint), "on the Imagery tab");
+  assert.equal(context.keyHint.getText(), "");
+  assert.ok(context.keyHint.isHidden(), "EOX needs nothing");
+  context.sourcePicker.setValue(2); // MapTiler, no key yet
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a MapTiler key: set it in \u2699 Settings.");
+  assert.ok(!context.keyHint.isHidden());
+  context.maptilerKeyField.setText("K1");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(context.keyHint.getText(), "");
+  assert.ok(context.keyHint.isHidden());
+  context.sourcePicker.setValue(3); // Mapbox
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a Mapbox token: set it in \u2699 Settings.");
+  context.mapboxKeyField.setText("T1");
+  context.mapboxKeyField.onValueCommitted();
+  assert.ok(context.keyHint.isHidden());
+  context.sourcePicker.setValue(4); // Custom tile link
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a custom tile link: set it in \u2699 Settings.");
+  context.customUrlField.setText("https://t.example/{z}/{x}/{y}.png");
+  context.customUrlField.onValueCommitted();
+  assert.ok(context.keyHint.isHidden());
+});
+
+test("Imagery tab: without setHidden on Label, the key hint is blank when there is nothing to say", () => {
+  const { context, ui } = buildSandbox();
+  delete ui.Label.prototype.setHidden;
+  context.sourcePicker.setValue(2);
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a MapTiler key: set it in \u2699 Settings.");
+  context.maptilerKeyField.setText("K1");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(context.keyHint.getText(), "");
 });
 
 // ---- Update check -------------------------------------------------------------------
@@ -4464,7 +4510,7 @@ test("each section has its panels, with their headings, in order", () => {
   assert.deepEqual(pageHeadings(context, lp[0]), [["World · Natural Earth"], ["Streets · OpenStreetMap"]]);
   assert.deepEqual(pageHeadings(context, lp[1]), [["Day & night"], ["Map furniture"]]);
   assert.deepEqual(pageHeadings(context, lp[2]), [["Extract"], ["Highlight"], ["Bake"]]);
-  assert.deepEqual(pageHeadings(context, pages[2]), [["Source"], ["Keys and links"], ["Build"]]);
+  assert.deepEqual(pageHeadings(context, pages[2]), [["Source"], ["Build"]]);
   assert.deepEqual(pageHeadings(context, context.labelPages.pages[0]), [["Place"], ["Preview (click to set the spot, drag to move)"], ["At coordinates"]]);
   assert.deepEqual(pageHeadings(context, context.labelPages.pages[1]), [["Stops"], ["Preview (click to add a stop, drag to move)"], ["Style"]]);
   assert.deepEqual(pageHeadings(context, pages[4]), [["Sheet"], ["Columns"], ["Show"], ["Unmatched rows"]]);
@@ -4489,7 +4535,7 @@ test("no heading has a rule: a heading row holds only labels", () => {
 test("panels sit 5 px apart in a page column (4 + 1) and each packs its items 4 apart, 8 more before a later heading", () => {
   const { context } = buildSandbox();
   const columns = allColumns(context);
-  assert.equal(columns.length, 8);
+  assert.equal(columns.length, 9);
   let panels = 0;
   columns.forEach((col, c) => {
     assert.equal(col._spacing, 4, "column " + c);
@@ -4551,12 +4597,13 @@ test("Layers has a tab bar Add / Overlays / Extract that switches its pages and 
   assert.ok(holds(context.sectionPages.pages[1], context.layersTabs.widget) && holds(context.sectionPages.pages[1], context.layersPages.widget));
 });
 
-test("buttons that moved: Refresh controls is in the Map tab's first panel, Clear download cache in the Streets panel", () => {
+test("buttons that moved: Refresh controls is in the Map tab's first panel, Clear download cache in Settings' Storage", () => {
   const { context } = buildSandbox();
   const mapPanels = panelsOf(context, context.sectionPages.pages[0]);
   assert.ok(holds(mapPanels[0], context.refreshControlsBtn) && holds(mapPanels[0], context.mapPicker) && holds(mapPanels[0], context.projPicker));
   const streets = panelsOf(context, context.layersPages.pages[0])[1];
-  assert.ok(holds(streets, context.clearCacheBtn) && holds(streets, context.addLayersBtn));
+  assert.ok(holds(streets, context.addLayersBtn) && !holds(streets, context.clearCacheBtn), "Clear download cache left the Streets panel");
+  assert.ok(holds(panelsOf(context, context.settingsColumn)[2], context.clearCacheBtn), "it is in Settings' Storage");
   assert.ok(!holds(context.layersPages.widget, context.refreshControlsBtn), "no longer on Layers");
   const cleared = [];
   context.GeoNet.clearCache = () => { cleared.push(1); return { files: 2, bytes: 2048 }; };
@@ -4585,7 +4632,7 @@ test("labelled rows use fieldLabel (fixed width 92): Map, Layers, Imagery, Label
   assert.ok(holds(rowLabel(add, "Detail"), context.scalePicker));
   assert.ok(holds(rowLabel(over, "Day"), context.dayNightDayField) && holds(rowLabel(over, "Day"), context.dayNightMonthPicker));
   assert.ok(holds(rowLabel(over, "UTC time (0-24)"), context.dayNightTimeField));
-  const img = context.sectionPages.pages[2];
+  const img = context.settingsColumn;
   [["MapTiler key", "maptilerKeyField"], ["Mapbox token", "mapboxKeyField"], ["Map ID / style", "styleField"], ["Custom link", "customUrlField"], ["Custom credit", "customAttrField"]].forEach((x) => assert.ok(holds(rowLabel(img, x[0]), context[x[1]]), x[0]));
   const routes = context.labelPages.pages[1];
   [["Shape", "routeShapePicker"], ["Arc height %", "arcField"], ["Traveller", "travellerPicker"]].forEach((x) => assert.ok(holds(rowLabel(routes, x[0]), context[x[1]]), x[0]));
@@ -5804,6 +5851,11 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
 const SETTINGS_FILE = "C:/fake/AppData/CavalryGeo/settings.json"; // outside the Scripts folder, so an update can't wipe it
 const OLD_SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
 function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
+// Saved styles are one file each in the Map styles folder beside settings.json.
+const STYLES_DIR = "C:/fake/AppData/CavalryGeo/Map styles";
+function styleFilesOf(api) { return Object.keys(api._files).filter((p) => p.indexOf(STYLES_DIR + "/") === 0).map((p) => p.slice(STYLES_DIR.length + 1)).sort(); }
+function styleFileOf(api, file) { return JSON.parse(api._files[STYLES_DIR + "/" + file]); }
+function styleText(name, color) { return JSON.stringify({ cavalryGeoStyle: 1, name: name, colors: { ocean: color }, widths: {} }, null, 2); }
 function pickStyle(context, name) {
   const i = context.mapStylePicker._entries.indexOf(name);
   assert.ok(i >= 0, name + " is listed");
@@ -5816,7 +5868,7 @@ test("Map tab Style: the section sits at the bottom of the Map tab, built-ins li
   assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
   assert.equal(context.mapStylePicker.getValue(), 0);
   const items = context.sectionPages.pages[0]._items;
-  const stylePanel = items[items.length - 2]; // the Tips row closes the tab
+  const stylePanel = items[items.length - 1]; // the Style panel closes the tab
   assert.ok(context.GeoStyle.isPanel(stylePanel));
   const last = panelContents(stylePanel);
   assert.ok(context.GeoStyle.isHeading(last[0]));
@@ -5913,9 +5965,10 @@ test("Map tab Style: Save as style saves the map's colours, lists and picks the 
   assert.equal(s.source, "eox");
   assert.equal(s.maptilerKey, "k");
   assert.equal(s.mapStyle, "Mine");
-  assert.equal(s.mapStyles.length, 1);
-  assert.equal(s.mapStyles[0].name, "Mine");
-  assert.equal(s.mapStyles[0].colors.ocean, "#010203");
+  assert.ok(!("mapStyles" in s), "saved styles live in files, not settings.json");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").name, "Mine");
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#010203");
   assert.deepEqual(context.mapStylePicker._entries.slice(-1), ["Mine"]);
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
   assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Mine");
@@ -5940,12 +5993,12 @@ test("Map tab Style: saving over a saved name asks first; No keeps the old one",
   context.saveStyleBtn.onClick();
   assert.equal(asked.length, 1);
   assert.match(asked[0].question, /Replace the saved style Mine\?/);
-  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#111111");
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#111111");
   assert.equal(context.statusLabel.getText(), "Nothing was saved.");
   withModal(ui, true);
   context.saveStyleBtn.onClick();
-  assert.equal(settingsOf(api).mapStyles.length, 1);
-  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#1d2a33");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#1d2a33");
 });
 
 test("Map tab Style: saving over a saved name with no dialog refuses", () => {
@@ -5957,15 +6010,274 @@ test("Map tab Style: saving over a saved name with no dialog refuses", () => {
 });
 
 test("Map tab Style: Delete removes the picked saved style and refuses built-ins", () => {
-  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); } });
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); a.deleteFilePath = (p) => { delete a._files[p]; }; } });
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
   context.deleteStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
-  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Other"]);
+  assert.deepEqual(styleFilesOf(api), ["Other.json"]);
   assert.equal(settingsOf(api).mapStyle, "Dark");
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Dark");
   context.deleteStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Built-in styles can't be deleted.");
+});
+
+test("Styles move from settings.json to files once", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox", mapStyles: [{ name: "Ocean" }, { name: "Sand" }] }); } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json", "Sand.json"]);
+  assert.equal(styleFileOf(api, "Sand.json").name, "Sand");
+  const s = settingsOf(api);
+  assert.ok(!("mapStyles" in s), "settings.json no longer holds the styles");
+  assert.equal(s.source, "eox");
+  assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night", "Ocean", "Sand"]);
+});
+
+test("A style that can't be written stays in settings.json", () => {
+  const { api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) throw new Error("locked"); return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"]);
+});
+
+test("Save as style writes a file; Delete style deletes it", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox" }); a.deleteFilePath = (p) => { delete a._files[p]; }; } });
+  createWorldMap(context);
+  api.set(oceanOf(api, context.currentMap()), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#010203");
+  assert.equal(settingsOf(api).mapStyle, "Mine");
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
+  assert.deepEqual(styleFilesOf(api), []);
+  assert.equal(settingsOf(api).mapStyle, "Dark");
+});
+
+test("A new style never overwrites a file that is not that style", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[STYLES_DIR + "/Mine.json"] = "{}"; } });
+  createWorldMap(context);
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(api._files[STYLES_DIR + "/Mine.json"], "{}");
+  assert.deepEqual(styleFilesOf(api), ["Mine 2.json", "Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine 2.json").name, "Mine");
+  assert.equal(context.statusLabel.getText(), "Saved style \"Mine\" from Map.");
+});
+
+test("Dropped-in files appear on Refresh; duplicates and non-styles are skipped, each reported once", () => {
+  const { context, api } = buildSandbox();
+  const ocean = JSON.stringify({ cavalryGeoStyle: 1, name: "Ocean", colors: { ocean: "#0a0b0c" }, widths: {} });
+  api._files[STYLES_DIR + "/a.json"] = ocean;
+  api._files[STYLES_DIR + "/b.json"] = ocean;
+  api._files[STYLES_DIR + "/notes.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.equal(context.mapStylePicker._entries.filter((n) => n === "Ocean").length, 1);
+  assert.equal(context.mapStylePicker._entries.length, 7);
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: "Ocean" is already saved\. \(and 1 more\)/);
+  context.refreshMapsBtn.onClick();
+  assert.doesNotMatch(context.statusLabel.getText(), /Skipped/);
+  api._files[STYLES_DIR + "/n2.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/n2\.json: not a Cavalry Geo style\./);
+});
+
+test("No mapStyles in settings.json: nothing is moved", () => {
+  const { api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox" }); } });
+  const s = settingsOf(api);
+  assert.ok(!("mapStyles" in s));
+  assert.equal(s.source, "eox");
+  assert.deepEqual(styleFilesOf(api), []);
+});
+
+test("The folder wins: a settings style with a file's name is dropped, the file is kept", () => {
+  const kept = styleText("Sand", "#aaaaaa");
+  const { api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Sand.json"] = kept;
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand", colors: { ocean: "#bbbbbb" } }] });
+  } });
+  assert.equal(api._files[STYLES_DIR + "/Sand.json"], kept);
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  assert.deepEqual(styleFilesOf(api), ["Sand.json"]);
+});
+
+test("A style that can't be written still works from settings.json, and Delete removes it there", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) throw new Error("locked"); return real(p, c, o); };
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Sand", mapStyles: [{ name: "Sand" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Sand");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Sand\".");
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  assert.equal(context.mapStylePicker._entries.includes("Sand"), false);
+});
+
+test("Without a folder listing, styles stay in settings.json and Save writes them there", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    delete a.listDirectory;
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Mine"));
+  createWorldMap(context);
+  context.styleNameField.setText("Other");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Mine", "Other"]);
+  assert.deepEqual(styleFilesOf(api), []);
+});
+
+test("A folder listing that fails at start-up still shows the styles in settings.json", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a.listDirectory = () => { throw new Error("denied"); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+});
+
+test("Folder listings with backslash paths read the same files", () => {
+  const { context } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    const list = a.listDirectory;
+    a.listDirectory = (p) => list(p).map((f) => f.replace(/\//g, "\\"));
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Ocean"));
+  assert.equal(context.GeoNet.readStyleFiles().paths.ocean, STYLES_DIR + "/Ocean.json");
+});
+
+test("Style files: a folder listing of bare file names still loads the styles, and the move completes", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+    a._files[STYLES_DIR + "/Sand.json"] = styleText("Sand", "#aaaaaa");
+    const list = a.listDirectory;
+    a.listDirectory = (p) => list(p).map((f) => f.slice(p.length + 1));
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"), "a file listed by its bare name still loads");
+  assert.equal(context.GeoNet.readStyleFiles().paths.sand, STYLES_DIR + "/Sand.json");
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json", "Sand.json"]);
+  assert.ok(!("mapStyles" in settingsOf(api)), "the move completed");
+});
+
+test("Style files: when the folder shows nothing after the writes, settings.json keeps every style", () => {
+  let wrote = false;
+  const { context, api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile, list = a.listDirectory;
+    a.writeToFile = (p, c, o) => { wrote = true; return real(p, c, o); };
+    a.listDirectory = (p) => (wrote ? [] : list(p));
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Ocean", "Sand"], "nothing was lost");
+  assert.ok(context.mapStylePicker._entries.includes("Sand"), "still listed from settings.json");
+});
+
+test("Style files: a listing that always misses the file writes no duplicate copy, on a second start too", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+    a.listDirectory = () => [];
+  } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"], "one copy written");
+  context.GeoNet.moveStylesToFiles();
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"], "a second move adds no \"Ocean 2.json\"");
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Ocean"], "Ocean stays in settings.json while the listing misses it");
+});
+
+test("A skipped duplicate whose name holds < shows it with ‹ in the already-saved note", () => {
+  const { context, api } = buildSandbox();
+  api._files[STYLES_DIR + "/a.json"] = styleText("Oc<ean", "#0a0b0c");
+  api._files[STYLES_DIR + "/b.json"] = styleText("Oc<ean", "#0a0b0c");
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: "Oc‹ean" is already saved\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /</);
+});
+
+test("Style files: listDirectoryPaths is used when present, and listDirectory is not called", () => {
+  const pathCalls = [];
+  let bareCalls = 0;
+  const { context } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    a.listDirectoryPaths = (p) => { pathCalls.push(p); return [STYLES_DIR + "/Ocean.json"]; };
+    a.listDirectory = () => { bareCalls++; return []; };
+  } });
+  assert.ok(pathCalls.length > 0, "the folder was listed with listDirectoryPaths");
+  assert.equal(bareCalls, 0, "listDirectory was not used");
+  assert.equal(context.GeoNet.readStyleFiles().paths.ocean, STYLES_DIR + "/Ocean.json");
+  assert.ok(context.mapStylePicker._entries.includes("Ocean"));
+  const only = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    a.listDirectoryPaths = () => [STYLES_DIR + "/Ocean.json"];
+    delete a.listDirectory;
+  } });
+  assert.equal(only.context.GeoNet.filesSupported(), true, "listDirectoryPaths alone is enough");
+  assert.ok(only.context.mapStylePicker._entries.includes("Ocean"));
+});
+
+test("Delete style removes every file that holds the style, not just the first", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/a.json"] = styleText("Ocean", "#0a0b0c");
+    a._files[STYLES_DIR + "/b.json"] = styleText("ocean", "#0a0b0c");
+    a._files[STYLES_DIR + "/c.json"] = styleText("Sand", "#aaaaaa");
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+  } });
+  pickStyle(context, "Ocean");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Ocean\".");
+  assert.deepEqual(styleFilesOf(api), ["c.json"]);
+  context.reloadStyleFiles(true);
+  assert.ok(!context.mapStylePicker._entries.includes("Ocean"), "gone after a reload");
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+});
+
+test("Reloading when the picked style's file has gone previews the Dark fallback", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[STYLES_DIR + "/Mine.json"] = styleText("Mine", "#010203"); } });
+  pickStyle(context, "Mine");
+  delete api._files[STYLES_DIR + "/Mine.json"];
+  let previews = 0;
+  const real = context.previewStyle;
+  context.previewStyle = () => { previews++; real(); };
+  context.reloadStyleFiles(true);
+  assert.equal(context.mapStylePicker.getValue(), 0, "Dark is picked");
+  assert.equal(previews, 1, "the preview follows the fallback");
+  context.reloadStyleFiles(true);
+  assert.equal(previews, 1, "nothing changed on the next reload, so no new preview");
+});
+
+test("A skipped file whose name holds < shows it with ‹ in the status line", () => {
+  const { context, api } = buildSandbox();
+  api._files[STYLES_DIR + "/a<b.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/a‹b\.json: not a Cavalry Geo style\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /</);
+});
+
+test("Settings cog: opening it disarms a pending Clear imagery tiles confirm", () => {
+  const { context } = buildSandbox();
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
+  let cleared = 0;
+  context.GeoNet.clearTiles = () => { cleared++; return { files: 0, bytes: 0, fallback: false }; };
+  context.clearTilesBtn.onClick();
+  assert.equal(context.clearTilesBtn.getText(), "Confirm: clear imagery tiles");
+  context.cogBtn.onClick();
+  assert.equal(context.clearTilesBtn.getText(), "Clear imagery tiles");
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 0, "the press after the cog only asks again");
+  assert.equal(context.clearTilesBtn.getText(), "Confirm: clear imagery tiles");
+});
+
+test("Delete says so when the style's file is still there afterwards", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Mine.json"] = styleText("Mine", "#010203");
+    a.deleteFilePath = () => {};
+  } });
+  pickStyle(context, "Mine");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Couldn't delete " + STYLES_DIR + "/Mine.json: it may be open elsewhere.");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
 });
 
 test("Map tab Style: a broken styles entry in settings.json never stops the panel", () => {
@@ -5979,7 +6291,7 @@ test("Imagery settings are merged into settings.json, never replacing other keys
   context.saveImagerySettings();
   const s = settingsOf(api);
   assert.equal(s.mapStyle, "Mono");
-  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(styleFileOf(api, "Mine.json").name, "Mine");
   assert.equal(s.updateCheckedAt, 5);
   assert.ok("source" in s);
 });
@@ -9486,17 +9798,13 @@ test("Start here: a first run shows the box at the top of the Map tab with the a
   assert.deepEqual(plain(notes), ["Start here"].concat(TIPS_LINES));
   assert.equal(mapPage._items[context.tipsBox.length - 1], context.tipsGotItBtn, "Got it ends the box");
   assert.equal(context.tipsGotItBtn.getText(), "Got it");
-  assert.equal(context.tipsBtn.getText(), "Tips");
+  assert.equal(context.tipsBtn.getText(), "Show tips again");
   assert.equal(context.tipsTitle._fontSize, 11, "the title is a small heading");
   assert.equal(context.tipsTitle._fixedHeight, 16);
-  const pageItems = mapPage._items, tipsRow = pageItems[pageItems.length - 1];
-  assert.ok(holds(tipsRow, context.tipsBtn), "the Tips button closes the Map tab");
-  assert.equal(tipsRow._stretch, 1, "a stretch after the button keeps it small");
-  assert.equal(holds(ui._root(), context.tipsBtn), true, "the Map page is inside the panel");
+  assert.equal(holds(context.sectionPages.pages[0], context.tipsBtn), false, "Tips is not on the Map tab");
+  assert.ok(holds(context.settingsColumn, context.tipsBtn), "Tips is in Preferences");
   const items = ui._root()._items;
-  assert.equal(items.some((n) => n === context.statusLabel), true);
   assert.equal(items[items.length - 1], context.statusLabel, "the status line is still last");
-  items.slice(0, -1).forEach((n) => assert.ok(n !== tipsRow && !(n._items || []).includes(context.tipsBtn), "root does not hold Tips directly"));
   assert.equal(context.tipsGotItBtn._background, "#1F8F4E", "Got it is the green primary button");
 });
 
@@ -12578,7 +12886,8 @@ function tippedControls(context, ui) {
   allColumns(context).forEach((col) => walkUi(col, (n) => {
     if (kinds.some((K) => n instanceof K) && bars.indexOf(n) < 0 && skip.indexOf(n) < 0 && found.indexOf(n) < 0) found.push(n);
   }));
-  return found;
+  // Outside the pages: the cog, on the tab bar's row (Tips is in the settings' Preferences, found above).
+  return found.concat([context.cogBtn]);
 }
 
 test("hover help: every control on every page has a plain tooltip, and every GeoTips text is used once", () => {
@@ -14466,4 +14775,352 @@ test("date line upgrades: a pin or label the user moved into their own group get
   assert.ok(api.get(moved, EX).indexOf(", nearest: true") >= 0, "a pin in the user's group is nearest");
   assert.ok(api.get(driver, A.CAMERA_EXPR_ATTR).indexOf("GeoRuntime.projectNearest(") >= 0, "a label in the user's group is nearest");
   assert.equal(api.get(stop, EX), olds[stop], "an old route's stop is left as it is");
+});
+
+// ---- Settings cog --------------------------------------------------------------------
+// The cog beside the tab bar opens the settings: a popover under it where this Cavalry has one, else a
+// Settings page that the cog shows in place of the tabs.
+function noPopoverSandbox(setup) {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container.prototype.showAsPopover;
+  if (setup) setup(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  return { context: context, api: api, ui: ui };
+}
+
+test("The cog sits right of the tab bar and opens the settings popover under itself, built once", () => {
+  const { context, ui } = buildSandbox();
+  const first = ui._root()._items[0];
+  assert.ok(first instanceof ui.HLayout, "the tab bar's row");
+  assert.deepEqual(first._items, [context.sectionTabs.widget, context.cogBtn]);
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
+  context.cogBtn.onClick();
+  assert.deepEqual(plain(context.settingsContainer._popoverAt), [11, 24]);
+  const box = context.settingsContainer;
+  context.cogBtn.onClick();
+  assert.equal(context.settingsContainer, box, "the same container is reused");
+  assert.ok(holds(context.settingsContainer, context.settingsColumn), "the container holds the settings column");
+  assert.equal(context.sectionPages.pageCount(), 5, "a settings column in a popover is not also a page");
+  assert.ok(holds(box, context.clearCacheBtn) && holds(box, context.maptilerKeyField));
+});
+
+test("Without showAsPopover the cog shows the Settings page, and the cog again goes back to the section it was on", () => {
+  const { context } = noPopoverSandbox();
+  assert.equal(context.settingsContainer, null, "no popover box");
+  assert.equal(context.sectionPages.pageCount(), 6);
+  assert.equal(context.sectionPages.pages[5], context.settingsColumn);
+  assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"], "Settings is not a tab");
+  context.showSection("Imagery");
+  context.cogBtn.onClick();
+  assert.equal(context.sectionPages.currentPage(), 5);
+  assert.equal(context.sectionTabs.selected(), "Settings");
+  context.cogBtn.onClick();
+  assert.equal(context.sectionPages.currentPage(), 2);
+  assert.equal(context.sectionTabs.selected(), "Imagery");
+});
+
+test("GeoCog.open: without a popover it calls the fallback, and with neither it says why", () => {
+  const { context } = noPopoverSandbox();
+  let shown = 0;
+  context.GeoCog.open(null, context.cogBtn, () => { shown++; });
+  assert.equal(shown, 1);
+  assert.throws(() => context.GeoCog.open(null, context.cogBtn), { message: "This Cavalry can't show the settings window." });
+});
+
+test("The cog button is 22 wide and 24 tall; it shows the cog icon when the file is there, else a gear", () => {
+  const withIcon = buildSandbox({ setup: (a) => { a._files[ICONS + "cog.png"] = "<png>"; } }).context.cogBtn;
+  assert.equal(withIcon._image, ICONS + "cog.png");
+  assert.deepEqual(plain(withIcon._imageSize), [16, 16]);
+  assert.equal(withIcon.getText(), "");
+  const plainCog = buildSandbox().context.cogBtn;
+  assert.equal(plainCog._image, undefined);
+  assert.equal(plainCog.getText(), "\u2699");
+  [withIcon, plainCog].forEach((b) => { assert.equal(b._fixedWidth, 22); assert.equal(b._fixedHeight, 24); });
+});
+
+test("Keys and cache buttons moved: Settings holds them; Imagery, Layers and Map don't", () => {
+  const { context } = buildSandbox();
+  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "stylePicker", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
+  moved.forEach((n) => assert.ok(holds(context.settingsColumn, context[n]), n + " is in Settings"));
+  const elsewhere = [context.sectionPages.pages[0], context.sectionPages.pages[2], context.layersPages.widget];
+  moved.forEach((n) => elsewhere.forEach((page) => assert.ok(!holds(page, context[n]), n + " left its old page")));
+  assert.deepEqual(pageHeadings(context, context.settingsColumn), [["Keys and links"], ["Map styles"], ["Storage"], ["Preferences"], ["About"]]);
+  const styles = panelsOf(context, context.settingsColumn)[1];
+  assert.ok(holds(styles, context.openStylesBtn) && holds(styles, context.exportStyleBtn));
+  const storage = panelsOf(context, context.settingsColumn)[2];
+  assert.ok(holds(storage, context.clearCacheBtn) && holds(storage, context.clearTilesBtn));
+});
+
+test("Keys typed in Settings still reach the imagery options and settings.json", () => {
+  const { context, api } = buildSandbox();
+  const maptiler = context.GeoSources.list().findIndex((s) => s.key === "maptiler");
+  assert.ok(maptiler >= 0);
+  context.sourcePicker.setValue(maptiler);
+  context.maptilerKeyField.setText(" K1 ");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(settingsOf(api).maptilerKey, "K1");
+  assert.equal(context.sourceOptions(context.currentSource()).key, "K1");
+});
+
+test("Open styles folder runs explorer with backslashes, and makes the folder first", () => {
+  const calls = [];
+  const { context, api } = buildSandbox({ setup: (a) => { a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); }; } });
+  context.openStylesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "explorer", args: ["C:\\fake\\AppData\\CavalryGeo\\Map styles"] }]);
+  assert.equal(context.statusLabel.getText(), "Opened the Map styles folder.");
+  assert.equal(api._files[STYLES_DIR], "<dir>");
+});
+
+test("Open styles folder on macOS runs open on the folder; without runDetachedProcess the status names it", () => {
+  const calls = [];
+  const mac = buildSandbox({ setup: (a) => {
+    a.getAppDataFolder = () => "/home/x";
+    a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); };
+  } });
+  mac.context.openStylesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "open", args: ["/home/x/CavalryGeo/Map styles"] }]);
+  const plainApi = buildSandbox();
+  plainApi.context.openStylesBtn.onClick();
+  assert.equal(plainApi.context.statusLabel.getText(), "Your styles are in C:/fake/AppData/CavalryGeo/Map styles.");
+});
+
+test("Export style writes the picked style as a JSON file, adding .json when missing", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] }); } });
+  pickStyle(context, "Ocean");
+  const asked = [];
+  const real = ui.chooseFileToSave;
+  ui.chooseFileToSave = function (dir, filter) { asked.push([dir, filter]); return real.call(this, dir, filter); };
+  ui._saveAnswer = "C:/out/Ocean";
+  context.exportStyleBtn.onClick();
+  // The dialog starts in the CavalryGeo folder beside settings.json, not in the Map styles folder.
+  assert.deepEqual(plain(asked), [["C:/fake/AppData/CavalryGeo", "JSON (*.json)"]]);
+  assert.equal(context.statusLabel.getText(), "Exported \"Ocean\" to C:/out/Ocean.json.");
+  const text = api._files["C:/out/Ocean.json"];
+  assert.equal(context.GeoStyleFiles.fromText(text).name, "Ocean");
+  assert.equal(text, context.GeoStyleFiles.toText(context.pickedStyle()));
+  ui._saveAnswer = "C:/out/Ocean.JSON";
+  context.exportStyleBtn.onClick();
+  assert.ok(api._files["C:/out/Ocean.JSON"] !== undefined, "an upper-case .JSON is kept as it is");
+});
+
+test("Export cancelled writes nothing and says so", () => {
+  const { context, api, ui } = buildSandbox();
+  ui._saveAnswer = "";
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Nothing was exported.");
+  assert.deepEqual(Object.keys(api._files).filter((p) => p.indexOf("C:/out") === 0), []);
+});
+
+test("Export without a save dialog says to copy the file from the folder instead", () => {
+  const { context, ui } = buildSandbox();
+  delete ui.chooseFileToSave;
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: This Cavalry has no save dialog: copy the file from the Map styles folder instead.");
+});
+
+test("A style file that doesn't appear after its write is an error: the style stays in settings", () => {
+  const { api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) return; return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"]);
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+});
+
+test("Delete style drops the settings entry even when the style folder can't be listed", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand" }] });
+    a.listDirectory = () => { throw new Error("no listing"); };
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+  } });
+  pickStyle(context, "Sand");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Sand\".");
+  assert.ok(!("mapStyles" in settingsOf(api)));
+});
+
+// ---- Settings cog: review fixes (round 1) ------------------------------------------
+test("Map tab: the previews run from the tab bar's left edge to the cog's right edge", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  installNe(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  context.sectionTabs.widget.geometry = () => ({ x: 0, y: 0, width: 470, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 472, y: 0, width: 22, height: 24 });
+  ui.onResize();
+  assert.equal(plain(context.preview._draw._size)[0], 494);
+});
+
+test("Export style: a file that doesn't appear after the write is an error, not \"Exported\"", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p === "C:/out/Ocean.json") return; return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+  } });
+  pickStyle(context, "Ocean");
+  ui._saveAnswer = "C:/out/Ocean";
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Couldn't write C:/out/Ocean.json.");
+  assert.equal(api._files["C:/out/Ocean.json"], undefined);
+});
+
+// ---- Settings cog: Preferences and About -------------------------------------------
+const RESET_QUESTION = "Put easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults? Keys and saved styles are kept.";
+const SIX_KEYS = ["flyEasing", "flyArc", "driftMove", "routeShape", "source", "mapStyle"];
+const RELEASES = "https://github.com/optative-visuals/CavalryGeo/releases/latest";
+function prefsPanel(context) { return panelsOf(context, context.settingsColumn)[3]; }
+function aboutPanel(context) { return panelsOf(context, context.settingsColumn)[4]; }
+function labelTextsIn(ui, node) { const out = []; walkUi(node, (n) => { if (n instanceof ui.Label) out.push(n.getText()); }); return out; }
+// Remembered choices away from their defaults, plus a kept key and two kept settings.
+function nonDefaultChoices(context) {
+  const mt = context.GeoSources.list().find((s) => s.key === "maptiler");
+  return { flyEasing: context.GeoFly.EASINGS[2].id, flyArc: context.GeoFly.ARCS[0].id, driftMove: context.GeoFly.DRIFTS[1].id,
+    routeShape: 1, source: mt.id, mapStyle: "Mono", maptilerKey: "kept-key", mapboxKey: "kept", showTips: false, checkForUpdates: false };
+}
+function sixKeysGone(s) { SIX_KEYS.forEach((k) => assert.ok(!(k in s), k + " was removed")); }
+// Builds a panel that remembers nonDefaultChoices(); the pickers show them before a reset.
+function withChoices() {
+  const choices = nonDefaultChoices(buildSandbox().context);
+  return buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(choices); } });
+}
+
+test("Preferences: Check for updates is ticked unless settings say false, and clicking it writes checkForUpdates", () => {
+  const { context, api } = buildSandbox();
+  assert.equal(context.updateCheck.getValue(), true, "on for a first run");
+  assert.ok(holds(prefsPanel(context), context.updateCheck.widget));
+  assert.ok(context.updateCheck.widget.getText().indexOf("Check for updates") >= 0);
+  context.updateCheck.widget.onClick();
+  assert.equal(context.updateCheck.getValue(), false);
+  assert.equal(settingsOf(api).checkForUpdates, false);
+  context.updateCheck.widget.onClick();
+  assert.equal(context.updateCheck.getValue(), true);
+  assert.equal(settingsOf(api).checkForUpdates, true);
+});
+
+test("Preferences: with Check for updates off the next open asks GitHub nothing", () => {
+  const first = openForUpdate();
+  assert.equal(first.curl.calls.length, 1);
+  assert.equal(first.context.updateCheck.getValue(), true);
+  first.context.updateCheck.widget.onClick();
+  const again = openForUpdate(readSettings(first.api));
+  assert.equal(again.context.updateCheck.getValue(), false, "the box shows the saved choice");
+  assert.equal(again.curl.calls.length, 0);
+});
+
+test("Preferences: Show tips again is the Tips button, here now, and still shows the Map tab and the box", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ showTips: false, mapStyle: "Mono" }); } });
+  assert.ok(holds(prefsPanel(context), context.tipsBtn));
+  assert.equal(context.tipsBtn.getText(), "Show tips again");
+  context.showSection("Imagery");
+  context.tipsBtn.onClick();
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(settingsOf(api).showTips, true);
+  assert.equal(settingsOf(api).mapStyle, "Mono");
+});
+
+test("Reset remembered choices: Yes asks the exact question, sets the pickers to defaults, and removes exactly the six keys", () => {
+  const { context, api, ui } = withChoices();
+  assert.equal(context.easingPicker.getValue(), 2, "remembered easing shows");
+  assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
+  assert.equal(context.pickedStyle().name, "Mono");
+  context.maptilerKeyField.setText(""); // MapTiler with no key: the hint is showing
+  context.sourcePicker.onValueChanged();
+  assert.ok(!context.keyHint.isHidden(), "hint shows before the reset");
+  const asked = withModal(ui, true);
+  context.resetChoicesBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Reset remembered choices");
+  assert.equal(asked[0].question, RESET_QUESTION);
+  assert.equal(context.easingPicker.getValue(), 0);
+  assert.equal(context.arcPicker.getValue(), 1);
+  assert.equal(context.driftPicker.getValue(), 0);
+  assert.equal(context.routeShapePicker.getValue(), 0);
+  assert.equal(context.sourcePicker.getValue(), 0, "imagery source back to the first");
+  assert.ok(context.keyHint.isHidden(), "EOX needs no key, so the hint is hidden after the reset");
+  assert.equal(context.keyHint.getText(), "");
+  assert.equal(context.pickedStyle().name, "Dark");
+  const s = settingsOf(api);
+  sixKeysGone(s);
+  assert.equal(s.maptilerKey, "kept-key");
+  assert.equal(s.mapboxKey, "kept");
+  assert.equal(s.showTips, false);
+  assert.equal(s.checkForUpdates, false);
+  assert.equal(context.statusLabel.getText(), "Remembered choices reset to their defaults.");
+});
+
+test("Reset remembered choices: picker changes that write settings can't bring the six keys back", () => {
+  const { context, api, ui } = withChoices();
+  ["easingPicker", "arcPicker", "driftPicker", "routeShapePicker", "sourcePicker", "mapStylePicker"].forEach((n) => {
+    const p = context[n];
+    p.setValue = function (v) { this._value = v; if (this.onValueChanged) this.onValueChanged(); };
+  });
+  withModal(ui, true);
+  context.resetChoicesBtn.onClick();
+  sixKeysGone(settingsOf(api));
+  assert.equal(settingsOf(api).maptilerKey, "kept-key");
+});
+
+test("Reset remembered choices: No changes nothing, pickers included", () => {
+  const { context, api, ui } = withChoices();
+  const asked = withModal(ui, false);
+  context.resetChoicesBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(context.easingPicker.getValue(), 2);
+  assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
+  assert.equal(context.pickedStyle().name, "Mono");
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing);
+  assert.equal(settingsOf(api).mapStyle, "Mono");
+});
+
+test("Reset remembered choices without a dialog: the first press asks to confirm, the second resets", () => {
+  const { context, api } = withChoices();
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
+  assert.match(context.statusLabel.getText(), /Press "Confirm: reset choices" to reset\./);
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing, "nothing yet");
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Reset remembered choices");
+  assert.equal(context.statusLabel.getText(), "Remembered choices reset to their defaults.");
+  sixKeysGone(settingsOf(api));
+  assert.equal(settingsOf(api).maptilerKey, "kept-key");
+  assert.equal(settingsOf(api).mapboxKey, "kept");
+});
+
+test("Reset remembered choices without a dialog: pressing the cog disarms the pending confirm", () => {
+  const { context, api } = withChoices();
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
+  context.cogBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Reset remembered choices");
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices", "the next press starts over");
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing, "nothing was reset");
+});
+
+test("About: the version line reads Cavalry Geo v and GEO_VERSION; Get updates opens the releases page", () => {
+  const calls = [];
+  const { context, ui } = buildSandbox({ version: "0.9.0", setup: (a) => { a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); }; } });
+  assert.ok(labelTextsIn(ui, aboutPanel(context)).includes("Cavalry Geo v0.9.0"));
+  assert.ok(holds(aboutPanel(context), context.getUpdatesBtn));
+  assert.equal(context.getUpdatesBtn.getText(), "Get updates…");
+  context.getUpdatesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "explorer", args: [RELEASES] }]);
+  assert.equal(context.statusLabel.getText(), "Opened the Cavalry Geo download page.");
+});
+
+test("About: without runDetachedProcess Get updates says where the download page is", () => {
+  const { context } = buildSandbox();
+  context.getUpdatesBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Download updates from " + RELEASES);
+});
+
+test("Start here: the Got it note points to Settings, Preferences instead of a Tips button", () => {
+  const { context } = buildSandbox();
+  const text = context.GeoTips.text("map.tipsGotIt");
+  assert.equal(text, "Hides the Start here steps. Show tips again (⚙ Settings, Preferences) brings them back.");
+  assert.doesNotMatch(text, /Tips button/);
 });
