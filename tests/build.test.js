@@ -585,7 +585,7 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   assert.equal(root._items.length, 3);
   assert.deepEqual(root._items[0]._items, [context.sectionTabs.widget, context.cogBtn], "the cog sits right of the tab bar");
   assert.deepEqual(root._items.slice(1), [pages.widget, context.statusLabel]);
-  assert.ok(!holds(pages.pages[0], context.tipsBtn), "Tips is on no page until Preferences takes it");
+  assert.ok(holds(context.settingsColumn, context.tipsBtn), "Tips is in Preferences");
   assert.equal(root._stretch, 1);
   pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout._items[0], layout, "page " + i)); // inside the coloured page's 8 px inset
   context.showSection("Imagery");
@@ -9640,10 +9640,11 @@ test("Start here: a first run shows the box at the top of the Map tab with the a
   assert.deepEqual(plain(notes), ["Start here"].concat(TIPS_LINES));
   assert.equal(mapPage._items[context.tipsBox.length - 1], context.tipsGotItBtn, "Got it ends the box");
   assert.equal(context.tipsGotItBtn.getText(), "Got it");
-  assert.equal(context.tipsBtn.getText(), "Tips");
+  assert.equal(context.tipsBtn.getText(), "Show tips again");
   assert.equal(context.tipsTitle._fontSize, 11, "the title is a small heading");
   assert.equal(context.tipsTitle._fixedHeight, 16);
-  assert.equal(holds(ui._root(), context.tipsBtn), false, "Tips is on no page until Preferences takes it");
+  assert.equal(holds(context.sectionPages.pages[0], context.tipsBtn), false, "Tips is not on the Map tab");
+  assert.ok(holds(context.settingsColumn, context.tipsBtn), "Tips is in Preferences");
   const items = ui._root()._items;
   assert.equal(items[items.length - 1], context.statusLabel, "the status line is still last");
   assert.equal(context.tipsGotItBtn._background, "#1F8F4E", "Got it is the green primary button");
@@ -12727,8 +12728,8 @@ function tippedControls(context, ui) {
   allColumns(context).forEach((col) => walkUi(col, (n) => {
     if (kinds.some((K) => n instanceof K) && bars.indexOf(n) < 0 && skip.indexOf(n) < 0 && found.indexOf(n) < 0) found.push(n);
   }));
-  // Outside the pages: the cog (on the tab bar's row) and Tips (on no page until Preferences takes it).
-  return found.concat([context.cogBtn, context.tipsBtn]);
+  // Outside the pages: the cog, on the tab bar's row (Tips is in the settings' Preferences, found above).
+  return found.concat([context.cogBtn]);
 }
 
 test("hover help: every control on every page has a plain tooltip, and every GeoTips text is used once", () => {
@@ -14805,4 +14806,141 @@ test("Export style: a file that doesn't appear after the write is an error, not 
   context.exportStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Couldn't write C:/out/Ocean.json.");
   assert.equal(api._files["C:/out/Ocean.json"], undefined);
+});
+
+// ---- Settings cog: Preferences and About -------------------------------------------
+const RESET_QUESTION = "Put easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults? Keys and saved styles are kept.";
+const SIX_KEYS = ["flyEasing", "flyArc", "driftMove", "routeShape", "source", "mapStyle"];
+const RELEASES = "https://github.com/optative-visuals/CavalryGeo/releases/latest";
+function prefsPanel(context) { return panelsOf(context, context.settingsColumn)[3]; }
+function aboutPanel(context) { return panelsOf(context, context.settingsColumn)[4]; }
+function labelTextsIn(ui, node) { const out = []; walkUi(node, (n) => { if (n instanceof ui.Label) out.push(n.getText()); }); return out; }
+// Remembered choices away from their defaults, plus a kept key and two kept settings.
+function nonDefaultChoices(context) {
+  const mt = context.GeoSources.list().find((s) => s.key === "maptiler");
+  return { flyEasing: context.GeoFly.EASINGS[2].id, flyArc: context.GeoFly.ARCS[0].id, driftMove: context.GeoFly.DRIFTS[1].id,
+    routeShape: 1, source: mt.id, mapStyle: "Mono", maptilerKey: "kept-key", showTips: false, checkForUpdates: false };
+}
+function sixKeysGone(s) { SIX_KEYS.forEach((k) => assert.ok(!(k in s), k + " was removed")); }
+// Builds a panel that remembers nonDefaultChoices(); the pickers show them before a reset.
+function withChoices() {
+  const choices = nonDefaultChoices(buildSandbox().context);
+  return buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(choices); } });
+}
+
+test("Preferences: Check for updates is ticked unless settings say false, and changing it writes checkForUpdates", () => {
+  const { context, api, ui } = buildSandbox();
+  assert.equal(context.updateCheck.getValue(), true, "on for a first run");
+  assert.ok(holds(prefsPanel(context), context.updateCheck));
+  assert.ok(labelTextsIn(ui, prefsPanel(context)).includes("Check for updates"));
+  context.updateCheck.setValue(false);
+  context.updateCheck.onValueChanged();
+  assert.equal(settingsOf(api).checkForUpdates, false);
+  context.updateCheck.setValue(true);
+  context.updateCheck.onValueChanged();
+  assert.equal(settingsOf(api).checkForUpdates, true);
+});
+
+test("Preferences: with Check for updates off the next open asks GitHub nothing", () => {
+  const first = openForUpdate();
+  assert.equal(first.curl.calls.length, 1);
+  assert.equal(first.context.updateCheck.getValue(), true);
+  first.context.updateCheck.setValue(false);
+  first.context.updateCheck.onValueChanged();
+  const again = openForUpdate(readSettings(first.api));
+  assert.equal(again.context.updateCheck.getValue(), false, "the box shows the saved choice");
+  assert.equal(again.curl.calls.length, 0);
+});
+
+test("Preferences: Show tips again is the Tips button, here now, and still shows the Map tab and the box", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ showTips: false, mapStyle: "Mono" }); } });
+  assert.ok(holds(prefsPanel(context), context.tipsBtn));
+  assert.equal(context.tipsBtn.getText(), "Show tips again");
+  context.showSection("Imagery");
+  context.tipsBtn.onClick();
+  assert.equal(context.sectionTabs.selected(), "Map");
+  assert.equal(settingsOf(api).showTips, true);
+  assert.equal(settingsOf(api).mapStyle, "Mono");
+});
+
+test("Reset remembered choices: Yes asks the exact question, sets the pickers to defaults, and removes exactly the six keys", () => {
+  const { context, api, ui } = withChoices();
+  assert.equal(context.easingPicker.getValue(), 2, "remembered easing shows");
+  assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
+  assert.equal(context.pickedStyle().name, "Mono");
+  const asked = withModal(ui, true);
+  context.resetChoicesBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Reset remembered choices");
+  assert.equal(asked[0].question, RESET_QUESTION);
+  assert.equal(context.easingPicker.getValue(), 0);
+  assert.equal(context.arcPicker.getValue(), 1);
+  assert.equal(context.driftPicker.getValue(), 0);
+  assert.equal(context.routeShapePicker.getValue(), 0);
+  assert.equal(context.sourcePicker.getValue(), 0, "imagery source back to the first");
+  assert.equal(context.pickedStyle().name, "Dark");
+  const s = settingsOf(api);
+  sixKeysGone(s);
+  assert.equal(s.maptilerKey, "kept-key");
+  assert.equal(s.showTips, false);
+  assert.equal(s.checkForUpdates, false);
+  assert.equal(context.statusLabel.getText(), "Remembered choices reset to their defaults.");
+});
+
+test("Reset remembered choices: picker changes that write settings can't bring the six keys back", () => {
+  const { context, api, ui } = withChoices();
+  ["easingPicker", "arcPicker", "driftPicker", "routeShapePicker", "sourcePicker", "mapStylePicker"].forEach((n) => {
+    const p = context[n];
+    p.setValue = function (v) { this._value = v; if (this.onValueChanged) this.onValueChanged(); };
+  });
+  withModal(ui, true);
+  context.resetChoicesBtn.onClick();
+  sixKeysGone(settingsOf(api));
+  assert.equal(settingsOf(api).maptilerKey, "kept-key");
+});
+
+test("Reset remembered choices: No changes nothing, pickers included", () => {
+  const { context, api, ui } = withChoices();
+  const asked = withModal(ui, false);
+  context.resetChoicesBtn.onClick();
+  assert.equal(asked.length, 1);
+  assert.equal(context.easingPicker.getValue(), 2);
+  assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
+  assert.equal(context.pickedStyle().name, "Mono");
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing);
+  assert.equal(settingsOf(api).mapStyle, "Mono");
+});
+
+test("Reset remembered choices without a dialog: the first press asks to confirm, the second resets", () => {
+  const { context, api } = withChoices();
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing, "nothing yet");
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Reset remembered choices");
+  sixKeysGone(settingsOf(api));
+  assert.equal(settingsOf(api).maptilerKey, "kept-key");
+});
+
+test("About: the version line reads Cavalry Geo v and GEO_VERSION; Get updates opens the releases page", () => {
+  const calls = [];
+  const { context, ui } = buildSandbox({ version: "0.9.0", setup: (a) => { a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); }; } });
+  assert.ok(labelTextsIn(ui, aboutPanel(context)).includes("Cavalry Geo v0.9.0"));
+  assert.ok(holds(aboutPanel(context), context.getUpdatesBtn));
+  assert.equal(context.getUpdatesBtn.getText(), "Get updates…");
+  context.getUpdatesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "explorer", args: [RELEASES] }]);
+});
+
+test("About: without runDetachedProcess Get updates says where the download page is", () => {
+  const { context } = buildSandbox();
+  context.getUpdatesBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Download updates from " + RELEASES);
+});
+
+test("Start here: the Got it note points to Settings, Preferences instead of a Tips button", () => {
+  const { context } = buildSandbox();
+  const text = context.GeoTips.text("map.tipsGotIt");
+  assert.equal(text, "Hides the Start here steps. Show tips again (⚙ Settings, Preferences) brings them back.");
+  assert.doesNotMatch(text, /Tips button/);
 });

@@ -632,10 +632,10 @@ deleteStyleBtn.onClick = guardAction(function () {
 });
 
 // ---- Start here tips -------------------------------------------------------
-// Shown on the Map tab until "Got it"; the Tips button brings them back (it moves to the settings' Preferences next).
+// Shown on the Map tab until "Got it"; Show tips again (in the settings' Preferences) brings them back.
 // A missing showTips setting means a first run, so the box shows.
 var tipsGotItBtn = GeoStyle.primaryButton("Got it");
-// The Tips button is on no page for now: the settings' Preferences take it (Show tips again).
+// The button sits in the settings' Preferences, where it reads Show tips again.
 var tipsBtn = GeoStyle.quietButton("Tips");
 // The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
 var tipsTitle = new ui.Label("Start here");
@@ -2140,6 +2140,56 @@ exportStyleBtn.onClick = guardAction(function () {
   if (!api.filePathExists(p)) throw new Error("Couldn't write " + p + ".");
   say("Exported \"" + style.name + "\" to " + p + ".");
 });
+// Preferences: the update check's switch, the tips button (moved here from the Map tab), and the reset of the
+// remembered choices. About: the version and the download link.
+var updateCheck = new ui.Checkbox((function () {
+  try { return (GeoNet.loadSettings() || {}).checkForUpdates !== false; } catch (e) { return true; }
+})());
+updateCheck.onValueChanged = guard(function () { GeoNet.updateSettings({ checkForUpdates: updateCheck.getValue() ? true : false }); });
+tipsBtn.setText("Show tips again");
+var resetChoicesBtn = GeoStyle.quietButton("Reset remembered choices");
+// Like Clear imagery tiles: without a dialog the first press asks, and a second press resets.
+var resetChoicesArmed = false;
+function disarmResetChoices() { resetChoicesArmed = false; resetChoicesBtn.setText("Reset remembered choices"); }
+// The pickers first: their change handlers write settings, so the keys are removed after them.
+function resetRememberedChoices() {
+  easingPicker.setValue(0);
+  arcPicker.setValue(1);
+  driftPicker.setValue(0);
+  routeShapePicker.setValue(0);
+  sourcePicker.setValue(0);
+  refreshStylePicker(GeoStyles.DARK.name);
+  GeoNet.removeSettings(GeoStyleFiles.RESET_KEYS);
+  refreshSourceUi();
+  previewStyle();
+  say("Remembered choices reset to their defaults.");
+}
+resetChoicesBtn.onClick = guardAction(function () {
+  var dialog = questionDialog();
+  if (dialog) {
+    disarmResetChoices();
+    if (!dialog.showQuestion("Reset remembered choices", "Put easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults? Keys and saved styles are kept.")) {
+      say("Nothing was reset.");
+      return;
+    }
+    resetRememberedChoices();
+    return;
+  }
+  if (!resetChoicesArmed) {
+    resetChoicesArmed = true;
+    resetChoicesBtn.setText("Confirm: reset choices");
+    say("This puts easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults. Keys and saved styles are kept. Press \"Confirm: reset choices\" to reset.");
+    return;
+  }
+  disarmResetChoices();
+  resetRememberedChoices();
+});
+var aboutVersion = GeoStyle.note("Cavalry Geo v" + GEO_VERSION);
+var getUpdatesBtn = GeoStyle.button("Get updates…");
+getUpdatesBtn.onClick = guardAction(function () {
+  if (!GeoNet.openPath(GeoUpdate.RELEASES_URL)) { say("Download updates from " + GeoUpdate.RELEASES_URL); return; }
+  say("Opened the Cavalry Geo download page.");
+});
 var settingsColumn = column([
   GeoStyle.panel([
     GeoStyle.heading("Keys and links"),
@@ -2157,9 +2207,17 @@ var settingsColumn = column([
     GeoStyle.heading("Storage"),
     row(clearCacheBtn, clearTilesBtn)
   ]),
-  // Preferences and About stay empty until the next step fills them.
-  GeoStyle.panel([GeoStyle.heading("Preferences")]),
-  GeoStyle.panel([GeoStyle.heading("About")])
+  GeoStyle.panel([
+    GeoStyle.heading("Preferences"),
+    row(updateCheck, new ui.Label("Check for updates")),
+    tipsBtn,
+    resetChoicesBtn
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("About"),
+    aboutVersion,
+    getUpdatesBtn
+  ])
 ]);
 // The popover's box, built once: null when this Cavalry has no popover (the Settings page is used then).
 var settingsContainer = (function () {
@@ -2305,7 +2363,10 @@ var TIP_TARGETS = [
   [dataUnmatchedList, "data.unmatched"],
   [cogBtn, "settings.cog"],
   [openStylesBtn, "settings.openStyles"],
-  [exportStyleBtn, "settings.exportStyle"]
+  [exportStyleBtn, "settings.exportStyle"],
+  [updateCheck, "settings.updateCheck"],
+  [resetChoicesBtn, "settings.reset"],
+  [getUpdatesBtn, "settings.getUpdates"]
 ];
 // (Dropdowns keep Cavalry's own look: setBackgroundColor on a DropDown only paints its open list.)
 TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
