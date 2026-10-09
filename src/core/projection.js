@@ -74,6 +74,9 @@ var GeoProjection = (function () {
 
   function wrapLon(lon) { return ((lon + 540) % 360 + 360) % 360 - 180; }
 
+  // The copy of lon nearest camLon (flat maps: a single thing sits once, on the copy the camera is over).
+  function nearestLon(lon, camLon) { return camLon + wrapLon(lon - camLon); }
+
   // Inverse of makeProjector: Cavalry pixels (camera centre at 0, 0, north +y) back to
   // lon / lat, or null off the globe's disc / outside the Equal Earth outline. Mercator
   // longitudes are not wrapped (makeProjector works in lon - camera lon, so a wrapped value
@@ -154,7 +157,7 @@ var GeoProjection = (function () {
 
   return {
     MERCATOR: MERCATOR, EQUAL_EARTH: EQUAL_EARTH, ORTHOGRAPHIC: ORTHOGRAPHIC, MAX_LAT: MAX_LAT, MAX_ZOOM: MAX_ZOOM,
-    worldScale: worldScale, makeProjector: makeProjector, makeGlobeProjector3: makeGlobeProjector3,
+    worldScale: worldScale, makeProjector: makeProjector, makeGlobeProjector3: makeGlobeProjector3, nearestLon: nearestLon,
     mercatorViewBounds: mercatorViewBounds, mercatorViewBoxes: mercatorViewBoxes, zoomForBounds: zoomForBounds, unproject: unproject
   };
 })();

@@ -198,16 +198,50 @@ test("visibleRegion: Equal Earth at lat 70 zoom 5 no longer widens to every long
   assert.ok(r.dlon1 - r.dlon0 < 200, JSON.stringify(r));
 });
 
-test("sourcePoint: Web Mercator is see-through past the map's top / bottom and its single world's sides", () => {
+test("sourcePoint: Web Mercator is see-through past the map's top / bottom, and repeats past the date line", () => {
   const cam = { lat: 80, lon: 170, zoom: 3, rotation: 0, projection: 0 }, r = R(cam), v = { scale: 1, cx: 0, cy: 0 };
   assert.ok(RP.sourcePoint(cam, v, 0, 0));
   assert.equal(RP.sourcePoint(cam, v, 0, (Math.PI - mercY(80) + 0.01) * r), null, "beyond the top");
   assert.ok(RP.sourcePoint(cam, v, 0, (Math.PI - mercY(80) - 0.01) * r));
-  assert.equal(RP.sourcePoint(cam, v, (10.5 * D2R) * r, 0), null, "past lon 180");
-  assert.ok(RP.sourcePoint(cam, v, (9.5 * D2R) * r, 0));
-  assert.equal(RP.sourcePoint(cam, v, (-350.5 * D2R) * r, 0), null, "past lon -180");
+  // Past lon 180 (10.5 east of the camera) the point wraps to dlon 10.5; past lon -180 it wraps to 9.5.
+  const east = RP.sourcePoint(cam, v, (10.5 * D2R) * r, 0), west = RP.sourcePoint(cam, v, (-350.5 * D2R) * r, 0);
+  assert.ok(east && west, "past the date line is not see-through");
+  assert.ok(Math.abs(east[0] - 10.5 * D2R * r) < 1e-6 && Math.abs(east[1]) < 1e-9, JSON.stringify(east));
+  assert.ok(Math.abs(west[0] - 9.5 * D2R * r) < 1e-6 && Math.abs(west[1]) < 1e-9, JSON.stringify(west));
   const rot = { lat: 0, lon: 0, zoom: 3, rotation: 90, projection: 0 };
-  assert.equal(RP.sourcePoint(rot, v, 0, 181 * D2R * R(rot)), null, "rotated: x is the map's y axis");
+  assert.equal(RP.sourcePoint(rot, v, -(Math.PI + 0.01) * R(rot), 0), null, "rotated: the map's y is screen X, past the top");
+  assert.ok(RP.sourcePoint(rot, v, -(Math.PI - 0.01) * R(rot), 0), "rotated: just inside the top");
+  assert.ok(RP.sourcePoint(rot, v, 0, 181 * D2R * R(rot)), "rotated: the map's x is screen Y, past lon 180 wraps");
+});
+
+test("sourcePoint: Web Mercator wraps past the date line: a point 30° east of lon 170 samples lon -160", () => {
+  const cam = { lat: 20, lon: 170, zoom: 3, rotation: 0, projection: 0 }, r = R(cam), v = { scale: 0.75, cx: 120, cy: -40 };
+  const got = RP.sourcePoint(cam, v, 30 * D2R * r, 0);
+  assert.ok(got);
+  const want = expected(cam, v, -160, 20);
+  assert.ok(Math.abs(got[0] - want[0]) < 1e-6 && Math.abs(got[1] - want[1]) < 1e-6, JSON.stringify([got, want]));
+});
+
+test("sourcePoint: Web Mercator sampling repeats every world: X and X ± one world give the same point", () => {
+  const cam = { lat: 0, lon: 120, zoom: 2, rotation: 0, projection: 0 }, r = R(cam), v = { scale: 1, cx: 0, cy: 0 };
+  const world = 2 * Math.PI * r;
+  for (const X of [-0.7 * world, -0.2 * world, 0, 0.3 * world, 0.45 * world]) {
+    const a = RP.sourcePoint(cam, v, X, 0), b = RP.sourcePoint(cam, v, X + world, 0), c = RP.sourcePoint(cam, v, X - world, 0);
+    assert.ok(a && b && c, "X " + X);
+    assert.ok(Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[0] - c[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-9, "X " + X + ": " + JSON.stringify([a, b, c]));
+  }
+});
+
+test("visibleRegion: a flat frame wider than the world spans every longitude, and a normal flat frame is unchanged", () => {
+  const world = RP.visibleRegion({ lat: 0, lon: 0, zoom: 0, rotation: 0, projection: 0 }, 1920, 1080);
+  assert.equal(world.dlon0, -180);
+  assert.equal(world.dlon1, 180);
+  assert.equal(world.lat0, -P.MAX_LAT);
+  assert.equal(world.lat1, P.MAX_LAT);
+  // Today's values at zoom 4 (the frame spans less than the world): kept exactly.
+  const z4 = RP.visibleRegion({ lat: 20, lon: 30, zoom: 4, rotation: 0, projection: 0 }, 1920, 1080);
+  assert.ok(Math.abs(z4.dlon0 + 87.74999999999999) < 1e-9 && Math.abs(z4.dlon1 - 87.74999999999999) < 1e-9, JSON.stringify(z4));
+  assert.ok(Math.abs(z4.lat0 + 27.732122928356855) < 1e-9 && Math.abs(z4.lat1 - 57.63126764548396) < 1e-9, JSON.stringify(z4));
 });
 
 test("sourcePoint: the globe's cancellation-free latitude matches the plain formula, also near the poles and at the series switch", () => {

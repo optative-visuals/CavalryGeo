@@ -1412,7 +1412,8 @@ test("script layers get exactly one slot per input (no spare trailing slot)", ()
   assert.equal(api.hasAttribute(map.cameraId, "array.5"), false, "camera has 5 inputs, no n5");
   const pinId = GeoScene.addPin(map, "P", 0, 0);
   assert.equal(api.hasAttribute(pinId, "generator.array.6"), true);
-  assert.equal(api.hasAttribute(pinId, "generator.array.7"), false, "map layer has 7 inputs, no n7");
+  assert.equal(api.hasAttribute(pinId, "generator.array.8"), true);
+  assert.equal(api.hasAttribute(pinId, "generator.array.9"), false, "map layer has 9 inputs (the comp size last), no n9");
 });
 
 test("default styles: countries show borders; states are border lines only", () => {
@@ -1946,7 +1947,7 @@ test("planImagery for EOX plans large images: one per 8x8 block, cropped", () =>
   const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {});
   assert.equal(plan.mode, "images");
   assert.equal(plan.tiles.length, 48);
-  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForTiles(plan.tiles)));
+  assert.deepEqual(plain(plan.items), plain(context.GeoBlocks.blocksForWrappedTiles(plan.tiles)));
   assert.ok(plan.items.length >= 2 && plan.items.length <= 4, String(plan.items.length));
   assert.equal(plan.missing.length, plan.items.length);
   assert.equal(context.GeoScene.itemBase(plan, plan.items[0]),
@@ -1959,7 +1960,7 @@ test("planImagery caps image plans by image count and by tiles' worth", () => {
   fakeCurl(api); context.GeoFetch._reset(); // large images need background downloads
   const map = imageryMap(context, api, 4);
   const asked = [];
-  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) {
     asked.push(maxZoom);
     const hi = Math.min(maxZoom, 10), tiles = [];
     for (let L = 4; L <= hi; L++) for (let i = 0; i < 400; i++) tiles.push({ z: L, x: i % 20, y: Math.floor(i / 20) });
@@ -1982,7 +1983,7 @@ test("planImagery names the tiles' worth limit, counted as the images' own tiles
   const map = imageryMap(context, api, 4);
   const tiles = [];
   for (let i = 0; i < 1200; i++) tiles.push({ z: 6, x: (i % 25) * 2, y: Math.floor(i / 25) });
-  context.GeoTiles.tileSet = function () { return { tiles, lo: 6, hi: 6, frames: 1 }; };
+  context.GeoTiles.bentTileSet = function () { return { tiles, lo: 6, hi: 6, frames: 1 }; };
   const worth = context.GeoBlocks.totalTiles(context.GeoBlocks.blocksForTiles(tiles));
   assert.ok(tiles.length < 2000 && worth > 2000, String(worth));
   assert.throws(() => context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), {}),
@@ -2113,20 +2114,20 @@ test("planImagery refuses a plan over the tile cap with the updated message (F1)
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4);
   const src = tileSource(context);
-  const realTileSet = context.GeoTiles.tileSet;
-  context.GeoTiles.tileSet = function () {
+  const realTileSet = context.GeoTiles.bentTileSet;
+  context.GeoTiles.bentTileSet = function () {
     var tiles = [];
     for (var i = 0; i < 301; i++) tiles.push({ z: 4, x: i, y: 0 });
     return { tiles: tiles, lo: 4, hi: 4, frames: 1 };
   };
   assert.throws(() => context.GeoScene.planImagery(map, src, {}),
     /Too many tiles \(301\) — end the flight at a lower zoom or use a smaller composition\.$/);
-  context.GeoTiles.tileSet = realTileSet;
+  context.GeoTiles.bentTileSet = realTileSet;
 });
 
 // A fake tile set: levels 4..min(maxZoom, 10), perLevel tiles each. Records each maxZoom asked for.
 function fakeLevelTileSet(context, perLevel, asked) {
-  context.GeoTiles.tileSet = function (samples, w, h, minZoom, maxZoom) {
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) {
     asked.push(maxZoom);
     var hi = Math.min(maxZoom, 10), tiles = [];
     for (var L = 4; L <= hi; L++) for (var i = 0; i < perLevel; i++) tiles.push({ z: L, x: i, y: 0 });
@@ -2196,11 +2197,11 @@ test("buildImagery creates levels, drivers and tiles at the back of the map, and
   assert.equal(api.getNiceName(r.groupId), "Imagery: EOX Sentinel-2");
   const kids = api.getChildren(map.groupId);
   assert.equal(kids[kids.length - 2], r.groupId, "imagery at the back of the map group, above the Ocean");
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.ok(level);
   assert.equal(api.getChildren(level).length, 48);
   const conns = api._connections.map((c) => Array.from(c));
-  assert.ok(conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"));
+  assert.ok(!conns.some((c) => c[2] === r.groupId && c[3] === "rotation.z"), "a bent build turns its View, not the group: no rotation driver on the group");
   ["position", "scale", "opacity"].forEach((a) => assert.ok(conns.some((c) => c[2] === level && c[3] === a), a));
   assert.equal(context.GeoScene.findImagery(map).length, 1);
   assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, 48);
@@ -2220,7 +2221,7 @@ test("buildImagery uses only the levels that actually have files for the opacity
   assert.deepEqual([plan.lo, plan.hi], [4, 5]);
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(r.levels, 1, "level 5 has no files and is skipped");
-  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  const driver = imageryChild(api, r.groupId, "Imagery driver: z 4 opacity");
   assert.ok(driver);
   const expr = String(api.get(driver, "expression"));
   assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
@@ -2237,7 +2238,7 @@ test("512-px sources are placed at half scale; tiles without files are skipped",
   const plan = context.GeoScene.planImagery(map, src, { key: "K", style: "streets-v2" });
   const r = context.GeoScene.buildImagery(map, src, { key: "K", style: "streets-v2" }, plan);
   assert.equal(r.tiles, 24);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   const tile = api.getChildren(level)[0];
   assert.equal(api.get(tile, "scale.x"), 0.5 * 260 / 256);
 });
@@ -2251,7 +2252,7 @@ test("buildImagery scales every tile by 260/256 (times 0.5 for 512px sources) to
   context.GeoNet.cachedTile = (base) => base + ".jpg";
   const plan = context.GeoScene.planImagery(map, src, {});
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   const tile = api.getChildren(level)[0];
   assert.equal(api.get(tile, "scale.x"), 260 / 256);
   assert.equal(api.get(tile, "scale.y"), 260 / 256);
@@ -2276,7 +2277,7 @@ test("buildImagery parents layers before setting their local transforms (parent 
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(api.get(r.groupId, "position.x"), 0, "outer imagery group local position must be reset after parenting");
   assert.equal(api.get(r.groupId, "position.y"), 0);
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.equal(api.get(level, "rotation.z"), 0, "level group local rotation must be reset after parenting");
   assert.equal(api.get(level, "position.x"), 0);
   assert.equal(api.get(level, "position.y"), 0);
@@ -2315,7 +2316,7 @@ test("buildImagery removes unreadable (zero-resolution) tiles and reports them a
   assert.equal(r.tiles, 45);
   assert.equal(r.unreadable, 3);
   assert.equal(deleted.length, 3, "only the unreadable footage layers are deleted");
-  const level = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "z 4");
+  const level = levelGroup(api, r.groupId, 4);
   assert.equal(api.getChildren(level).length, 45);
 });
 
@@ -2330,7 +2331,7 @@ test("buildImagery's built-level range ignores a level whose tiles are all unrea
   const r = context.GeoScene.buildImagery(map, src, {}, plan);
   assert.equal(r.levels, 1);
   assert.ok(r.unreadable > 0);
-  const driver = api.getChildren(r.groupId).find((id) => api.getNiceName(id) === "Imagery driver: z 4 opacity");
+  const driver = imageryChild(api, r.groupId, "Imagery driver: z 4 opacity");
   const expr = String(api.get(driver, "expression"));
   assert.ok(expr.includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), expr);
 });
@@ -2398,8 +2399,9 @@ function imageryFixture() {
 function imageryGroups(api) {
   return api.getCompLayers(false).filter((id) => String(api.getNiceName(id)).indexOf("Imagery:") === 0);
 }
+// Footage in any composition: a bent (or flat) build's tiles sit in its source comp, not the map comp.
 function footageCount(api) {
-  return api.getCompLayers(false).filter((id) => /^footageShape#/.test(id)).length;
+  return Object.keys(api._layerComp).filter((id) => /^footageShape#/.test(id)).length;
 }
 function stepToEnd(job, budget, each) {
   const out = [];
@@ -2407,7 +2409,24 @@ function stepToEnd(job, budget, each) {
   do { r = job.step(budget); out.push(r); if (each) each(r); } while (!r.done && out.length < 10000);
   return out;
 }
-function levelGroup(api, groupId, L) { return api.getChildren(groupId).find((id) => api.getNiceName(id) === "z " + L); }
+// The source composition of an imagery group's reference (bent and flat builds), or null (old flat imagery).
+function sourceCompOf(api, groupId) {
+  const ref = api.getChildren(groupId).find((id) => api.getNiceName(id) === "Imagery source");
+  return ref ? api.getCompFromReference(ref) || null : null;
+}
+// A child of an imagery group by its name: directly in the group (old flat imagery), else in its View in
+// the source comp (bent and flat builds keep their level groups and level drivers there).
+function imageryChild(api, groupId, name) {
+  const direct = api.getChildren(groupId).find((id) => api.getNiceName(id) === name);
+  if (direct) return direct;
+  const comp = sourceCompOf(api, groupId);
+  if (!comp) return undefined;
+  return inComp(api, comp, () => {
+    const view = api.getCompLayers(false).find((id) => api.getNiceName(id) === "View");
+    return view ? api.getChildren(view).find((id) => api.getNiceName(id) === name) : undefined;
+  });
+}
+function levelGroup(api, groupId, L) { return imageryChild(api, groupId, "z " + L); }
 
 test("beginImageryBuild adds one tile per zero-budget step and keeps the new group hidden until its drivers are connected", () => {
   const { context, api, map, src, plan } = imageryFixture();
@@ -2570,7 +2589,7 @@ test("an error in a build step tears down the new group and keeps the old imager
 });
 
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
-const PLUGIN_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+const PLUGIN_MISSING = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
 const VIEW_WHICH = ["position", "scale", "maskSize", "viewScale", "viewOffset"];
 // A globe camera at lon 170 sees across the date line (tiles east of it are shifted by one world).
 function bentFixture(cam) {
@@ -2597,10 +2616,10 @@ function bentParts(api, im) {
   return { ref, filter: filter && filter[0], view, mask, top };
 }
 
-test("Bent imagery: an all-Web-Mercator plan is not bent", () => {
+test("Bent imagery: an all-Web-Mercator plan is bent too, so flat imagery repeats through Reproject", () => {
   const { context, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
   const plan = context.GeoScene.planImagery(map, src, {});
-  assert.equal(plan.bent, undefined);
+  assert.equal(plan.bent, true);
   assert.equal(plan.tiles.length, 48);
 });
 
@@ -2779,7 +2798,7 @@ test("Bent imagery: a second bent build replaces the first, layer by layer, then
 
 test("Bent imagery: flat and bent builds of the same source replace each other", () => {
   const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
-  const flat = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const flat = oldFlatBuild(context, map, src); // imagery from an earlier version: footage tiles, no source comp
   assert.equal(context.GeoScene.findImagery(map)[0].meta.bent, undefined);
   api.set(map.cameraId, { "array.4": 2 });
   const bent = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
@@ -2794,11 +2813,12 @@ test("Bent imagery: flat and bent builds of the same source replace each other",
   found = context.GeoScene.findImagery(map);
   assert.equal(found.length, 1);
   assert.equal(found[0].groupId, flat2.groupId);
+  assert.equal(found[0].meta.bent, true, "a flat build now wraps, so it is bent too");
   assert.equal(api.layerExists(bent.groupId), false);
-  assert.deepEqual(compIds(api), [], "the bent source comp is deleted");
+  assert.deepEqual(compIds(api), [found[0].meta.sourceComp], "the bent source comp is deleted, the flat one is the only one left");
   assert.equal(api._comps[comp], undefined);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 0, "the filter is gone");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 1, "one filter, the flat build's");
 });
 
 test("Bent imagery: cancel during tiles discards the new group and deletes the new source comp", () => {
@@ -2859,6 +2879,135 @@ test("Bent imagery: an abandoned half-built bent group is found and removed by t
   assert.equal(context.GeoScene.findImagery(map).length, 1);
   assert.equal(compIds(api).length, 1);
   assert.equal(imageryGroups(api).length, 1);
+});
+
+// ---- Flat imagery through Reproject (task 6): flat builds are bent; old flat imagery is left alone ----
+const OLD_FLAT_NOTE = "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps.";
+const PLUGIN_NEEDED = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+// The base-branch shape of a flat build: footage-tile layers, with no bent flag and no source comp.
+function oldFlatBuild(context, map, src) {
+  const plan = context.GeoScene.planImagery(map, src, {});
+  delete plan.bent;
+  return context.GeoScene.buildImagery(map, src, {}, plan);
+}
+// Makes the world map (flat, the panel's own camera) and tiles that are all downloaded already.
+function flatWorld(context) {
+  createWorldMap(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  return { map: context.GeoScene.findMaps()[0], src: tileSource(context) };
+}
+
+test("Flat imagery: a flat plan is bent, and a flat build makes the source comp, one reference with the Reproject filter and the view drivers", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.bent, true, "a flat plan is bent");
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  const im = found[0], comp = im.meta.sourceComp;
+  assert.equal(im.meta.bent, true);
+  assert.equal(im.groupId, r.groupId);
+  assert.equal(api.getNiceName(comp), "Imagery source: EOX Sentinel-2 · World");
+  assert.deepEqual(compIds(api), [comp], "one source comp");
+  const p = bentParts(api, im);
+  assert.ok(p.ref, "one composition reference");
+  assert.equal(api.getCompFromReference(p.ref), comp);
+  assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.equal(api._connections.filter((c) => c[2] === p.ref && /^filters\.\d+$/.test(c[3])).length, 1, "one filter on the reference");
+  const targets = { position: [p.view, "position"], scale: [p.view, "scale"], maskSize: [p.mask, "generator.dimensions"], viewScale: [p.filter, "viewScale"], viewOffset: [p.filter, "viewOffset"] };
+  VIEW_WHICH.forEach((which) => {
+    const from = inConn(api, targets[which][0], targets[which][1]);
+    assert.ok(from, which + " is driven");
+    assert.equal(api.getParent(from.split(".")[0]), r.groupId, which);
+  });
+});
+
+test("Flat imagery: a camera at lon 179 plans canonical tiles on both sides of the date line, each downloaded once and placed per shift", () => {
+  const { context, api, map, src } = bentFixture({ lon: 179, zoom: 4, projection: 0 });
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const shifts = new Set(plan.items.map((r) => r.shift || 0));
+  assert.ok(shifts.has(0) && shifts.has(1), "tiles on both sides of the date line: shifts " + Array.from(shifts));
+  const r = context.GeoScene.buildImagery(map, src, {}, plan);
+  const canonical = new Set(plan.items.map((x) => context.GeoBlocks.rectKey(x)));
+  assert.equal(r.tiles, plan.items.length, "every placed tile is built");
+  assert.equal(api.getAssetWindowLayers().filter((id) => /^asset#/.test(id)).length, canonical.size, "each canonical tile is loaded once");
+});
+
+test("Flat imagery: a wide flat view at lon 179 places some canonical tiles at two shifts, and still downloads each once", () => {
+  const { context, map, src } = bentFixture({ lon: 179, zoom: 1, projection: 0 });
+  context.GeoNet.cachedTile = () => null;
+  const plan = context.GeoScene.planImagery(map, src, {});
+  const keys = plan.items.map((x) => context.GeoBlocks.rectKey(x));
+  assert.ok(keys.length > new Set(keys).size, "some canonical tile is placed at two shifts");
+  assert.equal(plan.missing.length, new Set(keys).size, "downloaded once");
+  assert.equal(new Set(plan.missing.map((x) => context.GeoBlocks.rectKey(x))).size, plan.missing.length);
+});
+
+test("Flat imagery: without the Cavalry Geo Reproject type a flat build throws the plugin message and makes nothing", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
+  assert.throws(() => context.GeoScene.planImagery(map, src, {}), (e) => e.message === PLUGIN_NEEDED);
+  assert.deepEqual(compIds(api), []);
+  assert.equal(context.GeoScene.findImagery(map).length, 0);
+});
+
+test("Flat imagery: night lights plan bent on a flat map too, so they repeat, and need the Reproject plugin like day imagery", () => {
+  const { context, api, map } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  assert.equal(context.GeoScene.planNightLights(map).bent, true, "night lights are bent on a flat map");
+  assert.equal(context.GeoScene.planNightLights(map).night, true, "and still flagged night");
+  api._layerTypes.splice(api._layerTypes.findIndex((t) => t.type === "cavalryGeo::reproject"), 1);
+  assert.throws(() => context.GeoScene.planNightLights(map), (e) => e.message === PLUGIN_NEEDED);
+});
+
+test("Flat imagery: old flat imagery is left alone by Refresh controls, which reports the note and ends its status with it", () => {
+  const { context, api } = buildSandbox();
+  const { map, src } = flatWorld(context);
+  const old = oldFlatBuild(context, map, src);
+  const kids = api.getChildren(old.groupId).length;
+  const r = context.GeoControlPanel.sync(map);
+  assert.equal(r.imageryNote, OLD_FLAT_NOTE);
+  assert.equal(r.dayNightNote, null);
+  assert.ok(api.layerExists(old.groupId), "the old imagery is still there");
+  assert.equal(api.getChildren(old.groupId).length, kids, "its tiles are untouched");
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, old.groupId);
+  assert.equal(found[0].meta.bent, undefined);
+  assert.deepEqual(compIds(api), [], "no source comp is made for it");
+  context.refreshControlsBtn.onClick();
+  assert.match(context.statusLabel.getText(), new RegExp(OLD_FLAT_NOTE.replace(/[.]/g, "\\.") + "$"));
+});
+
+test("Flat imagery: a rebuild over old flat imagery replaces it with the wrapping build, and the note goes", () => {
+  const { context, api } = buildSandbox();
+  const { map, src } = flatWorld(context);
+  const old = oldFlatBuild(context, map, src);
+  assert.equal(context.GeoControlPanel.sync(map).imageryNote, OLD_FLAT_NOTE);
+  const next = context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+  const found = context.GeoScene.findImagery(map);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].groupId, next.groupId);
+  assert.equal(found[0].meta.bent, true);
+  assert.equal(api.layerExists(old.groupId), false, "the old flat group is deleted");
+  assert.equal(api.getCompLayers(false).filter((id) => api.getLayerType(id) === "cavalryGeo::reproject").length, 1);
+  assert.equal(context.GeoControlPanel.sync(map).imageryNote, null);
+});
+
+test("Flat imagery: a Controls sync makes at most 9 comp scans with a flat build, and with old flat imagery", () => {
+  ["new", "old"].forEach((kind) => {
+    const { context, api } = buildSandbox();
+    const { map, src } = flatWorld(context);
+    if (kind === "old") oldFlatBuild(context, map, src);
+    else context.GeoScene.buildImagery(map, src, {}, context.GeoScene.planImagery(map, src, {}));
+    context.GeoControlPanel.sync(map); // settle
+    let scans = 0;
+    const realScan = api.getCompLayers;
+    api.getCompLayers = function () { scans++; return realScan.apply(this, arguments); };
+    context.GeoControlPanel.sync(map);
+    api.getCompLayers = realScan;
+    assert.ok(scans <= 9, kind + " flat imagery: comp scans " + scans + " (budget 9)");
+  });
 });
 
 // F10: a tile marked empty (404/204 on a previous download) must not show up as
@@ -3577,14 +3726,16 @@ test("Imagery tab: downloads tick every 60 ms, then the same timer builds in 20 
   useCustomTiles(context);
   context.buildImageryBtn.onClick();
   const total = context.imageryState.plan.items.length;
+  // One download tick per tile to fetch: a bent plan (flat imagery too) downloads each canonical tile once, though it places it at two shifts.
+  const downloads = context.imageryState.plan.missing.length;
   context.buildImageryBtn.onClick();
   const timer = api._timers[0];
   assert.equal(timer.interval, 60, "a gap between blocking downloads keeps the UI responsive");
-  for (let i = 0; i < total; i++) timer.callbacks.onTimeout();
+  for (let i = 0; i < downloads; i++) timer.callbacks.onTimeout();
   assert.equal(timer.active, true, "the same timer keeps running to build");
   assert.equal(timer.interval, 20);
+  timer.callbacks.onTimeout(); // the first build step sets the progress bar to the build's total
   assert.equal(context.imageryProgress._max, total);
-  timer.callbacks.onTimeout();
   assert.equal(context.statusLabel.getText(), "Building imagery: 1 / " + total + " tiles…");
   assert.equal(context.imageryProgress._value, 1);
   context.buildImageryBtn.onClick();
@@ -6814,7 +6965,7 @@ test("routes: stops ride with the camera and legs are wired to them", () => {
 const HIN = (name) => "array." + GeoExpressionT.inputIndex(GeoExpressionT.HANDLE_INPUTS, name);
 const LONDON = { name: "London", lon: -0.12, lat: 51.5 }, TOKYO = { name: "Tokyo", lon: 139.7, lat: 35.7 };
 
-test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both stops' places wired in", () => {
+test("routes: shape 1 makes handle helpers with 27 inputs, the camera and both stops' places wired in", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
   const r = context.GeoScene.createRoute(map, [LONDON, TOKYO, { name: "Cairo", lon: 31.2, lat: 30 }], { arc: 30, labels: false, shape: 1 });
@@ -6823,8 +6974,8 @@ test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both s
   d.legs.forEach((l) => {
     const a = d.stops[l.from], b = d.stops[l.to];
     [l.startHandle, l.endHandle].forEach((h) => {
-      assert.equal(api.hasAttribute(h, "array.23"), true);
-      assert.equal(api.hasAttribute(h, "array.24"), false);
+      assert.equal(api.hasAttribute(h, "array.26"), true);
+      assert.equal(api.hasAttribute(h, "array.27"), false);
       assert.equal(api.get(h, HIN("shape")), 1);
       ["camLat", "camLon", "camZoom", "camRotation", "camProjection"].forEach((n, i) => assert.equal(IN(h, HIN(n)), map.cameraId + ".array." + i, n));
       assert.equal(IN(h, HIN("aLon")), a.position + ".array.5");
@@ -6834,6 +6985,135 @@ test("routes: shape 1 makes handle helpers with 24 inputs, the camera and both s
       assert.match(api.get(h, "expression"), /greatCircleHandles/);
     });
   });
+});
+
+test("routes: stops carry their chained longitude and the route's reference, handles the chained ends too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 }, NY = { name: "New York", lon: -74, lat: 40.7 };
+  const r = context.GeoScene.createRoute(map, [TK, LA, NY], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const rawLon = { Tokyo: 139.7, "Los Angeles": -118.2, "New York": -74 };
+  const chainOf = { Tokyo: 139.7, "Los Angeles": 241.8, "New York": 286 };
+  const ref = (139.7 + 286) / 2;
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg + ": " + a + " vs " + b);
+  d.stops.forEach((s) => {
+    near(api.get(s.position, "array.7"), chainOf[s.name], s.name + " chainLon");
+    near(api.get(s.position, "array.8"), ref, s.name + " refLon");
+    assert.equal(api.get(s.position, "array.5"), rawLon[s.name], s.name + " labelLon stays the stop's own longitude");
+    assert.match(api.get(s.position, "expression"), /nearestLon\(_i8/);
+  });
+  // Each handle: the chained ends of its two stops and the route's reference; aLon / bLon stay the raw longitudes (globe, Equal Earth).
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [l.startHandle, l.endHandle].forEach((h) => {
+      near(api.get(h, HIN("aChainLon")), chainOf[a.name], "aChainLon of " + a.name);
+      near(api.get(h, HIN("bChainLon")), chainOf[b.name], "bChainLon of " + b.name);
+      near(api.get(h, HIN("refLon")), ref, "refLon");
+      assert.equal(api.get(h, HIN("aLon")), rawLon[a.name], "aLon raw");
+      assert.equal(api.get(h, HIN("bLon")), rawLon[b.name], "bLon raw");
+      assert.match(api.get(h, "expression"), /_hs/);
+    });
+  });
+});
+
+test("routes: a route inside one copy of the world keeps chained longitudes equal to its own", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId);
+  d.stops.forEach((s, i) => {
+    assert.equal(api.get(s.position, "array.7"), ABC[i].lon);
+    assert.equal(api.get(s.position, "array.8"), 10);
+  });
+});
+
+// Evaluates a route's stored stop-driver and handle expressions at a camera, as Cavalry would: the stop's own inputs
+// (labelLon, chainLon, refLon) and each handle's stored inputs, with the camera and the stops' screen positions given.
+function evalRouteAt(api, d, cam) {
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const camIns = [cam.lat, cam.lon, cam.zoom, cam.rotation, cam.projection];
+  const pos = d.stops.map((s) => run(api.get(s.position, "expression"),
+    camIns.concat([api.get(s.position, "array.5"), api.get(s.position, "array.6"), api.get(s.position, "array.7"), api.get(s.position, "array.8")])));
+  const legs = d.legs.map((l) => {
+    const a = pos[l.from], b = pos[l.to], out = { a, b };
+    [["start", l.startHandle], ["end", l.endHandle]].forEach(([w, h]) => {
+      const ins = new Array(27).fill(0);
+      for (let i = 8; i < 27; i++) ins[i] = api.get(h, "array." + i);
+      camIns.forEach((v, i) => { ins[15 + i] = v; });
+      Object.assign(ins, { 0: a[0], 1: a[1], 4: b[0], 5: b[1] });
+      out[w] = run(api.get(h, "expression"), ins);
+    });
+    return out;
+  });
+  return { pos, legs };
+}
+const PROJ_T = require("../src/core/projection.js"), CURVE_T = require("../src/core/curve.js");
+
+test("routes: round the world (London -> Tokyo -> LA -> London): the closing leg is short and joined, at every camera", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 4, "London's second visit gets its own holder");
+  assert.equal(d.legs.length, 3);
+  d.legs.forEach((l, i) => { assert.equal(l.from, i); assert.equal(l.to, i + 1); });
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg + ": " + a + " vs " + b);
+  near(api.get(d.stops[3].position, "array.7"), 359.88, "second London chained");
+  near(api.get(d.stops[0].position, "array.7"), -0.12, "first London chained");
+  const ref = (-0.12 + 359.88) / 2;
+  d.stops.forEach((s) => near(api.get(s.position, "array.8"), ref, "one refLon for the route"));
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => {
+    const aC = api.get(h, HIN("aChainLon")), bC = api.get(h, HIN("bChainLon"));
+    assert.ok(Math.abs(bC - aC) < 180, "leg takes the short way: " + aC + " -> " + bC);
+  }));
+  [0, 180, 179.9, -179.9].forEach((lon) => {
+    const cam = { lat: 20, lon, zoom: 1, rotation: 0, projection: 0 };
+    const { pos, legs } = evalRouteAt(api, d, cam);
+    const shift = PROJ_T.nearestLon(ref, lon) - ref;
+    d.legs.forEach((l, i) => {
+      const h = legs[i];
+      const h0 = d.legs[i].startHandle;
+      const want = CURVE_T.greatCircleHandles(h.a, h.b, { cam, aLon: api.get(h0, HIN("aChainLon")) + shift, aLat: api.get(h0, HIN("aLat")),
+        bLon: api.get(h0, HIN("bChainLon")) + shift, bLat: api.get(h0, HIN("bLat")), offA: [0, 0], offB: [0, 0] }, { arc: 30, lean: 0, flip: 0 });
+      const arc = CURVE_T.handles(h.a, h.b, { arc: 30, lean: 0, flip: 0 });
+      assert.notDeepEqual(h.start, arc.start, "leg " + i + " at " + lon + " is a great circle, not the arc fallback");
+      near(h.start[0], want.start[0], "leg " + i + " start x at " + lon);
+      near(h.start[1], want.start[1], "leg " + i + " start y at " + lon);
+      near(h.end[0], want.end[0], "leg " + i + " end x at " + lon);
+    });
+    // Joined: each leg ends on the screen point the next leg starts from.
+    legs.forEach((h, i) => { if (i + 1 < legs.length) { near(h.b[0], legs[i + 1].a[0], "joined x " + i); near(h.b[1], legs[i + 1].a[1], "joined y " + i); } });
+    near(pos[3][0] - pos[0][0], 2 * Math.PI * PROJ_T.worldScale(1), "the two Londons sit one world apart (in px), each on its own copy");
+  });
+});
+
+test("routes: London -> Tokyo -> London (no winding) keeps one London holder", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 };
+  const r = context.GeoScene.createRoute(map, [LON, TK, LON], { arc: 30, labels: true, shape: 0 });
+  const d = routeData(api, r.groupId);
+  assert.equal(d.stops.length, 2);
+  assert.equal(d.legs[1].to, 0);
+  assert.equal(d.legs[1].from, 1);
+});
+
+test("routes: a rotated flat camera turns the stops and the great-circle handles with it", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const base = { lat: 20, lon: 0, zoom: 1, projection: 0 };
+  const flat = evalRouteAt(api, d, { ...base, rotation: 0 }), turned = evalRouteAt(api, d, { ...base, rotation: 45 });
+  const t = 45 * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  const rot = (v) => [v[0] * c - v[1] * s, v[0] * s + v[1] * c];
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ": " + a + " vs " + b);
+  flat.pos.forEach((p, k) => { const q = rot(p); near(turned.pos[k][0], q[0], "stop " + k + " x"); near(turned.pos[k][1], q[1], "stop " + k + " y"); });
+  flat.legs[0].start.forEach((v, k) => near(turned.legs[0].start[k], rot(flat.legs[0].start)[k], "start handle " + k));
+  flat.legs[0].end.forEach((v, k) => near(turned.legs[0].end[k], rot(flat.legs[0].end)[k], "end handle " + k));
 });
 
 test("routes: shape defaults to 0 (Arc)", () => {
@@ -6858,7 +7138,7 @@ test("prepareRoutes: an older route's handle helpers gain the new inputs (connec
   d.legs.forEach((l) => {
     const a = d.stops[l.from], b = d.stops[l.to];
     [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
-      assert.equal(api.hasAttribute(h, "array.23"), true);
+      assert.equal(api.hasAttribute(h, "array.26"), true);
       assert.equal(api.get(h, HIN("shape")), 0);
       assert.equal(IN(h, HIN("camLon")), map.cameraId + ".array.1");
       assert.equal(IN(h, HIN("camProjection")), map.cameraId + ".array.4");
@@ -6869,7 +7149,7 @@ test("prepareRoutes: an older route's handle helpers gain the new inputs (connec
     });
   });
   hs.forEach((h, k) => { for (let i = 0; i < 14; i++) assert.equal(api.get(h, "array." + i), old[k][i], "input " + i + " of helper " + k); });
-  const snap = () => JSON.stringify([api._connections, hs.map((h) => [api.get(h, "expression"), Array.from({ length: 24 }, (_, i) => api.get(h, "array." + i))])]);
+  const snap = () => JSON.stringify([api._connections, hs.map((h) => [api.get(h, "expression"), Array.from({ length: 27 }, (_, i) => api.get(h, "array." + i))])]);
   const before = snap();
   context.GeoScene.prepareRoutes(map);
   assert.equal(snap(), before, "a second refresh changes nothing");
@@ -7022,6 +7302,88 @@ test("routes: Pin here turns a dragged stop into its new place and zeroes the dr
   assert.deepEqual([p.x !== undefined ? p.x : p[0], p.y !== undefined ? p.y : p[1]], [0, 0]);
 });
 
+test("routes: Pin here keeps a route stop where it was dragged (flat at camera 0 and 180, globe), the other stops too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1, msg + ": " + a + " vs " + b);
+  [{ lon: 0, projection: 0 }, { lon: 180, projection: 0 }, { lon: 140, projection: 2 }].forEach((c) => {
+    const cam = { lat: 20, lon: c.lon, zoom: 1, rotation: 0, projection: c.projection };
+    d.stops.forEach((s) => api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection }));
+    const before = evalRouteAt(api, d, cam).pos;
+    d.stops.forEach((s, k) => api.set(s.holder, { position: { x: before[k][0], y: before[k][1], z: 0 } }));   // what the drivers computed
+    api.set(d.stops[0].circle, { position: { x: 12, y: -7, z: 0 } });                                       // the user's drag
+    const dragged = [before[0][0] + 12, before[0][1] - 7];
+    assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[0].circle])), { pinned: 1, offGlobe: [] });
+    const after = evalRouteAt(api, d, cam).pos;
+    const tag = JSON.stringify(c);
+    near(after[0][0], dragged[0], "dragged stop x " + tag); near(after[0][1], dragged[1], "dragged stop y " + tag);
+    near(after[1][0], before[1][0], "other stop x " + tag); near(after[1][1], before[1][1], "other stop y " + tag);
+    // The route stays chained: its handles follow the stops' chained longitudes.
+    const legs = evalRouteAt(api, d, cam).legs;
+    assert.ok(legs[0].start.every(Number.isFinite), "leg still draws " + tag);
+    api.set(d.stops[0].circle, { position: { x: 0, y: 0, z: 0 } });
+  });
+});
+
+// Drags stop k of a route by (dx, dy) on the camera, Pins it, and returns the screen points before and after.
+function dragAndPin(api, context, map, d, cam, k, dx, dy) {
+  d.stops.forEach((s) => api.set(s.position, { "array.0": cam.lat, "array.1": cam.lon, "array.2": cam.zoom, "array.3": cam.rotation, "array.4": cam.projection }));
+  const before = evalRouteAt(api, d, cam).pos;
+  d.stops.forEach((s, j) => api.set(s.holder, { position: { x: before[j][0], y: before[j][1], z: 0 } }));
+  api.set(d.stops[k].circle, { position: { x: dx, y: dy, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[k].circle])), { pinned: 1, offGlobe: [] });
+  const after = evalRouteAt(api, d, cam).pos;
+  api.set(d.stops[k].circle, { position: { x: 0, y: 0, z: 0 } });
+  return { before: before[k], dragged: [before[k][0] + dx, before[k][1] + dy], after: after[k], all: { before, after } };
+}
+
+test("routes: Pin here keeps a stop chained past 180 (LA) and a second London visit (~359.9) on their copies", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1, msg + ": " + a + " vs " + b);
+  const r = context.GeoScene.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  [0, 180].forEach((lon) => {
+    const cam = { lat: 20, lon, zoom: 1, rotation: 0, projection: 0 };
+    const chain0 = api.get(d.stops[2].position, "array.7");
+    const la = dragAndPin(api, context, map, d, cam, 2, 12, -7);
+    near(la.after[0], la.dragged[0], "LA x at camera " + lon); near(la.after[1], la.dragged[1], "LA y at camera " + lon);
+    // The chain moves with the drag (12 px at zoom 1 is about 8.4 degrees) and stays on LA's copy, past 180.
+    assert.ok(Math.abs(api.get(d.stops[2].position, "array.7") - chain0) < 10, "LA stays on its copy at camera " + lon + ": " + api.get(d.stops[2].position, "array.7"));
+  });
+  const cam0 = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 0 };
+  const ld = dragAndPin(api, context, map, d, cam0, 3, 12, -7);
+  near(ld.after[0], ld.dragged[0], "London' x at camera 0"); near(ld.after[1], ld.dragged[1], "London' y at camera 0");
+  assert.ok(Math.abs(api.get(d.stops[3].position, "array.7") - 359.88) < 10, "London' stays near 359.9");
+});
+
+test("routes: a stop pinned on the globe (wrapped longitude) keeps its chained copy on the flat map", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = routeData(api, r.groupId);
+  const flatCam = { lat: 20, lon: 180, zoom: 1, rotation: 0, projection: 0 };
+  const before = evalRouteAt(api, d, flatCam).pos;
+  // LA seen from a globe centred at 180 (it is on the near side): pinned, its longitude comes back wrapped (-118.2).
+  const globe = { lat: 20, lon: 180, zoom: 1, rotation: 0, projection: 2 };
+  d.stops.forEach((s) => api.set(s.position, { "array.0": 20, "array.1": 180, "array.2": 1, "array.3": 0, "array.4": 2 }));
+  api.set(d.stops[1].holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(d.stops[1].circle, { position: { x: 0, y: 0, z: 0 } });
+  const gp = evalRouteAt(api, d, globe).pos[1];
+  api.set(d.stops[1].holder, { position: { x: gp[0], y: gp[1], z: 0 } });
+  api.set(d.stops[1].circle, { position: { x: 0, y: 0, z: 0 } });
+  assert.deepEqual(plain(context.GeoScene.pinStops(map, [d.stops[1].circle])), { pinned: 1, offGlobe: [] });
+  const chain = api.get(d.stops[1].position, "array.7");
+  assert.ok(Math.abs(chain - 241.8) < 180, "chain stays on LA's copy, got " + chain);
+  const flat = evalRouteAt(api, d, flatCam).pos;
+  assert.ok(Math.abs(flat[1][0] - before[1][0]) < 1, "LA still at its flat place: " + flat[1][0] + " vs " + before[1][0]);
+});
+
 test("routes: Pin here keeps a stop dragged off the globe's edge, and ignores other layers", () => {
   const { context, api } = buildSandbox();
   const map = routeMap(context);
@@ -7046,6 +7408,27 @@ test("routes: Pin here treats a stop whose camera inputs aren't numbers as off t
   assert.deepEqual(plain(context.GeoScene.pinStops(map, [s.circle])), { pinned: 0, offGlobe: ["A"] });
   assert.equal(api.get(s.position, "array.5"), 0, "the stop keeps its place");
   assert.deepEqual(plain(api.get(s.circle, "position")), { x: 10, y: 10, z: 0 }, "and its drag");
+});
+
+test("routes: Pin here on a stop with only seven inputs never reads the shift inputs (8 and the old chain)", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const r = context.GeoScene.createRoute(map, ABC, { arc: 30, labels: false });
+  const s = routeData(api, r.groupId).stops[0];
+  api.set(s.holder, { position: { x: 0, y: 0, z: 0 } });
+  api.set(s.circle, { position: { x: 10, y: 10, z: 0 } });
+  api.set(s.position, { "array.0": 0, "array.1": 10, "array.2": 4, "array.3": 0, "array.4": 0 });
+  api.set(s.position, { "array.7": undefined, "array.8": undefined }); // a seven-input stop: no chain or ref inputs
+  const realGet = api.get;
+  api.get = function (id, attr) {
+    if (id === s.position && /^array\.[78]$/.test(attr)) throw new Error("no attribute " + attr);
+    return realGet.apply(this, arguments);
+  };
+  let res;
+  try { res = plain(context.GeoScene.pinStops(map, [s.circle])); } finally { api.get = realGet; }
+  assert.deepEqual(res, { pinned: 1, offGlobe: [] });
+  assert.ok(Number.isFinite(api.get(s.position, "array.5")) && Number.isFinite(api.get(s.position, "array.6")), "the stop is placed");
+  assert.equal(api.hasAttribute(s.position, "array.7"), false, "and gets no chain input");
 });
 
 test("controls: a new route gets its four rows beside the stop rows; Arc height drives every handle", () => {
@@ -8769,6 +9152,15 @@ test("highlights: the effects list", () => {
   assert.deepEqual(plain(context.GeoScene.HIGHLIGHT_EFFECTS), [{ id: "fill", name: "Fill in" }, { id: "outline", name: "Outline draw-on" }, { id: "pulse", name: "Pulse" }, { id: "glow", name: "Glow" }]);
 });
 
+test("highlights: the shape is drawn whole, once, nearest the camera (no copies on a flat map)", () => {
+  const { context, api } = buildSandbox();
+  const { map, extract } = highlightMap(context), G = context.GeoScene;
+  const rec = hlRec(api, G.createHighlight(map, extract, "fill", { start: 0, duration: 20 }));
+  const expr = api.get(rec.shape, "generator.expression");
+  assert.ok(expr.includes("ellipseScale: 1, whole: true}"), "buildPath gets whole: true");
+  assert.ok(!expr.includes("frame: {"), "a highlight gets no comp frame");
+});
+
 test("highlights: Fill in makes a numbered group directly above the extract, a filled shape from the extract's data, keyed opacity", () => {
   const { context, api } = buildSandbox();
   const { map, extract } = highlightMap(context), G = context.GeoScene;
@@ -9517,9 +9909,50 @@ const coRec = (api, g) => plain(api.getUserDataKey(g, "geoCallout"));
 const near = (a, b) => Math.abs(a - b) < 1e-6;
 // Where a new callout's label starts: the place's screen point + (160, 100), clamped inside the comp (1920 x 1080, 40 px margin).
 function labelStart(context, map, lon, lat) {
-  const p = plain(context.GeoRuntime.projectPoint(lon, lat, context.GeoScene.readCamera(map.cameraId)));
+  const p = plain(context.GeoRuntime.projectNearest(lon, lat, context.GeoScene.readCamera(map.cameraId)));
   return [Math.max(-960 + 40, Math.min(960 - 240, p[0] + 160)), Math.max(-540 + 40, Math.min(540 - 40, p[1] + 100))];
 }
+
+test("nearest copy: pins, labels and callout places use projectNearest; route stop drivers keep projectPoint", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, map = calloutMap(context);
+  const pin = G.addPin(map, "Here", 179.5, 0);
+  const text = G.createLabel(map, "There", 179.5, 0);
+  G.createCallout(map, { lon: 179.5, lat: 0 }, "Callout");
+  G.createRoute(map, [{ name: "A", lon: 179.5, lat: 0 }, { name: "B", lon: -170, lat: 10 }], { lift: 30, pins: false, labels: false });
+  const layers = api.getCompLayers(false);
+  const categoryOf = (id) => { const m = context.GeoExpression.readTag(String(api.get(id, "expression") || api.get(id, "generator.expression") || ""), "GEO_META"); return m && m.category; };
+  const seen = {};
+  layers.forEach((id) => {
+    const expr = String(api.get(id, "expression") || api.get(id, "generator.expression") || "");
+    const cat = categoryOf(id);
+    if (!cat) return;
+    seen[cat] = true;
+    if (["pin", "label", "labelDriver", "calloutPlace"].indexOf(cat) >= 0) assert.ok(expr.includes("GeoRuntime.projectNearest(") || expr.includes("nearest: true"), cat + " should use the nearest copy");
+    if (cat === "stopDriver") { assert.ok(expr.includes("GeoRuntime.projectPoint(") && !expr.includes("GeoRuntime.projectNearest("), "route stops are not part of this task"); }
+  });
+  ["pin", "labelDriver", "calloutPlace", "stopDriver"].forEach((c) => assert.ok(seen[c], "a " + c + " layer was made"));
+  assert.ok(pin && text);
+});
+
+test("old-style route stops keep the global placement; standalone pins and labels use the nearest copy", () => {
+  const { context, api } = buildSandbox();
+  delete api.setGenerator;   // the old-style route (script legs, pins, labels) is what this checks
+  const G = context.GeoScene, map = calloutMap(context);
+  const standalone = G.addPin(map, "Solo", 179.5, 0);
+  const r = G.createRoute(map, [{ name: "A", lon: 170, lat: 0 }, { name: "B", lon: -170, lat: 0 }], { lift: 30, pins: true, labels: true });
+  const pins = api.getChildren(r.groupId).filter((id) => String(api.getNiceName(id)).indexOf("Pin: ") === 0);
+  assert.equal(pins.length, 2);
+  pins.forEach((id) => {
+    const expr = String(api.get(id, "generator.expression"));
+    assert.ok(!expr.includes("GeoRuntime.projectNearest(") && !expr.includes("nearest: true"), "old-route pin keeps the global placement");
+  });
+  const labelDriver = api._connections.map((c) => Array.from(c)).find((c) => c[3] === "position" && String(api.getNiceName(c[2])) === "A");
+  assert.ok(labelDriver, "old-route stop label has a position driver");
+  const labelExpr = String(api.get(labelDriver[0], "expression"));
+  assert.ok(!labelExpr.includes("GeoRuntime.projectNearest(") && labelExpr.includes("GeoRuntime.projectPoint("), "old-route label keeps the global placement");
+  assert.ok(String(api.get(standalone, "generator.expression")).includes("nearest: true"), "a standalone pin uses the nearest copy");
+});
 
 test("callouts: createCallout makes a numbered group with every member named and parented", () => {
   const { context, api } = buildSandbox();
@@ -9585,7 +10018,7 @@ test("callouts: the size utility reads the label; the place and fade drivers fol
   assert.equal(api.get(rec.place, "array.5"), 2.35); assert.equal(api.get(rec.place, "array.6"), 48.85);
   assert.equal(api.getInConnection(rec.fade, "array.5"), rec.place + ".array.5", "the fade reads lon / lat from the place driver");
   assert.equal(api.getInConnection(rec.fade, "array.6"), rec.place + ".array.6");
-  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN));
+  assert.equal(api.get(rec.place, "expression"), E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutPlace" }, context.GeoAttrs.DRIVER_RETURN, { nearest: true }));
   assert.equal(api.get(rec.fade, "expression"), E.labelVisibilityExpression(context.GEO_RUNTIME_SRC, { camera: map.cameraId, category: "calloutFade" }));
   assert.equal(api.getInConnection(rec.dot, "position"), rec.place + ".id");
   [rec.dot, rec.line1, rec.line2].forEach((id) => assert.equal(api.getInConnection(id, "opacity"), rec.fade + ".id"));
@@ -12730,8 +13163,8 @@ test("the panel never calls api.processEvents (running the user's clicks inside 
 const nightMattes = (api, id) => api._connections.filter((c) => c[2] === id && /^trackMattes\.\d+$/.test(c[3])).map((c) => c[0]);
 const nightFootage = (api, groupId) => api.getChildren(groupId).filter((id) => /^z -?\d+$/.test(String(api.getNiceName(id))))
   .reduce((a, lg) => a.concat(api.getChildren(lg)), []);
-// The tiles of a Night lights group: a flat build pre-comps them under View in its source comp (the group
-// holds one "Imagery source" reference); a bent build's tiles are read the same way.
+// The tiles of a Night lights group: they sit under View in its source comp (the group holds one "Imagery source"
+// reference). Older flat builds pre-comped them the same way, without the filter.
 const nightTiles = (api, groupId) => {
   const ref = api.getChildren(groupId).find((id) => api.getNiceName(id) === "Imagery source");
   if (!ref) return nightFootage(api, groupId);
@@ -12781,38 +13214,39 @@ test("night lights: a flat build makes a Night lights group at the top of Day & 
   assert.equal(api.getParent(r.groupId), dn);
   assert.equal(api.getChildren(dn)[0], r.groupId, "top child of Day & night");
   assert.equal(r.night, true);
-  // One composition reference, matted by the four night layers, with no reproject filter.
+  // One composition reference, matted by the four night layers, with the Reproject filter.
   const kids = api.getChildren(r.groupId);
   const refs = kids.filter((id) => api.getNiceName(id) === "Imagery source");
   assert.equal(refs.length, 1, "one Imagery source reference");
   assert.deepEqual(nightMattes(api, refs[0]), rec.layers);
-  assert.equal(api._connections.filter((c) => c[2] === refs[0] && /^filters\.\d+$/.test(c[3])).length, 0, "no filter on the reference");
+  assert.equal(api._connections.filter((c) => c[2] === refs[0] && /^filters\.\d+$/.test(c[3])).length, 1, "one Reproject filter on the reference");
   assert.equal(api.getCompFromReference(refs[0]), G.findNightLights(map)[0].meta.sourceComp);
   // The four night layers are matted on the reference only; no footage in the map comp has a matte.
   assert.deepEqual(plain(G.findImagery(map).map((i) => i.groupId)), [d.groupId], "day imagery only");
   assert.ok(api.layerExists(d.groupId), "day imagery untouched");
-  // The source comp: the map comp's size, frame range and frame rate, and View -> level groups -> tiles.
+  // The source comp: the map comp's frame range and frame rate, and View (with its mask) -> level groups -> tiles.
   const night = G.findNightLights(map);
   assert.deepEqual(plain(night.map((i) => i.groupId)), [r.groupId]);
   assert.equal(night[0].meta.night, true);
   assert.equal(night[0].meta.category, "imagery");
-  assert.ok(!night[0].meta.bent, "flat, not bent");
+  assert.equal(night[0].meta.bent, true, "bent, like day imagery");
   const comp = night[0].meta.sourceComp;
   assert.equal(api.getNiceName(comp), "Imagery source: NASA Black Marble · World");
-  assert.deepEqual(plain(api.get(comp, "resolution")), plain(api.get("comp#1", "resolution")), "the map comp's resolution");
+  assert.deepEqual(compIds(api).sort(), [G.findImagery(map)[0].meta.sourceComp, comp].sort(), "the day source comp and the night one");
   assert.deepEqual(plain(api.get(comp, "frameRange")), { x: 2, y: 50 });
   assert.equal(api.get(comp, "fps"), 24);
-  const top = inComp(api, comp, () => api.getCompLayers(false));
-  const view = top.find((id) => api.getNiceName(id) === "View");
-  assert.ok(view, "a View group in the source comp");
-  assert.equal(top.filter((id) => api.getNiceName(id) === "View mask").length, 0, "no View mask");
-  const tiles = inComp(api, comp, () => nightFootage(api, view));
+  const p = bentParts(api, night[0]);
+  assert.equal(p.ref, refs[0]);
+  assert.equal(api.getLayerType(p.filter), "cavalryGeo::reproject");
+  assert.ok(p.view, "a View group in the source comp");
+  assert.ok(p.mask, "a View mask in the source comp");
+  const tiles = inComp(api, comp, () => nightFootage(api, p.view));
   assert.equal(tiles.length, r.tiles);
   assert.ok(tiles.length > 0);
   tiles.forEach((t) => assert.deepEqual(nightMattes(api, t), [], "tiles are not matted"));
-  // The rotation driver is tagged in the map comp (in Night lights) and turns View.
+  // The position driver is tagged in the map comp (in Night lights) and drives View.
   assert.equal(api.getParent(night[0].driverId), r.groupId);
-  assert.ok(api._connections.some((c) => c[0] === night[0].driverId && c[2] === view && c[3] === "rotation.z"), "rotation driver -> View rotation.z");
+  assert.ok(api._connections.some((c) => c[0] === night[0].driverId && c[2] === p.view && c[3] === "position"), "position driver -> View position");
 });
 
 test("night lights: a flat night build's source comp is filed in the map's imagery asset group (version 1)", () => {
@@ -12831,11 +13265,12 @@ test("night lights: a flat night build's source comp is deleted when the night l
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   const d = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
-  assert.equal(compIds(api).length, 1);
+  assert.deepEqual(compIds(api).sort(), [dayComp, G.findNightLights(map)[0].meta.sourceComp].sort());
   api.deleteLayer(d.groupId);
   assert.equal(G.prepareNightLights(map).removed, 1);
-  assert.deepEqual(compIds(api), [], "the night source comp is gone");
+  assert.deepEqual(compIds(api), [dayComp], "the night source comp is gone; the day one is not the night lights'");
   assert.equal(api.getActiveComp(), "comp#1");
 });
 
@@ -12862,12 +13297,13 @@ test("night lights: a rebuild replaces the Night lights group, and a day rebuild
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const first = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   const firstComp = G.findNightLights(map)[0].meta.sourceComp;
   const again = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.equal(api.layerExists(first.groupId), false, "old Night lights removed");
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "one Night lights group");
-  assert.deepEqual(compIds(api), [G.findNightLights(map)[0].meta.sourceComp], "the old night source comp is deleted");
+  assert.deepEqual(compIds(api).sort(), [dayComp, G.findNightLights(map)[0].meta.sourceComp].sort(), "the old night source comp is deleted");
   assert.notEqual(G.findNightLights(map)[0].meta.sourceComp, firstComp);
   const dayAgain = G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
   assert.deepEqual(plain(G.findNightLights(map).map((i) => i.groupId)), [again.groupId], "night lights kept by a day rebuild");
@@ -12892,13 +13328,14 @@ test("night lights: cancelling a flat night build discards its group and its sou
   const { context, api, map, dn, rec } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
   job.step(0); job.step(0);
-  assert.equal(compIds(api).length, 1, "the source comp exists mid-build");
+  assert.equal(compIds(api).length, 2, "the night source comp exists mid-build, beside the day one");
   assert.equal(job.cancel(), true);
   const steps = stepToEnd(job, 0, () => assert.equal(api.getActiveComp(), "comp#1"));
   assert.equal(steps[steps.length - 1].cancelled, true);
-  assert.deepEqual(compIds(api), [], "the source comp is deleted");
+  assert.deepEqual(compIds(api), [dayComp], "the night source comp is deleted");
   assert.equal(G.findNightLights(map).length, 0);
   assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
   rec.layers.forEach((l) => assert.equal(api.get(l, "hidden"), false, "night layer " + l + " shown after cancel"));
@@ -12908,12 +13345,13 @@ test("night lights: a throw after the flat source comp exists deletes it and the
   const { context, api, map, dn } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   const before = api.getCompLayers(false).slice().sort();
   api.createCompReference = function () { throw new Error("no reference"); };
   const job = G.beginImageryBuild(map, context.GeoSources.night(), {}, G.planNightLights(map));
   assert.throws(() => job.step(0), /no reference/);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.deepEqual(compIds(api), [], "the new source comp is deleted");
+  assert.deepEqual(compIds(api), [dayComp], "the new source comp is deleted");
   assert.deepEqual(api.getCompLayers(false).slice().sort(), before, "nothing left in the map comp");
   assert.equal(G.findNightLights(map).length, 0);
   assert.deepEqual(api.getChildren(dn).filter((id) => api.getNiceName(id) === "Night lights"), []);
@@ -12923,6 +13361,7 @@ test("night lights: a throw in the middle of a flat night build deletes the grou
   const { context, api, map } = nightFixture(4);
   const G = context.GeoScene, day = tileSource(context);
   G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const dayComp = G.findImagery(map)[0].meta.sourceComp;
   let calls = 0;
   const realAdd = api.addAssetToComp.bind(api);
   api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
@@ -12930,7 +13369,7 @@ test("night lights: a throw in the middle of a flat night build deletes the grou
   job.step(0); job.step(0);
   assert.throws(() => job.step(0), /boom/);
   assert.equal(api.getActiveComp(), "comp#1");
-  assert.deepEqual(compIds(api), []);
+  assert.deepEqual(compIds(api), [dayComp], "only the day source comp is left");
   assert.equal(G.findNightLights(map).length, 0);
 });
 
@@ -13037,6 +13476,64 @@ test("night lights: Controls sync and the route order never look inside the Nigh
   assert.ok(asked.length > 0);
   assert.deepEqual(asked.filter((id) => inside.has(id)), []);
   assert.equal(promotedNames(api, r.componentId).filter((name) => /Night lights/.test(name)).length, 0, "no night lights row among the imagery");
+});
+
+// An older flat night build (pre-comped, from before the Reproject filter): a source comp the size of the map comp
+// with View (one level group) in it, one reference with no filter matted by the Night rectangle, and a driver tagged
+// as imagery with night and sourceComp but no bent flag. Made by hand, since new builds no longer make it.
+function oldPrecompNight(context, api, map) {
+  const G = context.GeoScene, E = context.GeoExpression;
+  const dn = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const mapComp = api.getActiveComp();
+  const comp = api.createComp("Imagery source: NASA Black Marble · World");
+  api.set(comp, { resolution: api.get(mapComp, "resolution") });
+  api.setActiveComp(comp);
+  const view = api.create("group", "View");
+  api.parent(api.create("group", "z 3"), view);
+  api.setActiveComp(mapComp);
+  const outer = api.create("group", "Night lights");
+  api.parent(outer, dn);
+  const ref = api.createCompReference(comp);
+  api.rename(ref, "Imagery source");
+  api.parent(ref, outer);
+  api.connect(dnRec(api, dn).night, "id", ref, "trackMattes");
+  const meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: "old-night", night: true, sourceComp: comp };
+  const driver = api.create("javaScript", "Imagery driver: rotation");
+  api.set(driver, { expression: E.writeTag("GEO_META", meta) });
+  api.parent(driver, outer);
+  return { comp, outer, ref, view, dn };
+}
+
+test("night lights: an older flat (pre-comped) night group is found, kept while wanted, and taken down by its teardown (version 1)", () => {
+  const { context, api, map } = nightFixtureV2(4);
+  const G = context.GeoScene, day = tileSource(context);
+  G.buildImagery(map, day, {}, G.planImagery(map, day, {}));
+  const old = oldPrecompNight(context, api, map);
+  const found = G.findNightLights(map);
+  assert.deepEqual(plain(found.map((i) => i.groupId)), [old.outer], "found as night lights");
+  assert.equal(found[0].meta.sourceComp, old.comp);
+  assert.ok(!found[0].meta.bent, "no bent flag: an older flat build");
+  assert.equal(G.nightLightsStatus(map).wanted, true, "satellite day imagery with Day & night");
+  assert.equal(G.prepareNightLights(map).needsBuild, false, "the older night lights are kept; none is due");
+  assert.equal(api.layerExists(old.outer), true, "not rebuilt or removed");
+  G.removeNightLights(map);
+  assert.equal(api.layerExists(old.outer), false, "the group is taken down");
+  assert.equal(api.layerExists(old.ref), false, "its reference is taken down");
+  assert.ok(!compIds(api).includes(old.comp), "its source comp is deleted");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.equal(api.getActiveComp(), "comp#1");
+});
+
+test("night lights: an older flat (pre-comped) night group with no satellite day imagery is removed by Refresh controls (version 1)", () => {
+  const { context, api, map } = nightFixtureV2(4);
+  const G = context.GeoScene;
+  const old = oldPrecompNight(context, api, map);
+  assert.equal(G.nightLightsStatus(map).orphaned, true, "orphaned without satellite imagery");
+  context.GeoControlPanel.sync(map);
+  assert.equal(api.layerExists(old.outer), false, "the group is removed");
+  assert.ok(!compIds(api).includes(old.comp), "its source comp is deleted");
+  assert.equal(G.findNightLights(map).length, 0);
+  assert.equal(api.getActiveComp(), "comp#1");
 });
 
 // ---- Night lights, version 2: one matte, the Night rectangle ----
@@ -13619,4 +14116,354 @@ test("night lights in the panel: a day build over an older overlay without the p
   context.buildImageryBtn.onClick();
   const seen = runSeen(context, api);
   assert.ok(seen.some((s) => /^Imagery built: .* Credit: .* · NASA Black Marble 2016 \(NASA Earth Observatory \/ Suomi NPP VIIRS\)/.test(s)), seen.join(" | "));
+});
+
+// Date line: base and data layers take the comp size as their frame (compW / compH) and repeat on flat maps;
+// pins and old-style route stop pins draw once, as single things do.
+test("date line: base and data layers get the comp size and repeat; pins and old-style route stops do not", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, E = context.GeoExpression;
+  const map = G.createMap("World", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  const at = (inputs, n) => "generator.array." + E.inputIndex(inputs, n);
+  const expr = (id) => String(api.get(id, "generator.expression"));
+  const countries = G.createMapLayer(map, "Countries", { v: 1, kind: "polygon", f: [] }, { camera: map.cameraId, category: "countries" }, {}, {});
+  assert.equal(api.get(countries, at(E.MAP_LAYER_INPUTS, "compW")), 1080);
+  assert.equal(api.get(countries, at(E.MAP_LAYER_INPUTS, "compH")), 1080);
+  assert.ok(expr(countries).includes("frame: {w: _i7, h: _i8}"));
+  assert.ok(!expr(G.addPin(map, "Paris", 2.35, 48.85, null, true)).includes("frame: {w:"));
+  assert.ok(!expr(G.addPin(map, "Stop", 2.35, 48.85, null, false)).includes("frame: {w:"));
+  const d = G.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: false });
+  assert.equal(api.get(d.layers.regions, at(E.REGION_INPUTS, "compW")), 1080);
+  assert.equal(api.get(d.layers.bubbles, at(E.BUBBLE_INPUTS, "compH")), 1080);
+  assert.ok(expr(d.layers.regions).includes("frame: {w: _i16, h: _i17}"));
+  assert.ok(expr(d.layers.bubbles).includes("frame: {w: _i9, h: _i10}"));
+  assert.ok(expr(d.layers.labels).includes("frame: {w: _i11, h: _i12}"));
+  api.get = realGet;
+});
+
+// Date line: Bake keeps the copies a wide flat shot shows; single things and old layers bake one world.
+test("Bake: a repeating flat layer bakes every copy the comp frame shows; pins and old layers bake one world", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("Wide", { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+  const enc = { v: 1, kind: "polygon", f: [] };
+  const japan = context.GeoCodec.encodeLayer({ kind: "polygon", features: [{ name: "J", rank: 1, rings: [[[130, 30], [146, 30], [146, 46], [130, 46], [130, 30]]] }] });
+  const shot = { lat: 0, lon: 179, zoom: 2, rotation: 0, projection: 0 };
+  const layer = G.createMapLayer(map, "Japan", japan, { camera: map.cameraId, category: "countries" }, {}, {});
+  api.set(layer, { "generator.array.0": shot.lat, "generator.array.1": shot.lon, "generator.array.2": shot.zoom, "generator.array.3": 0, "generator.array.4": 0 });
+  const calls = [];
+  const realBuild = context.GeoRuntime.buildPath;
+  context.GeoRuntime.buildPath = function (e, cam, detail, opts) { calls.push(opts); return realBuild.apply(this, arguments); };
+  let baked = null;
+  const realEditable = api.createEditable;
+  api.createEditable = function (path, name) { baked = path; return realEditable.apply(this, arguments); };
+  try {
+    G.bake(layer);
+    assert.equal(calls[calls.length - 1].frame.w, 1920);
+    assert.equal(calls[calls.length - 1].frame.h, 1080, "the comp size is the frame");
+    const reference = realBuild.call(context.GeoRuntime, japan, shot, 100, { frame: { w: 1920, h: 1080 } }, baked.constructor);
+    assert.deepEqual(JSON.parse(JSON.stringify(baked._cmds)), JSON.parse(JSON.stringify(reference._cmds)), "baked = buildPath with the frame");
+    assert.equal(baked._cmds.filter((c) => c[0] === "moveTo").length, 2, "Japan at lon 179, zoom 2: two copies on the frame");
+
+    const pin = G.addPin(map, "Paris", 2.35, 48.85, null, true);
+    api.set(pin, { "generator.array.0": 0, "generator.array.1": 179, "generator.array.2": 2, "generator.array.3": 0, "generator.array.4": 0 });
+    G.bake(pin);
+    assert.equal(calls[calls.length - 1].frame, null, "a pin bakes one world");
+
+    api.set(layer, { "generator.expression": String(api.get(layer, "generator.expression")).replace(/, frame: \{w: _i7, h: _i8\}/, "") });
+    G.bake(layer);
+    assert.equal(calls[calls.length - 1].frame, null, "an old layer without the frame option bakes one world");
+    assert.equal(baked._cmds.filter((c) => c[0] === "moveTo").length, 1);
+  } finally {
+    context.GeoRuntime.buildPath = realBuild;
+    api.createEditable = realEditable;
+  }
+});
+
+// Bake matches the live draw for a pin: on the copy nearest the camera, not a world away (camera at -178, pin at 178).
+test("Date line: bake puts a pin on the copy nearest the camera, as it draws live", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = G.createMap("Wide", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const pin = G.addPin(map, "Here", 178, 0, null, true);
+  const shot = { lat: 0, lon: -178, zoom: 4, rotation: 0, projection: 0 };
+  api.set(pin, { "generator.array.0": shot.lat, "generator.array.1": shot.lon, "generator.array.2": shot.zoom, "generator.array.3": 0, "generator.array.4": 0, "generator.array.5": 100, "generator.array.6": 8 });
+  const realEditable = api.createEditable;
+  let baked = null;
+  api.createEditable = function (path) { baked = path; return realEditable.apply(this, arguments); };
+  try { G.bake(pin); } finally { api.createEditable = realEditable; }
+  const dots = baked._cmds.filter((c) => c[0] === "addEllipse");
+  assert.equal(dots.length, 1);
+  const enc = context.GeoCodec.encodeLayer({ kind: "point", features: [{ name: "Here", rank: 1, rings: [[[178, 0]]] }] });
+  const live = context.GeoRuntime.buildPath(enc, shot, 100, { pointRadius: 8, ellipseScale: 1, nearest: true }, baked.constructor);
+  const want = live._cmds.filter((c) => c[0] === "addEllipse")[0];
+  assert.ok(Math.abs(dots[0][1] - want[1]) < 1e-6 && Math.abs(dots[0][2] - want[2]) < 1e-6, `baked ${dots[0][1]} vs live ${want[1]}`);
+  assert.ok(Math.abs(dots[0][1]) < 100, "the copy near the camera, not one world (about 4000 px) away");
+});
+
+// Date line, task 8: Refresh controls brings a map made before the date line up to date.
+// An older map is this version's layers made, then aged to the base branch's shapes: their inputs stop before the
+// comp size and the chained longitudes, and their expressions have no frame, nearest, whole or chained option.
+function dlBase(expr) {
+  return expr.replace(/, frame: \{w: _i\d+, h: _i\d+\}/g, "").replace(/, nearest: true/g, "").replace(/, whole: true/g, "")
+    .replace(/GeoRuntime\.projectNearest\(/g, "GeoRuntime.projectPoint(");
+}
+// Cuts a layer's inputs from index n on and gives it the base expression; `olds` keeps the aged expression.
+function dlAge(api, olds, id, arr, exprAttr, n, expr) {
+  if (n !== undefined) api._truncate(id, arr, n);
+  const text = expr === undefined ? dlBase(String(api.get(id, exprAttr))) : expr;
+  api.set(id, { [exprAttr]: text });
+  olds[id] = text;
+}
+// The values of the first n inputs of each [id, arr], and every connection those layers have (what a refresh must not touch).
+function dlSnap(api, pairs) {
+  return {
+    values: pairs.map(([id, arr, n]) => Array.from({ length: n }, (_, i) => api.get(id, arr + "." + i))),
+    conns: api._connections.filter((c) => pairs.some((p) => c[0] === p[0] || c[2] === p[0])).map((c) => JSON.stringify(c))
+  };
+}
+function dlOldMap(context, api) {
+  const G = context.GeoScene, A = context.GeoAttrs, C = require("../src/core/codec.js");
+  const map = controlsMap(context), cam = map.cameraId, MA = A.MAP_ARRAY_ATTR, EX = A.MAP_EXPR_ATTR;
+  const o = { map: map, olds: {}, pairs: [] };
+  const enc = C.encodeLayer({ kind: "polygon", features: [{ name: "Land", rank: 1, rings: [[[0, 40], [5, 40], [5, 50], [0, 40]]] }] });
+  o.countries = G.createMapLayer(map, "Countries", enc, { camera: cam, category: "countries" }, {}, {});
+  o.extract = G.createMapLayer(map, "France", enc, { camera: cam, category: "extract", source: "countries" }, G.layerStyle(map, "extractFill"), {});
+  o.pin = G.addPin(map, "Paris", 2.35, 48.85);
+  dlAge(api, o.olds, o.countries, MA, EX, 7);
+  dlAge(api, o.olds, o.extract, MA, EX, 7);
+  dlAge(api, o.olds, o.pin, MA, EX, 7);
+  // a Label in driver mode: the position helper (7 inputs, projectPoint) moves its text
+  G.createLabel(map, "Paris", 2.35, 48.85);
+  o.driver = api.getCompLayers().filter((id) => api.getNiceName(id) === "Paris position")[0];
+  dlAge(api, o.olds, o.driver, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  // a callout's place helper
+  o.callout = G.createCallout(map, { lon: 2.35, lat: 48.85 }, "Paris");
+  o.place = coRec(api, o.callout).place;
+  dlAge(api, o.olds, o.place, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  // a highlight shape (drawn whole in this version)
+  o.highlight = hlRec(api, G.createHighlight(map, o.extract, "fill", { start: 0, duration: 20 })).shape;
+  dlAge(api, o.olds, o.highlight, MA, EX, undefined);
+  // data layers: regions, bubbles and value labels (the base branch's input counts)
+  const data = G.createDataLayers(map, { url: "https://x/y.csv", choice: { valueColumn: "Population" }, scale: "50m" }, samplePrepared(context),
+    { regions: true, bubbles: true, labels: true, legend: false }).layers;
+  o.regions = data.regions; o.bubbles = data.bubbles; o.labels = data.labels;
+  dlAge(api, o.olds, o.regions, MA, EX, 16);
+  dlAge(api, o.olds, o.bubbles, MA, EX, 9);
+  dlAge(api, o.olds, o.labels, MA, EX, 11);
+  // an old-style route stop (a pin inside a route group, nearest false): stays as it is
+  const grp = api.create("group", "Route 7: Old way");
+  api.parent(grp, map.groupId);
+  o.oldStop = G.addPin(map, "Stop", 0, 0, grp, false);
+  dlAge(api, o.olds, o.oldStop, MA, EX, 7);
+  // a new-style route, aged: stops and handles as the base branch had them (labelDriver stops, unchained handles)
+  o.route = G.createRoute(map, ABC, { arc: 40, labels: false });
+  ageRoute(context, api, o, o.route.groupId);
+  Object.keys(o.olds).forEach((id) => { o.pairs.push([id, MA]); });
+  return o;
+}
+// Ages a route's stops (7 inputs, the base driver) and handles (24 inputs, the unchained base expression).
+function ageRoute(context, api, o, groupId) {
+  const E = context.GeoExpression, A = context.GeoAttrs, cam = o.map.cameraId, CA = A.CAMERA_ARRAY_ATTR;
+  const d = routeData(api, groupId);
+  d.stops.forEach((s) => {
+    api._truncate(s.position, CA, 7);
+    dlAge(api, o.olds, s.position, CA, A.CAMERA_EXPR_ATTR, undefined, E.labelDriverExpression(context.GEO_RUNTIME_SRC, { camera: cam, category: "stopDriver" }, A.DRIVER_RETURN));
+  });
+  d.legs.forEach((l) => [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
+    api._truncate(h, CA, 24);
+    dlAge(api, o.olds, h, CA, A.CAMERA_EXPR_ATTR, undefined, E.routeHandleExpression(context.GEO_CURVE_SRC, { camera: cam, category: "legHandle" }, which));
+  }));
+  return d;
+}
+
+test("date line upgrades: Refresh controls brings an older map's layers up to date, keeping their inputs, keys and connections", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api), E = context.GeoExpression, A = context.GeoAttrs, RT = context.GEO_RUNTIME_SRC;
+  const MA = A.MAP_ARRAY_ATTR, cam = o.map.cameraId, meta = (id) => E.readTag(o.olds[id], "GEO_META"), data = (id) => E.readData(o.olds[id]);
+  const pairs = [[o.countries, MA, 7], [o.extract, MA, 7], [o.pin, MA, 7], [o.regions, MA, 16], [o.bubbles, MA, 9], [o.labels, MA, 11], [o.highlight, MA, 8],
+    [o.driver, A.CAMERA_ARRAY_ATTR, 7], [o.place, A.CAMERA_ARRAY_ATTR, 7]];
+  const before = dlSnap(api, pairs);
+  context.GeoControlPanel.sync(o.map);
+  const after = dlSnap(api, pairs);
+  // the Controls rows link their own inputs on the first refresh (detail, point size, ...): every earlier connection stays
+  assert.deepEqual(after.values, before.values, "earlier inputs' values are unchanged");
+  before.conns.forEach((c) => assert.ok(after.conns.indexOf(c) >= 0, "connection kept: " + c));
+  // base and extract layers repeat: the comp size as the last two inputs, and the frame expression
+  [o.countries, o.extract].forEach((id) => {
+    assert.equal(api.get(id, MA + ".7"), 1920, "compW"); assert.equal(api.get(id, MA + ".8"), 1080, "compH");
+    assert.equal(api.get(id, A.MAP_EXPR_ATTR), E.mapLayerExpression(RT, data(id), meta(id), { ellipseScale: A.ELLIPSE_SCALE, nearest: false, single: false }));
+  });
+  // pins, labels and callout places sit on the copy nearest the camera; highlights draw whole
+  assert.equal(api.get(o.pin, A.MAP_EXPR_ATTR), E.mapLayerExpression(RT, data(o.pin), meta(o.pin), { ellipseScale: A.ELLIPSE_SCALE, nearest: true, single: true }));
+  assert.equal(api.get(o.driver, A.CAMERA_EXPR_ATTR), E.labelDriverExpression(RT, meta(o.driver), A.DRIVER_RETURN, { nearest: true }));
+  assert.equal(api.get(o.place, A.CAMERA_EXPR_ATTR), E.labelDriverExpression(RT, meta(o.place), A.DRIVER_RETURN, { nearest: true }));
+  assert.equal(api.get(o.highlight, A.MAP_EXPR_ATTR), E.highlightLayerExpression(RT, data(o.highlight), meta(o.highlight), { ellipseScale: A.ELLIPSE_SCALE }));
+  // data layers: the comp size is appended (regions 16 / 17, bubbles 9 / 10, value labels 11 / 12) and the frame is in the call
+  [[o.regions, 16], [o.bubbles, 9], [o.labels, 11]].forEach(([id, n]) => {
+    assert.equal(api.get(id, MA + "." + n), 1920); assert.equal(api.get(id, MA + "." + (n + 1)), 1080);
+  });
+  assert.equal(api.get(o.regions, A.MAP_EXPR_ATTR), E.regionsExpression(context.GEO_DATA_RUNTIME_SRC, data(o.regions), meta(o.regions)));
+  assert.equal(api.get(o.bubbles, A.MAP_EXPR_ATTR), E.bubblesExpression(context.GEO_DATA_RUNTIME_SRC, data(o.bubbles), meta(o.bubbles), { ellipseScale: A.ELLIPSE_SCALE }));
+  assert.equal(api.get(o.labels, A.MAP_EXPR_ATTR), E.valueLabelsExpression(context.GEO_DATA_RUNTIME_SRC, data(o.labels), meta(o.labels)));
+  // an old-style route stop is left exactly as it was
+  assert.equal(api.get(o.oldStop, A.MAP_EXPR_ATTR), o.olds[o.oldStop]);
+  assert.equal(api.hasAttribute(o.oldStop, MA + ".7"), false);
+  // the new-style route: stops carry the chain and the reference (ABC: 0, 10, 20 -> reference 10), handles the chained ends
+  const d = routeData(api, o.route.groupId), CA = A.CAMERA_ARRAY_ATTR, HI = (n) => CA + "." + E.inputIndex(E.HANDLE_INPUTS, n);
+  const chainOf = { A: 0, B: 10, C: 20 };
+  d.stops.forEach((s) => {
+    assert.equal(api.get(s.position, CA + ".7"), chainOf[s.name], s.name + " chainLon");
+    assert.equal(api.get(s.position, CA + ".8"), 10, "refLon");
+    assert.equal(api.get(s.position, A.CAMERA_EXPR_ATTR), E.routeStopDriverExpression(RT, { camera: cam, category: "stopDriver" }, A.DRIVER_RETURN));
+  });
+  d.legs.forEach((l) => {
+    const a = d.stops[l.from], b = d.stops[l.to];
+    [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(([h, which]) => {
+      assert.equal(api.get(h, HI("aChainLon")), chainOf[a.name]); assert.equal(api.get(h, HI("bChainLon")), chainOf[b.name]); assert.equal(api.get(h, HI("refLon")), 10);
+      assert.equal(api.get(h, A.CAMERA_EXPR_ATTR), E.routeHandleExpression(context.GEO_CURVE_SRC, { camera: cam, category: "legHandle" }, which, { chained: true }));
+    });
+  });
+});
+
+test("date line upgrades: a second Refresh controls writes nothing to the older map", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api);
+  context.GeoControlPanel.sync(o.map);
+  const ids = Object.keys(o.olds).concat([o.route.groupId]);
+  const snap = () => JSON.stringify([ids.map((id) => [api.get(id, "generator.expression"), api.get(id, "expression")]), api._connections, ids.map((id) => api.getUserDataKey(id, "geoRoute") || null)]);
+  const before = snap();
+  // Labels (renameAttribute) are set on every refresh for the Controls rows, so they are not counted: values, inputs and connections are.
+  const writes = [], realSet = api.set, realAdd = api.addDynamic, realConnect = api.connect, realDisconnect = api.disconnect;
+  api.set = function (id) { writes.push(["set", id]); return realSet.apply(api, arguments); };
+  api.addDynamic = function (id) { writes.push(["add", id]); return realAdd.apply(api, arguments); };
+  api.connect = function () { writes.push(["connect", arguments[0]]); return realConnect.apply(api, arguments); };
+  api.disconnect = function () { writes.push(["disconnect", arguments[0]]); return realDisconnect.apply(api, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.set = realSet; api.addDynamic = realAdd; api.connect = realConnect; api.disconnect = realDisconnect; }
+  assert.deepEqual(writes.filter((w) => ids.indexOf(w[1]) >= 0 || w[0] === "add"), [], "no writes to the map's layers");
+  assert.equal(snap(), before);
+});
+
+test("date line upgrades: a resized comp is followed by Refresh controls in every repeating layer (compW, compH)", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api), E = context.GeoExpression, MA = context.GeoAttrs.MAP_ARRAY_ATTR;
+  context.GeoControlPanel.sync(o.map);
+  const realGet = api.get;
+  api.get = function (id, attr) { if (id === api.getActiveComp() && attr === "resolution") return { x: 1080, y: 1080 }; return realGet.apply(this, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.get = realGet; }
+  assert.equal(api.get(o.countries, MA + ".7"), 1080); assert.equal(api.get(o.countries, MA + ".8"), 1080);
+  assert.equal(api.get(o.regions, MA + "." + E.inputIndex(E.REGION_INPUTS, "compW")), 1080);
+  assert.equal(api.get(o.labels, MA + "." + E.inputIndex(E.VALUE_LABEL_INPUTS, "compH")), 1080);
+  assert.equal(api.hasAttribute(o.pin, MA + ".7"), false, "a pin gets no comp frame");
+});
+
+test("date line upgrades: a Controls sync scans the comp for an older map at most 9 times", () => {
+  const { context, api } = buildSandbox();
+  const o = dlOldMap(context, api);
+  let scans = 0;
+  const realScan = api.getCompLayers;
+  api.getCompLayers = function () { scans++; return realScan.apply(this, arguments); };
+  try { context.GeoControlPanel.sync(o.map); } finally { api.getCompLayers = realScan; }
+  assert.ok(scans <= 9, "comp scans on the first refresh of an older map: " + scans);
+});
+
+test("date line upgrades: a route visiting a place a whole turn apart stays unchained, and no holder is added", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, E = context.GeoExpression, A = context.GeoAttrs, CA = A.CAMERA_ARRAY_ATTR;
+  const LON = { name: "London", lon: -0.12, lat: 51.5 }, TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = G.createRoute(map, [LON, TK, LA, LON], { arc: 30, labels: false, shape: 1 });
+  // the older record: London has one holder, so the route's last leg ends on the first one
+  const rec = plain(api.getUserDataKey(r.groupId, "geoRoute"));
+  rec.legs[2].to = 0;
+  api.setUserData(r.groupId, "geoRoute", rec);
+  const o = { map: map, olds: {} };
+  const d = ageRoute(context, api, o, r.groupId);
+  const holders = api.getChildren(r.groupId).length;
+  context.GeoControlPanel.sync(map);
+  d.stops.forEach((s) => assert.equal(api.hasAttribute(s.position, CA + ".7"), false, s.name + " has no chainLon"));
+  d.legs.forEach((l) => [l.startHandle, l.endHandle].forEach((h) => assert.ok(api.get(h, A.CAMERA_EXPR_ATTR).indexOf("_hs") < 0, "handle stays unchained")));
+  assert.equal(api.getChildren(r.groupId).length, holders, "no holder added");
+});
+
+test("date line upgrades: a route made on this version keeps its chained stops and handles, pinned or not", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, A = context.GeoAttrs, CA = A.CAMERA_ARRAY_ATTR;
+  const r = G.createRoute(map, ABC, { arc: 40, labels: false });
+  const d = routeData(api, r.groupId);
+  // a pinned stop: its dropped place and its chained longitude differ from the placed ones
+  api.set(d.stops[1].position, { [CA + ".5"]: -170, [CA + ".7"]: 190 });
+  const ids = d.stops.map((s) => s.position).concat(d.legs.reduce((a, l) => a.concat([l.startHandle, l.endHandle]), []));
+  const snap = () => JSON.stringify(ids.map((id) => [api.get(id, A.CAMERA_EXPR_ATTR), Array.from({ length: 27 }, (_, i) => api.get(id, CA + "." + i))]));
+  const before = snap();
+  context.GeoControlPanel.sync(map);
+  assert.equal(snap(), before, "a refresh changes nothing on a current route");
+});
+
+// A keyed stop longitude (the animation drives labelLon) moves its stop on a flat map, on the copy its chain picks.
+function keyedStopCheck(context, api, d, cam0) {
+  const GP = require("../src/core/projection.js");
+  const at = (lon, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, 35.7, o); return o; };
+  const near = (a, b, msg) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), msg + ": " + a + " is not " + b);
+  const tk = d.stops[0], cam180 = { ...cam0, lon: 180 };
+  api.setFrame(0);
+  near(evalRouteAt(api, d, cam0).pos[0], at(-220.3, cam0), "static Tokyo at camera 0");
+  api.keyframe(tk.position, 0, { "array.5": 139.7 });
+  api.keyframe(tk.position, 10, { "array.5": 150 });
+  near(evalRouteAt(api, d, cam0).pos[0], at(-220.3, cam0), "keyed at frame 0");
+  api.setFrame(10);
+  near(evalRouteAt(api, d, cam0).pos[0], at(-210, cam0), "keyed at frame 10 moves with the key on the chained copy");
+  near(evalRouteAt(api, d, cam180).pos[0], at(150, cam180), "at camera 180 the keyed place itself");
+  // The handles follow the keyed end too: the same as a route whose Tokyo is set to 150 without the key.
+  const keyed = evalRouteAt(api, d, cam0);
+  api.deleteKeyframe(tk.position, "array.5", 0); api.deleteKeyframe(tk.position, "array.5", 10);
+  api.set(tk.position, { "array.5": 150 });
+  const fixed = evalRouteAt(api, d, cam0);
+  assert.deepEqual(keyed.legs.map((l) => [l.start, l.end]), fixed.legs.map((l) => [l.start, l.end]), "handles follow the keyed stop");
+  api.setFrame(0);
+}
+
+test("routes: a keyed stop longitude moves its stop on a flat map, on the copy its chain picks", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  keyedStopCheck(context, api, routeData(api, r.groupId), { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+});
+
+test("routes: an upgraded older route's keyed stop moves on a flat map too", () => {
+  const { context, api } = buildSandbox();
+  const map = routeMap(context);
+  const TK = { name: "Tokyo", lon: 139.7, lat: 35.7 }, LA = { name: "Los Angeles", lon: -118.2, lat: 34.05 };
+  const r = context.GeoScene.createRoute(map, [TK, LA], { arc: 30, labels: false, shape: 1 });
+  const d = ageRoute(context, api, { map: map, olds: {} }, r.groupId);
+  assert.equal(api.hasAttribute(d.stops[0].position, "array.7"), false, "aged");
+  context.GeoScene.prepareRoutes(map);
+  assert.equal(api.hasAttribute(d.stops[0].position, "array.7"), true, "upgraded");
+  keyedStopCheck(context, api, routeData(api, r.groupId), { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 });
+});
+
+test("date line upgrades: a pin or label the user moved into their own group gets the nearest copy; an old route's stop does not", () => {
+  const { context, api } = buildSandbox();
+  const map = controlsMap(context), G = context.GeoScene, A = context.GeoAttrs, EX = A.MAP_EXPR_ATTR;
+  const mine = api.create("group", "My places");
+  api.parent(mine, map.groupId);
+  const olds = {};
+  const moved = G.addPin(map, "Lyon", 4.8, 45.7);
+  api.parent(moved, mine);
+  dlAge(api, olds, moved, A.MAP_ARRAY_ATTR, EX, 7);
+  G.createLabel(map, "Nice", 7.3, 43.7);
+  const driver = api.getCompLayers().filter((id) => api.getNiceName(id) === "Nice position")[0];
+  api.parent(driver, mine);
+  dlAge(api, olds, driver, A.CAMERA_ARRAY_ATTR, A.CAMERA_EXPR_ATTR);
+  const oldGroup = api.create("group", "Route 3: Old way");
+  api.parent(oldGroup, map.groupId);
+  const stop = G.addPin(map, "Stop", 0, 0, oldGroup, false);
+  dlAge(api, olds, stop, A.MAP_ARRAY_ATTR, EX, 7);
+  context.GeoControlPanel.sync(map);
+  assert.ok(api.get(moved, EX).indexOf(", nearest: true") >= 0, "a pin in the user's group is nearest");
+  assert.ok(api.get(driver, A.CAMERA_EXPR_ATTR).indexOf("GeoRuntime.projectNearest(") >= 0, "a label in the user's group is nearest");
+  assert.equal(api.get(stop, EX), olds[stop], "an old route's stop is left as it is");
 });

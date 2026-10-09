@@ -81,6 +81,18 @@ var GeoData = (function () {
 
   function fmtOf(data) { return data.fmt || {}; }
 
+  // Positions (x, y) at which a point drawn pad around (x, y) appears: once, or once per copy of the world
+  // that reaches o.frame on a flat map (see GeoRuntime.worldCopies).
+  function pointCopies(cam, x, y, pad, frame) {
+    var ks = GeoRuntime.worldCopies(cam, { minX: x - pad, minY: y - pad, maxX: x + pad, maxY: y + pad }, frame), out = [];
+    for (var i = 0; i < ks.length; i++) {
+      if (ks[i] === 0) { out.push([x, y]); continue; }
+      var off = GeoRuntime.copyOffset(cam, ks[i]);
+      out.push([x + off[0], y + off[1]]);
+    }
+    return out;
+  }
+
   function choropleth(data, cam, o, cav) {
     var mesh = new cav.Mesh();
     mesh.addPath(new cav.Path(), new cav.Material()); // the first path takes the layer's own colour (check 8)
@@ -89,7 +101,7 @@ var GeoData = (function () {
       var mat = new cav.Material();
       mat.fill = true;
       mat.fillColor = colorAt(valueAt(data.series[i], o.year), o, data.range);
-      mesh.addPath(GeoRuntime.buildPath({ v: 1, kind: geo.kind, f: [geo.f[i]] }, cam, 100, {}, cav.Path), mat);
+      mesh.addPath(GeoRuntime.buildPath({ v: 1, kind: geo.kind, f: [geo.f[i]] }, cam, 100, { frame: o.frame }, cav.Path), mat);
     }
     return mesh;
   }
@@ -100,7 +112,8 @@ var GeoData = (function () {
     for (var i = 0; i < data.pts.length; i++) {
       var r = bubbleRadius(valueAt(data.series[i], o.year), data.range.maxAbs, o.maxRadius);
       if (r <= 0 || !project(data.pts[i][0], data.pts[i][1], out)) continue;
-      path.addEllipse(out[0], out[1], r * scale, r * scale);
+      var at = pointCopies(cam, out[0], out[1], r * scale, o.frame);
+      for (var c = 0; c < at.length; c++) path.addEllipse(at[c][0], at[c][1], r * scale, r * scale);
     }
     return path;
   }
@@ -122,7 +135,8 @@ var GeoData = (function () {
     for (var i = 0; i < data.pts.length; i++) {
       var text = formatValue(valueAt(data.series[i], o.year), o.format, o.decimals, f.prefix, f.suffix);
       if (!text || !project(data.pts[i][0], data.pts[i][1], out)) continue;
-      path.addText(text, size, out[0] - textWidth(text, size, cav) / 2, out[1] - size * 0.35);
+      var tw = textWidth(text, size, cav), at = pointCopies(cam, out[0], out[1], Math.max(tw, size), o.frame);
+      for (var c = 0; c < at.length; c++) path.addText(text, size, at[c][0] - tw / 2, at[c][1] - size * 0.35);
     }
     return path;
   }

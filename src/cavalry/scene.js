@@ -125,10 +125,19 @@ var GeoScene = (function () {
     }
   }
 
-  function createMapLayer(map, name, enc, meta, style, inputValues, parentId) {
+  // The comp size as a layer's frame inputs (compW, compH), with the layer's own values over them.
+  function withCompSize(values) {
+    var s = compSize(), out = { compW: s.width, compH: s.height };
+    for (var k in values) if (Object.prototype.hasOwnProperty.call(values, k)) out[k] = values[k];
+    return out;
+  }
+
+  // nearest: single things (pins, text labels) draw on the copy of the world nearest the camera.
+  // single: a single thing (pin, label, old-style route stop) is drawn once; other map layers repeat on a flat map.
+  function createMapLayer(map, name, enc, meta, style, inputValues, parentId, nearest, single) {
     var id = api.create(A.MAP_LAYER_TYPE, name);
-    addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.MAP_INPUTS, inputValues);
-    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE }));
+    addInputs(id, A.MAP_ARRAY_ATTR, GeoExpression.MAP_LAYER_INPUTS, withCompSize(inputValues));
+    setOne(id, A.MAP_EXPR_ATTR, GeoExpression.mapLayerExpression(GEO_RUNTIME_SRC, enc, meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: nearest === true, single: single === true }));
     connectCamera(map.cameraId, id, A.MAP_ARRAY_ATTR);
     applyStyle(id, style);
     api.parent(id, parentId || map.groupId);
@@ -137,12 +146,19 @@ var GeoScene = (function () {
 
   function layerMeta(id) { return GeoExpression.readTag(readExpr(id, A.MAP_EXPR_ATTR), "GEO_META"); }
 
+  // The call that follows a layer's data: its options (the comp frame, nearest, whole) are written there.
+  function callOf(expr) { var i = expr.lastIndexOf("GEO_DATA_END*/"); return i < 0 ? expr : expr.slice(i); }
+  // frame: the inputs of the comp size (null for a layer that does not repeat); nearest / whole: how a single thing or a highlight draws.
   function findMapLayers(map) {
     var out = [];
     api.getCompLayers(false).forEach(function (id) {
       var expr = readExpr(id, A.MAP_EXPR_ATTR), meta = GeoExpression.readTag(expr, "GEO_META");
       // size (the expression's length, data included) tells a caller whether a layer's data changed
-      if (meta && meta.camera === map.cameraId) out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length });
+      if (meta && meta.camera === map.cameraId) {
+        var call = callOf(expr);
+        out.push({ id: id, name: api.getNiceName(id), meta: meta, size: expr.length, frame: GeoExpression.frameInputs(call),
+          nearest: call.indexOf(", nearest: true") >= 0, whole: call.indexOf("whole: true") >= 0 });
+      }
     });
     return out;
   }
@@ -153,9 +169,10 @@ var GeoScene = (function () {
     return enc;
   }
 
-  function addPin(map, name, lon, lat, parentId) {
+  // nearest (default true): the pin sits on the copy nearest the camera; false keeps the old global placement (old-style route stops).
+  function addPin(map, name, lon, lat, parentId, nearest) {
     var enc = GeoCodec.encodeLayer({ kind: "point", features: [{ name: name, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId);
+    return createMapLayer(map, "Pin: " + name, enc, { camera: map.cameraId, category: "pin" }, layerStyle(map, "pin"), { pointRadius: 8 }, parentId, nearest !== false, true);
   }
 
   function createRouteLeg(map, parentId, name, enc, lift) {
@@ -387,8 +404,8 @@ var GeoScene = (function () {
     stops.forEach(function (s) {
       if (seen.some(function (p) { return samePlace(p, s); })) return;
       seen.push(s);
-      if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId);
-      if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId);
+      if (opts.pins !== false) addPin(map, s.name, s.lon, s.lat, groupId, false);
+      if (opts.labels) createLabel(map, s.name, s.lon, s.lat, groupId, false);
     });
     if (typeof api.setUserData === "function") {
       // The helpers made are always recorded. One that can't be wired is deleted again (by
@@ -418,9 +435,9 @@ var GeoScene = (function () {
     api.connect(bPosition, CA + ".6", handle, at("bLat"), true);
   }
 
-  // A route made before great circles has handle helpers with only the first 14 inputs. Adds the
-  // rest (shape Arc, so the look is unchanged), connects them and writes the current expression.
-  // A helper that already has all its inputs is left alone, so a second refresh changes nothing.
+  // A route made before some handle inputs were added has handle helpers that lack the newer ones. A helper without
+  // the last input gets each missing one added (shape Arc, so the look is unchanged), connected, and the current
+  // expression written. A helper that already has the last input is left alone, so a second refresh changes nothing.
   function upgradeHandles(map, g) {
     var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
     if (!rec || !rec.legs || !rec.stops) return;
@@ -445,6 +462,62 @@ var GeoScene = (function () {
     });
   }
 
+  // A route made before the date line: its stops gain the chained longitude and the route's reference longitude, and its
+  // handles the chained ends, worked out from its legs in travel order (the chain a new route is drawn with). Only a route
+  // whose stops lack the chain is worked out: a current route keeps its own (a pinned stop keeps the chain it was dropped
+  // on). A place visited a whole turn apart (round the world) needs a holder of its own for the second visit, which an
+  // older route does not have, so such a route stays unchained. Handles are written before stops, so a refresh that is
+  // interrupted is tried again (the stops are what say a route is still older).
+  function upgradeChains(map, g) {
+    var rec = userData(g, ROUTE_KEY), E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    if (!rec || !rec.stops || !rec.legs || !rec.legs.length) return;
+    var stops = rec.stops, chainIn = E.inputIndex(E.ROUTE_STOP_INPUTS, "chainLon"), refIn = E.inputIndex(E.ROUTE_STOP_INPUTS, "refLon");
+    if (!stops.every(function (s) { return !!s && !!s.position && layerThere(s.position); })) return;
+    if (!stops.some(function (s) { return !api.hasAttribute(s.position, CA + "." + chainIn); })) return;
+    // Travel order: the first leg's start, then each leg's end (each leg starts where the one before it ended).
+    var seq = [rec.legs[0].from];
+    for (var i = 0; i < rec.legs.length; i++) {
+      if (rec.legs[i].from !== seq[seq.length - 1]) return;
+      seq.push(rec.legs[i].to);
+    }
+    if (seq.some(function (h) { return !stops[h]; })) return;
+    var lons = seq.map(function (h) { return Number(api.get(stops[h].position, CA + ".5")); });
+    if (!lons.every(isFinite)) return;
+    var chained = GeoRoutes.chainLons(lons), chainOf = {};
+    for (var k = 0; k < seq.length; k++) {
+      if (chainOf[seq[k]] === undefined) chainOf[seq[k]] = chained[k];
+      else if (Math.abs(chainOf[seq[k]] - chained[k]) > 1e-9) return;
+    }
+    var refLon = (chained[0] + chained[chained.length - 1]) / 2;
+    // A stop no leg visits keeps its own longitude as its chain.
+    stops.forEach(function (s, h) { if (chainOf[h] === undefined) chainOf[h] = Number(api.get(s.position, CA + ".5")); });
+    var aAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "aChainLon"), bAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "bChainLon"), rAt = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "refLon");
+    var cameraCat = { camera: map.cameraId, category: "legHandle" };
+    rec.legs.forEach(function (l) {
+      [[l.startHandle, "start"], [l.endHandle, "end"]].forEach(function (w) {
+        var hd = w[0];
+        if (!hd || !layerThere(hd)) return;
+        extendInputs(hd, CA, E.HANDLE_INPUTS, { aChainLon: chainOf[l.from], bChainLon: chainOf[l.to], refLon: refLon });
+        var o = {};
+        if (Number(api.get(hd, aAt)) !== chainOf[l.from]) o[aAt] = chainOf[l.from];
+        if (Number(api.get(hd, bAt)) !== chainOf[l.to]) o[bAt] = chainOf[l.to];
+        if (Number(api.get(hd, rAt)) !== refLon) o[rAt] = refLon;
+        if (Object.keys(o).length) api.set(hd, o);
+        var fresh = E.routeHandleExpression(GEO_CURVE_SRC, cameraCat, w[1], { chained: true });
+        if (readExpr(hd, A.CAMERA_EXPR_ATTR) !== fresh) setOne(hd, A.CAMERA_EXPR_ATTR, fresh);
+      });
+    });
+    stops.forEach(function (s, h) {
+      var pos = s.position, o = {};
+      extendInputs(pos, CA, E.ROUTE_STOP_INPUTS, { chainLon: chainOf[h], refLon: refLon });
+      if (Number(api.get(pos, CA + "." + chainIn)) !== chainOf[h]) o[CA + "." + chainIn] = chainOf[h];
+      if (Number(api.get(pos, CA + "." + refIn)) !== refLon) o[CA + "." + refIn] = refLon;
+      if (Object.keys(o).length) api.set(pos, o);
+      var fresh = E.routeStopDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "stopDriver" }, A.DRIVER_RETURN);
+      if (readExpr(pos, A.CAMERA_EXPR_ATTR) !== fresh) setOne(pos, A.CAMERA_EXPR_ATTR, fresh);
+    });
+  }
+
   function buildRoute(map, stops, pairs, opts, track, number) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR, arc = opts.arc != null ? opts.arc : 30;
     var look = styleOf(map);
@@ -455,9 +528,23 @@ var GeoScene = (function () {
     var helpers = track(api.create("group", "Route helpers"));
     api.parent(helpers, groupId);
     api.set(helpers, identityTransform());
-    var places = [];
-    stops.forEach(function (s) { if (!places.some(function (p) { return samePlace(p, s); })) places.push(s); });
-    function placeIndex(s) { for (var i = 0; i < places.length; i++) if (samePlace(places[i], s)) return i; return -1; }
+    // The route's longitudes as drawn (each leg the short way across the date line). Flat maps move the whole route
+    // by one shift, from refLon (the midpoint of its first and last stop), so every stop moves together.
+    var chained = GeoRoutes.chainLons(stops.map(function (s) { return s.lon; }));
+    var refLon = (chained[0] + chained[chained.length - 1]) / 2;
+    // Stop holders: one per visit whose chained longitude differs from the place's earlier visit (a round-the-world
+    // route comes back to a place a whole turn on). Other visits to a place share its holder. The first holder of a
+    // place is its primary: it carries the label.
+    var holders = [];
+    var visitHolder = stops.map(function (s, i) {
+      for (var k = 0; k < holders.length; k++) if (samePlace(holders[k].place, s) && Math.abs(holders[k].chain - chained[i]) < 1e-9) return k;
+      var first = !holders.some(function (h) { return samePlace(h.place, s); });
+      holders.push({ place: s, chain: chained[i], primary: first });
+      return holders.length - 1;
+    });
+    // The legs as indices into stops: the same pairs routePairs makes (identical consecutive stops are skipped).
+    var legStops = [];
+    for (var si = 0; si < stops.length - 1; si++) if (!samePlace(stops[si], stops[si + 1])) legStops.push([si, si + 1]);
     function utility(name, inputs, values, expr) {
       var id = track(api.create(A.CAMERA_LAYER_TYPE, name));
       addInputs(id, CA, inputs, values);
@@ -468,7 +555,8 @@ var GeoScene = (function () {
     function feed(id, sources) { sources.forEach(function (s, i) { api.connect(s[0], s[1], id, CA + "." + i, true); }); }
     var meta = function (category) { return { camera: map.cameraId, category: category }; };
 
-    var stopData = places.map(function (p) {
+    var stopData = holders.map(function (hd) {
+      var p = hd.place;
       var holder = track(api.create("group", "Stop: " + p.name));
       var circle = track(api.primitive("ellipse", p.name));
       setOne(circle, "generator.radius", [STOP_RADIUS, STOP_RADIUS]);
@@ -476,7 +564,7 @@ var GeoScene = (function () {
       api.parent(circle, holder);
       api.set(circle, identityTransform());
       var label = null;
-      if (opts.labels) {
+      if (opts.labels && hd.primary) {
         label = track(api.create(A.TEXT_LAYER_TYPE, p.name));
         setOne(label, A.TEXT_ATTR, p.name);
         applyStyle(label, GeoStyles.layerStyle(look, "label"));
@@ -484,7 +572,8 @@ var GeoScene = (function () {
         api.set(label, { "rotation.z": 0, "scale.x": 1, "scale.y": 1 });
         setOne(label, "position", [STOP_RADIUS + 6, STOP_RADIUS + 6]);
       }
-      var position = utility(p.name + " position", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
+      var position = utility(p.name + " position", E.ROUTE_STOP_INPUTS, { labelLon: p.lon, labelLat: p.lat, chainLon: hd.chain, refLon: refLon },
+        E.routeStopDriverExpression(GEO_RUNTIME_SRC, meta("stopDriver"), A.DRIVER_RETURN));
       connectCamera(map.cameraId, position, CA);
       api.connect(position, A.DRIVER_OUTPUT_ATTR, holder, "position", true);
       var visibility = utility(p.name + " visibility", E.LABEL_INPUTS, { labelLon: p.lon, labelLat: p.lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("stopVisibility")));
@@ -494,12 +583,15 @@ var GeoScene = (function () {
       api.connect(visibility, A.DRIVER_OUTPUT_ATTR, holder, "opacity", true);
       var endPoint = utility(p.name + " end point", E.END_POINT_INPUTS, {}, E.routeEndPointExpression(meta("stopEnd")));
       feed(endPoint, [[holder, "position.x"], [holder, "position.y"], [circle, "position.x"], [circle, "position.y"]]);
-      return { name: p.name, lon: p.lon, lat: p.lat, holder: holder, circle: circle, label: label, position: position, visibility: visibility, endPoint: endPoint };
+      return { name: p.name, lon: p.lon, lat: p.lat, chainLon: hd.chain, holder: holder, circle: circle, label: label, position: position, visibility: visibility, endPoint: endPoint };
     });
 
     var cam = readCamera(map.cameraId);
+    // Where each stop starts on screen (for the first handle seeds): flat maps put it on the route's shifted copy.
+    var seedShift = GeoRoutes.routeShift(chained, cam.lon), seedFlat = Math.round(cam.projection || 0) <= 0;
+    function seedLon(s) { return seedFlat ? s.chainLon + seedShift : s.lon; }
     var legData = pairs.map(function (pair, idx) {
-      var a = stopData[placeIndex(pair[0])], b = stopData[placeIndex(pair[1])];
+      var a = stopData[visitHolder[legStops[idx][0]]], b = stopData[visitHolder[legStops[idx][1]]];
       var name = "Leg " + (idx + 1) + ": " + a.name + " → " + b.name;
       var line = track(api.create("basicLine", name));
       api.setGenerator(line, "generator", "bezierLine");
@@ -508,14 +600,15 @@ var GeoScene = (function () {
       try { setOne(line, "stroke.trim", true); setOne(line, "stroke.trimEnd", 100); } catch (e) { /* draw-on stays off */ }
       api.connect(a.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.startPosition", true);
       api.connect(b.endPoint, A.DRIVER_OUTPUT_ATTR, line, "generator.endPosition", true);
-      var seed = GeoCurve.handles(GeoRuntime.projectPoint(a.lon, a.lat, cam), GeoRuntime.projectPoint(b.lon, b.lat, cam), { arc: arc, lean: 0, flip: false });
+      var seed = GeoCurve.handles(GeoRuntime.projectPoint(seedLon(a), a.lat, cam), GeoRuntime.projectPoint(seedLon(b), b.lat, cam), { arc: arc, lean: 0, flip: false });
       var sources = [[a.holder, "position.x"], [a.holder, "position.y"], [a.circle, "position.x"], [a.circle, "position.y"],
         [b.holder, "position.x"], [b.holder, "position.y"], [b.circle, "position.x"], [b.circle, "position.y"]];
       var handle = {};
       ["start", "end"].forEach(function (which) {
         var h = utility(name + " " + which + " handle", E.HANDLE_INPUTS, { arc: arc, handX: seed[which][0], handY: seed[which][1], shape: opts.shape ? 1 : 0,
-          camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection, aLon: a.lon, aLat: a.lat, bLon: b.lon, bLat: b.lat },
-          E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which));
+          camLat: cam.lat, camLon: cam.lon, camZoom: cam.zoom, camRotation: cam.rotation, camProjection: cam.projection, aLon: a.lon, aLat: a.lat, bLon: b.lon, bLat: b.lat,
+          aChainLon: a.chainLon, bChainLon: b.chainLon, refLon: refLon },
+          E.routeHandleExpression(GEO_CURVE_SRC, meta("legHandle"), which, { chained: true }));
         feed(h, sources);
         wireHandleExtras(map, h, a.position, b.position);
         api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
@@ -524,7 +617,7 @@ var GeoScene = (function () {
       var fade = addLegClip(map, helpers, line, name, "fade", a, b, handle.start, track);
       var clipStart = addLegClip(map, helpers, line, name, "start", a, b, handle.start, track);
       var clipEnd = addLegClip(map, helpers, line, name, "end", a, b, handle.start, track);
-      return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, clipStart: clipStart, clipEnd: clipEnd, from: placeIndex(pair[0]), to: placeIndex(pair[1]) };
+      return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, clipStart: clipStart, clipEnd: clipEnd, from: visitHolder[legStops[idx][0]], to: visitHolder[legStops[idx][1]] };
     });
 
     // New layers land on top of their group: legs first, then stops last-to-first, so the
@@ -593,6 +686,7 @@ var GeoScene = (function () {
     var want = {}, res = { pinned: 0, offGlobe: [] };
     (ids || []).forEach(function (id) { want[id] = true; });
     findRoutes(map).forEach(function (r) {
+      var pinnedHere = false;
       r.stops.forEach(function (s) {
         if (!want[s.circle] && !want[s.holder] && !(s.label && want[s.label])) return;
         var h = xy(api.get(s.holder, "position")), c = xy(api.get(s.circle, "position"));
@@ -604,12 +698,43 @@ var GeoScene = (function () {
         var o = {};
         o[A.CAMERA_ARRAY_ATTR + ".5"] = ll.lon;
         o[A.CAMERA_ARRAY_ATTR + ".6"] = ll.lat;
+        // A route stop is placed by its chained longitude plus the route's shift (the reference longitude's copy nearest the
+        // camera), so the chain takes the dropped spot less that shift. The shift is left alone: the route's other stops
+        // keep their screen places.
+        // The dropped longitude may come back wrapped (a globe pin), so the chain takes the copy nearest its old value:
+        // the same screen point, and the same copy the stop was on.
+        // Only a stop with the chain input (7) reads the shift and the old chain: a stop with fewer inputs never reads them.
+        if (api.hasAttribute(s.position, A.CAMERA_ARRAY_ATTR + ".7")) {
+          var ref = v(8), shift = GeoProjection.nearestLon(ref, cam.lon) - ref, oldChain = v(7);
+          if (isFinite(shift)) o[A.CAMERA_ARRAY_ATTR + ".7"] = isFinite(oldChain) ? GeoProjection.nearestLon(ll.lon - shift, oldChain) : ll.lon - shift;
+        }
         api.set(s.position, o);
         api.set(s.circle, { position: [0, 0] });
         res.pinned++;
+        pinnedHere = true;
       });
+      if (pinnedHere) refreshRouteChains(r.groupId);
     });
     return res;
+  }
+
+  // The handles' chained longitudes follow their stops' (their own inputs are static, not connected).
+  function refreshRouteChains(groupId) {
+    var d = userData(groupId, ROUTE_KEY), CA = A.CAMERA_ARRAY_ATTR, E = GeoExpression;
+    if (!d || !d.stops || !d.legs) return;
+    var aAttr = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "aChainLon"), bAttr = CA + "." + E.inputIndex(E.HANDLE_INPUTS, "bChainLon");
+    d.legs.forEach(function (l) {
+      var a = d.stops[l.from], b = d.stops[l.to];
+      if (!a || !b || !a.position || !b.position || !layerThere(a.position) || !layerThere(b.position)) return;
+      if (!api.hasAttribute(a.position, CA + ".7") || !api.hasAttribute(b.position, CA + ".7")) return;
+      [l.startHandle, l.endHandle].forEach(function (h) {
+        if (!h || !layerThere(h) || !api.hasAttribute(h, aAttr)) return;
+        var o = {};
+        o[aAttr] = api.get(a.position, CA + ".7");
+        o[bAttr] = api.get(b.position, CA + ".7");
+        api.set(h, o);
+      });
+    });
   }
 
   function dataPayloads(prepared, opts) {
@@ -638,12 +763,12 @@ var GeoScene = (function () {
     var groupId = api.create("group", "Data: " + prepared.title);
     api.parent(groupId, map.groupId);
     function meta(display) { return { camera: map.cameraId, category: "data", display: display, source: source }; }
-    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, { year: year }, E.regionsExpression(src, p.regions, meta("regions")), GeoStyles.layerStyle(look, "regions"), true);
+    if (opts.regions) layers.regions = createDataLayer(map, groupId, "Regions: " + prepared.title, E.REGION_INPUTS, withCompSize({ year: year }), E.regionsExpression(src, p.regions, meta("regions")), GeoStyles.layerStyle(look, "regions"), true);
     if (opts.bubbles) {
-      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, { year: year }, E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), GeoStyles.layerStyle(look, "bubbles"), true);
+      layers.bubbles = createDataLayer(map, groupId, "Bubbles: " + prepared.title, E.BUBBLE_INPUTS, withCompSize({ year: year }), E.bubblesExpression(src, p.points, meta("bubbles"), { ellipseScale: A.ELLIPSE_SCALE }), GeoStyles.layerStyle(look, "bubbles"), true);
       if (A.FILL_ALPHA_ATTR) { try { setOne(layers.bubbles, A.FILL_ALPHA_ATTR, 70); } catch (e) { /* opacity is cosmetic */ } }
     }
-    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, { year: year }, E.valueLabelsExpression(src, p.points, meta("labels")), GeoStyles.layerStyle(look, "valueLabels"), true);
+    if (opts.labels) layers.labels = createDataLayer(map, groupId, "Labels: " + prepared.title, E.VALUE_LABEL_INPUTS, withCompSize({ year: year }), E.valueLabelsExpression(src, p.points, meta("labels")), GeoStyles.layerStyle(look, "valueLabels"), true);
     if (opts.legend) {
       var s = compSize();
       if (layers.regions) {
@@ -711,7 +836,13 @@ var GeoScene = (function () {
     var detail = v(5);
     var radius = v(6);
     var lift = meta.category === "route" ? v(7) : undefined;
-    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift }, cavalry.Path);
+    // A repeating layer (its expression names a comp frame) bakes every copy of the world the frame shows,
+    // with the comp size read from its own compW / compH inputs. Old layers, pins, labels and routes have none.
+    // Its call holds the frame and the nearest option: a pin or label bakes on the copy nearest the camera, as it draws live.
+    var call = callOf(readExpr(layerId, A.MAP_EXPR_ATTR)), fi = GeoExpression.frameInputs(call), frame = null;
+    if (fi) frame = { w: v(fi.w), h: v(fi.h) };
+    var nearest = call.indexOf(", nearest: true") >= 0;
+    var path = GeoRuntime.buildPath(enc, cam, detail, { pointRadius: radius, ellipseScale: A.ELLIPSE_SCALE, lift: lift, frame: frame, nearest: nearest }, cavalry.Path);
     var id = api.createEditable(path, api.getNiceName(layerId) + " (baked)");
     var parent = api.getParent(layerId);
     if (parent) api.parent(id, parent);
@@ -721,7 +852,8 @@ var GeoScene = (function () {
     return id;
   }
 
-  function createLabel(map, text, lon, lat, parentId) {
+  // nearest (default true): as addPin; false for old-style route stop labels, which are drawn unwrapped.
+  function createLabel(map, text, lon, lat, parentId, nearest) {
     var parent = parentId || map.groupId;
     if (A.LABEL_MODE === "driver") {
       var textId = api.create(A.TEXT_LAYER_TYPE, text);
@@ -729,7 +861,7 @@ var GeoScene = (function () {
       applyStyle(textId, layerStyle(map, "label"));
       var driverId = api.create(A.CAMERA_LAYER_TYPE, text + " position");
       addInputs(driverId, A.CAMERA_ARRAY_ATTR, GeoExpression.LABEL_INPUTS, { labelLon: lon, labelLat: lat });
-      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN));
+      setOne(driverId, A.CAMERA_EXPR_ATTR, GeoExpression.labelDriverExpression(GEO_RUNTIME_SRC, { camera: map.cameraId, category: "labelDriver" }, A.DRIVER_RETURN, { nearest: nearest !== false }));
       connectCamera(map.cameraId, driverId, A.CAMERA_ARRAY_ATTR);
       api.connect(driverId, A.DRIVER_OUTPUT_ATTR, textId, "position", true);
       // A second helper sets the text's opacity: 0 when its place is behind the globe.
@@ -747,7 +879,7 @@ var GeoScene = (function () {
       return textId;
     }
     var enc = GeoCodec.encodeLayer({ kind: "text", features: [{ name: text, rank: 1, rings: [[[lon, lat]]] }] });
-    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent);
+    return createMapLayer(map, "Label: " + text, enc, { camera: map.cameraId, category: "label" }, layerStyle(map, "label"), { pointRadius: 24 }, parent, nearest !== false, true);
   }
 
   // Newly created layers land on top of the group, which can bury an existing pin,
@@ -829,14 +961,14 @@ var GeoScene = (function () {
     return plan.mode === "images" ? GeoSources.imageUrl(src, r) : GeoSources.tileUrl(src, opts, r.z, r.x0, r.y0);
   }
 
+  // Every plan is bent, flat maps included: day imagery and night lights (see planNightLights) repeat past the
+  // date line through Reproject, and need the plugin.
   function planImagery(map, src, opts) {
     GeoSources.tileUrl(src, opts, 0, 0, 0); // validates key, style or link before any work
     // Large images need background downloads: one at a time, an EOX image would freeze
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
     var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
-    // Any Equal Earth or globe frame makes the whole build bent (see "Bent imagery" below).
-    var bent = samples.some(function (c) { return Math.round(c.projection || 0) !== 0; });
-    if (bent && !reprojectAvailable()) throw new Error(REPROJECT_MISSING);
+    if (!reprojectAvailable()) throw new Error(REPROJECT_MISSING);
     // Each sample's region is worked out once, however many times the level drops.
     var regions = [];
     function regionOf(cam, width, height) {
@@ -846,13 +978,11 @@ var GeoScene = (function () {
       return regions[k];
     }
     function tilesUpTo(maxZoom) {
-      return bent ? GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf)
-        : GeoTiles.tileSet(samples, s.width, s.height, src.minZoom, maxZoom);
+      return GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf);
     }
     var set = tilesUpTo(src.maxZoom);
     function itemsFor(ts) {
-      if (bent) return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
-      return images ? GeoBlocks.blocksForTiles(ts.tiles) : ts.tiles.map(GeoBlocks.tileRect);
+      return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
     }
     // An image covers the bounding box of the tiles it needs, so the image limit counts the
     // tiles' worth of pixels really downloaded (GeoBlocks.totalTiles), not the tiles needed.
@@ -872,8 +1002,7 @@ var GeoScene = (function () {
       throw new Error(items.length > GeoBlocks.MAX_IMAGES ? "Too many images (" + items.length + ")" + end
         : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(items) + ")" + end);
     }
-    var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts) };
-    if (bent) plan.bent = true;
+    var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts), bent: true };
     if (images) plan.imageTiles = GeoBlocks.totalTiles(items);
     var left = {};
     GeoFetch.leftovers().forEach(function (p) { left[String(p).replace(/\\/g, "/")] = true; });
@@ -899,8 +1028,7 @@ var GeoScene = (function () {
         plan.imageTiles = GeoBlocks.totalTiles(plan.items);
       }
     }
-    if (bent) bentMissing(plan);
-    else plan.cached = plan.items.length - plan.missing.length;
+    bentMissing(plan);
     if (set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
   }
@@ -1013,6 +1141,12 @@ var GeoScene = (function () {
     return fileInAssetGroup(loose, imageryAssetGroup(map));
   }
 
+  // The Refresh controls note for day imagery (findImagery entries): old flat imagery is footage tiles with
+  // no bent flag and no source comp, which stop at the date line until they are rebuilt. Null when there is none.
+  function imageryNote(imagery) {
+    return (imagery || []).some(function (im) { return !im.meta.bent && !im.meta.sourceComp; }) ? OLD_FLAT_NOTE : null;
+  }
+
   // camCount: how many camera inputs to connect (default all five); the rest keep their
   // default values (bent level drivers: lat, lon and zoom only, rotation and projection held 0).
   function imageryDriver(map, parentId, name, expr, targetId, targetAttr, camCount) {
@@ -1058,7 +1192,8 @@ var GeoScene = (function () {
     return tiles.concat(levelGroups, [groupId]);
   }
 
-  // ---- Bent imagery (globe / Equal Earth) -------------------------------------------
+  // ---- Bent imagery (globe / Equal Earth, and flat day imagery) ---------------------
+  // Flat day imagery is bent too: Reproject's flat branch wraps longitude, so the source repeats past the date line.
   // The tiles go into a separate composition, "Imagery source: <label> · <map>", laid out as a
   // north-up Web Mercator map centred on the camera: a group "View" (masked by the rectangle
   // "View mask") holds today's level groups, with level drivers that read only the camera's
@@ -1069,7 +1204,9 @@ var GeoScene = (function () {
   // layers and footage land in the active comp, so source-comp work runs inside withComp, which
   // always puts the map comp back.
   var REPROJECT_TYPE = "cavalryGeo::reproject";
-  var REPROJECT_MISSING = "Imagery on the globe and Equal Earth needs the Cavalry Geo Reproject plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+  var REPROJECT_MISSING = "Imagery needs the Cavalry Geo plugin: drag the CavalryGeo_plugin folder from the download into the Cavalry window once, then press Build imagery again.";
+  // Imagery made before flat builds went through Reproject: footage tiles that stop at the date line.
+  var OLD_FLAT_NOTE = "Flat imagery built by an earlier version stops at the date line: press Build imagery to rebuild it so it wraps.";
   var REFERENCE_NAME = "Imagery source", VIEW_NAME = "View", VIEW_MASK_NAME = "View mask";
   var FILTER_CAMERA_ATTRS = ["camLat", "camLon", "camZoom", "camRotation", "camProjection"];
   var VIEW_DRIVERS = [["position", "View position"], ["scale", "View scale"], ["maskSize", "View mask size"], ["viewScale", "filter view scale"], ["viewOffset", "filter view offset"]];
@@ -1105,15 +1242,13 @@ var GeoScene = (function () {
   // A new, empty source comp sized for the whole View box (see below), with the map comp's frame
   // range and frame rate, and a see-through background. The map comp is active again when this returns or throws; onMade
   // gets the id as soon as the comp exists, so a failure further on can still delete it.
-  // exact: the source comp is the map comp's size (flat night lights, which have no filter).
-  function createSourceComp(name, mapComp, onMade, exact) {
+  function createSourceComp(name, mapComp, onMade) {
     var size = A.readResolution(api.get(mapComp, A.COMP_RESOLUTION_ATTR)), range = compFrameRange(), fps = null, comp, o = {};
     try { fps = Number(api.get(mapComp, A.COMP_FPS_ATTR)); } catch (e) { fps = null; }
     try { comp = api.createComp(name); onMade(comp); } finally { api.setActiveComp(mapComp); }
     // A reference's filter only sees the comp inside its resolution rectangle (centred on the
     // origin), so the comp must cover the masked View box: at most MAX_VIEW_PX + 4 either way.
-    if (exact) o[A.COMP_RESOLUTION_ATTR] = { x: size.width, y: size.height };
-    else o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
+    o[A.COMP_RESOLUTION_ATTR] = { x: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.width + 16), y: Math.max(GeoReproject.MAX_VIEW_PX + 8, size.height + 16) };
     o[A.COMP_BACKGROUND_ATTR] = { r: 0, g: 0, b: 0, a: 0 };
     api.set(comp, o);
     setOne(comp, A.COMP_END_ATTR, range.end); // the end first, so a late start never lands past the old end
@@ -1133,14 +1268,14 @@ var GeoScene = (function () {
     });
   }
 
-  // Whether imagery meta has a source comp: bent imagery, and flat night lights (pre-comped, see
-  // "Night lights" below).
+  // Whether imagery meta has a source comp: bent imagery, and the flat night lights that older versions
+  // pre-comped (see "Night lights" below), which are still found and taken down.
   function usesSourceComp(meta) { return !!meta && (!!meta.bent || !!meta.sourceComp); }
 
   // Imagery taken apart a layer per entry ({ id } in the map comp, { id, comp } in a source
-  // comp, { comp } = delete that source comp). Flat: teardownOrder. Source comp (bent, or flat
-  // night): in the source comp (active while each is deleted) its tiles, level groups, View (with
-  // the level drivers) and View mask; then the filter and the group in the map comp; then the
+  // comp, { comp } = delete that source comp). Flat: teardownOrder. Source comp (bent, or an older
+  // pre-comped night build): in the source comp (active while each is deleted) its tiles, level groups,
+  // View (with the level drivers) and View mask; then the filter and the group in the map comp; then the
   // source comp itself.
   function teardownEntries(im, mapComp) {
     var mapPart = teardownOrder(im.groupId).map(function (id) { return { id: id }; });
@@ -1190,9 +1325,9 @@ var GeoScene = (function () {
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
-    // precomp: flat night lights, built in a source comp like bent imagery but with no filter and no
-    // view drivers (see "Night lights"). sourced: the build has a source comp (bent or precomp).
-    var bent = !!plan.bent, precomp = night && !bent, sourced = bent || precomp, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
+    // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
+    // (the older flat form, which planImagery no longer makes).
+    var bent = !!plan.bent, sourced = bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
     var sourceComp = null, view = null, mask = null, filter = null, assetGroup = false;
     // The map's imagery asset group, found or made on first use (false until then; null when unavailable).
     function fileAway(ids) {
@@ -1223,10 +1358,10 @@ var GeoScene = (function () {
     try { userSelection = api.getSelection(); } catch (e) { /* nothing selected */ }
 
     function withSourceComp(fn) { return withComp(sourceComp, mapComp, fn); }
-    // The source comp's name: "Imagery source: <label> · <map>" (bent and flat night alike).
+    // The source comp's name: "Imagery source: <label> · <map>" (day and night alike).
     function sourceCompName() { return "Imagery source: " + GeoSources.label(src, opts) + " · " + api.getNiceName(map.groupId); }
 
-    // Night lights: the reference to the source comp (bent or pre-comped flat) is matted by the four night
+    // Night lights: the reference to the source comp (bent) is matted by the four night
     // layers, so it shows only where they are dark. Nothing happens for day imagery (mattes is empty).
     // Read each time: a Controls sync during the build may upgrade the overlay (its Night rectangle replaces the four layers).
     function currentMattes() { return night ? nightMattes(findDayNight(map)) : []; }
@@ -1263,27 +1398,7 @@ var GeoScene = (function () {
       var meta = { camera: map.cameraId, category: "imagery", group: outer, cacheKey: plan.cacheKey, sourceMeta: GeoSources.meta(src, opts) };
       if (night) meta.night = true;
       if (bent) { startBent(meta); return; }
-      if (precomp) { startPrecomp(meta); return; }
       imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), outer, "rotation.z");
-    }
-
-    // Flat night lights (pre-comped): the source comp (the map comp's size, no filter), View in it, the
-    // reference in the outer group (matted, identity), then the rotation driver, which carries the GEO_META
-    // tag and turns View (not outer) so the reference in the map comp stays at identity.
-    function startPrecomp(meta) {
-      createSourceComp(sourceCompName(), mapComp, function (c) { sourceComp = c; }, true);
-      meta.sourceComp = sourceComp;
-      fileAway([sourceComp]);
-      withSourceComp(function () {
-        view = api.create("group", VIEW_NAME);
-        api.set(view, identityTransform());
-      });
-      var ref = api.createCompReference(sourceComp);
-      api.rename(ref, REFERENCE_NAME);
-      api.parent(ref, outer);
-      api.set(ref, identityTransform());
-      matte(ref);
-      imageryDriver(map, outer, "Imagery driver: rotation", GeoExpression.imageryRotationExpression(meta, A.ROTATION_SIGN), view, "rotation.z");
     }
 
     // Bent: the source comp with View and its mask, the reference with the filter (camera
@@ -1346,7 +1461,7 @@ var GeoScene = (function () {
       // 257/256 still showed faint seams in Cavalry), on top of the 512px-source half scale.
       api.set(id, { "position.x": p[0], "position.y": p[1], "rotation.z": 0,
         "scale.x": base * (px[0] + 4) / px[0], "scale.y": base * (px[1] + 4) / px[1] });
-      if (!sourced) matte(id); // a source-comp build (bent, flat night) mattes its reference only, not the tiles inside the source comp
+      if (!sourced) matte(id); // a source-comp build (bent) mattes its reference only, not the tiles inside the source comp
       built++;
     }
 
@@ -1360,8 +1475,7 @@ var GeoScene = (function () {
         ["position", "scale", "opacity"].forEach(function (attr) {
           var name = "Imagery driver: z " + b.L + " " + attr, expr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, lv);
           // Bent: in the source comp under View, reading the camera's lat / lon / zoom only.
-          // Flat night (pre-comped): in the source comp under View, with all five camera inputs.
-          if (sourced) withSourceComp(function () { imageryDriver(map, view, name, expr, b.group, attr, bent ? 3 : undefined); });
+          if (sourced) withSourceComp(function () { imageryDriver(map, view, name, expr, b.group, attr, 3); });
           else imageryDriver(map, outer, name, expr, b.group, attr);
         });
       });
@@ -1455,10 +1569,11 @@ var GeoScene = (function () {
 
   // ---- Night lights (NASA Black Marble in the Day & night group) ----------------------
   // A night build is the imagery build with plan.night: its group "Night lights" is the top child of
-  // the Day & night group. Flat night lights are pre-comped like bent imagery: the tiles sit in a source
-  // comp "Imagery source: NASA Black Marble · <map>" (sized to the map comp, no filter, no view drivers
-  // beyond the rotation), and the group holds one reference to it, matted by the four night layers
-  // (bent: the same reference, with the bent filter). Day imagery never lists or tears down night
+  // the Day & night group. Night lights are built like bent imagery, flat maps included: the tiles sit in a
+  // source comp "Imagery source: NASA Black Marble · <map>", and the group holds one reference to it with the
+  // Reproject filter, matted by the night layers (or the Night rectangle). Older flat night lights were
+  // pre-comped (a source comp the size of the map, no filter, no View mask); they are still found, kept and
+  // taken down like the rest, but no new build makes them. Day imagery never lists or tears down night
   // lights, and a night build never touches day.
 
   // Wanted: the Day & night overlay is complete and the map has satellite day imagery (see
@@ -1475,8 +1590,8 @@ var GeoScene = (function () {
   // A version 1 overlay while the plugin is missing: it is left as it is, so its night lights are neither built nor removed.
   function leftAsItIs(f) { return !!f && f.version === 1 && !nightAvailable(); }
 
-  // The plan for night lights: NASA's night layer over the same view. planImagery already stops at the
-  // layer's maximum zoom (8); zoomCapped says the camera went past it.
+  // The plan for night lights: NASA's night layer over the same view, bent like day imagery. planImagery already
+  // stops at the layer's maximum zoom (8); zoomCapped says the camera went past it.
   function planNightLights(map) {
     var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
     var plan = planImagery(map, GeoSources.night(), {});
@@ -1517,7 +1632,7 @@ var GeoScene = (function () {
   function extendComp(newEnd) {
     var comp = api.getActiveComp(), oldEnd = compFrameRange().end;
     if (!(newEnd > oldEnd)) return null;
-    // Bent imagery and flat night lights live in their own source composition(s), which must be as long.
+    // Imagery and night lights (and older pre-comped night lights) live in their own source composition(s), which must be as long.
     var sources = [];
     api.getCompLayers(false).forEach(function (id) {
       try {
@@ -1892,6 +2007,7 @@ var GeoScene = (function () {
     numberRoutes(map, groups);
     groups.forEach(function (g) {
       try { upgradeHandles(map, g); } catch (e) { /* the next Controls refresh tries again */ }
+      try { upgradeChains(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { prepareTravel(map, g, mapLayers); } catch (e) { /* the next Controls refresh tries again */ }
       try { upgradeClips(map, g); } catch (e) { /* the next Controls refresh tries again */ }
       try { upgradeTravellers(map, g); } catch (e) { /* the next Controls refresh tries again */ }
@@ -2347,6 +2463,16 @@ var GeoScene = (function () {
   // line stays exactly where it was) and the current script. Compares first, so a second refresh writes nothing.
   function upgradeCalloutAnchors(m) {
     var E = GeoExpression, CA = A.CAMERA_ARRAY_ATTR;
+    // The place helper sits on the copy nearest the camera (a callout made before that projects onto the global place).
+    if (m.place && layerThere(m.place)) {
+      try {
+        var nowPlace = readExpr(m.place, A.CAMERA_EXPR_ATTR), placeMeta = E.readTag(nowPlace, "GEO_META");
+        if (placeMeta) {
+          var freshPlace = E.labelDriverExpression(GEO_RUNTIME_SRC, placeMeta, A.DRIVER_RETURN, { nearest: true });
+          if (nowPlace !== freshPlace) setOne(m.place, A.CAMERA_EXPR_ATTR, freshPlace);
+        }
+      } catch (e) { /* the next Controls refresh tries this helper again */ }
+    }
     var helpers = [[m.edge, E.CALLOUT_GEOM_INPUTS, E.calloutEdgeExpression], [m.bend, E.CALLOUT_GEOM_INPUTS, E.calloutBendExpression]];
     (m.draws || []).forEach(function (id) { helpers.push([id, E.CALLOUT_DRAW_INPUTS, E.calloutDrawExpression]); });
     helpers.forEach(function (h) {
@@ -2511,7 +2637,7 @@ var GeoScene = (function () {
       var dot = track(api.primitive("ellipse", label0 + " dot"));
       setOne(dot, "generator.radius", [CALLOUT_DOT, CALLOUT_DOT]);
       applyStyle(dot, { fill: look.colors.accent });
-      var placeId = utility("place", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("calloutPlace"), A.DRIVER_RETURN));
+      var placeId = utility("place", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelDriverExpression(GEO_RUNTIME_SRC, meta("calloutPlace"), A.DRIVER_RETURN, { nearest: true }));
       connectCamera(map.cameraId, placeId, CA);
       api.connect(placeId, A.DRIVER_OUTPUT_ATTR, dot, "position", true);
       var fade = utility("fade", E.LABEL_INPUTS, { labelLon: lon, labelLat: lat }, E.labelVisibilityExpression(GEO_RUNTIME_SRC, meta("calloutFade")));
@@ -2549,7 +2675,7 @@ var GeoScene = (function () {
       api.parent(box, g);
       ["position", "rotation.z", "scale.x", "scale.y"].forEach(function (attr) { api.connect(label, attr, box, attr, true); });
       api.parent(label, g);
-      var s = compSize(), p = GeoRuntime.projectPoint(lon, lat, readCamera(map.cameraId));
+      var s = compSize(), p = GeoRuntime.projectNearest(lon, lat, readCamera(map.cameraId));
       api.set(label, {
         "rotation.z": 0, "scale.x": 1, "scale.y": 1,
         position: [Math.max(-s.width / 2 + CALLOUT_MARGIN, Math.min(s.width / 2 - CALLOUT_LABEL_W, p[0] + CALLOUT_OFFSET[0])),
@@ -3123,6 +3249,83 @@ var GeoScene = (function () {
     });
   }
 
+  // A route's group, new or older style: it carries the route's data (or is named as one). A group the user made is not one,
+  // so a pin or label the user moved into it still sits on the copy nearest the camera.
+  function isRouteGroup(g) {
+    if (!g) return false;
+    if (typeof api.hasUserDataKey === "function" && (api.hasUserDataKey(g, ROUTE_KEY) || api.hasUserDataKey(g, ROUTE_NUMBER_KEY) || api.hasUserDataKey(g, ROUTE_TRAVEL_KEY))) return true;
+    return ROUTE_PREFIX.test(String(api.getNiceName(g)));
+  }
+  // The data layers that repeat on a flat map: each display's inputs and its expression builder (null for the rest).
+  function dataFrame(display) {
+    var E = GeoExpression;
+    if (display === "regions") return { inputs: E.REGION_INPUTS, build: function (data, meta) { return E.regionsExpression(GEO_DATA_RUNTIME_SRC, data, meta); } };
+    if (display === "bubbles") return { inputs: E.BUBBLE_INPUTS, build: function (data, meta) { return E.bubblesExpression(GEO_DATA_RUNTIME_SRC, data, meta, { ellipseScale: A.ELLIPSE_SCALE }); } };
+    if (display === "labels") return { inputs: E.VALUE_LABEL_INPUTS, build: function (data, meta) { return E.valueLabelsExpression(GEO_DATA_RUNTIME_SRC, data, meta); } };
+    return null;
+  }
+  // Layers made before the date line, brought up to date by Refresh controls (a layer already current is not written).
+  // Base and extract layers and the data layers' regions, bubbles and value labels gain the comp size as their last inputs
+  // (compW, compH, appended: no earlier input moves) and the frame in their call, so they repeat on a flat map. Pins and
+  // labels on the map draw the copy nearest the camera, and highlight shapes draw whole. An old-style route's stop (a pin or
+  // label in the route's group, not the map's) and its legs stay as they are. Each layer and driver is guarded: a failing
+  // one is tried again by the next refresh. mapLayers / drivers: the lists the sync already read (no comp scan here).
+  function upgradeMapLayers(map, mapLayers, drivers) {
+    var E = GeoExpression, RT = GEO_RUNTIME_SRC, MA = A.MAP_ARRAY_ATTR, EX = A.MAP_EXPR_ATTR, size = compSize();
+    var comp = { compW: size.width, compH: size.height };
+    mapLayers.forEach(function (l) {
+      var c = l.meta.category, df = c === "data" ? dataFrame(l.meta.display) : null;
+      try {
+        if (c === "pin" || c === "label") {
+          var pinParent = api.getParent(l.id);
+          if (l.nearest || (pinParent !== map.groupId && isRouteGroup(pinParent))) return;
+          var pointData = readLayerData(l.id);
+          setOne(l.id, EX, E.mapLayerExpression(RT, pointData, l.meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: true }));
+        } else if (c === "highlight") {
+          if (l.whole) return;
+          var shapeData = readLayerData(l.id);
+          setOne(l.id, EX, E.highlightLayerExpression(RT, shapeData, l.meta, { ellipseScale: A.ELLIPSE_SCALE }));
+        } else if (df) {
+          if (l.frame) return;
+          var regionData = readLayerData(l.id);
+          extendInputs(l.id, MA, df.inputs, comp);
+          setOne(l.id, EX, df.build(regionData, l.meta));
+        } else if (GeoControls.BASE.indexOf(c) >= 0 || c === "extract") {
+          if (l.frame) return;
+          var baseData = readLayerData(l.id);
+          extendInputs(l.id, MA, E.MAP_LAYER_INPUTS, comp);
+          setOne(l.id, EX, E.mapLayerExpression(RT, baseData, l.meta, { ellipseScale: A.ELLIPSE_SCALE, nearest: false, single: false }));
+        }
+      } catch (e) { /* the next Controls refresh tries this layer again */ }
+    });
+    (drivers || []).forEach(function (d) {
+      try {
+        // A label on a route's stop (in the route's group) keeps its place; the others are nearest.
+        var driverParent = api.getParent(d.driver);
+        if (driverParent !== map.groupId && isRouteGroup(driverParent)) return;
+        var now = readExpr(d.driver, A.CAMERA_EXPR_ATTR);
+        if (now.indexOf("GeoRuntime.projectNearest(") >= 0) return;
+        var meta = E.readTag(now, "GEO_META");
+        if (!meta) return;
+        setOne(d.driver, A.CAMERA_EXPR_ATTR, E.labelDriverExpression(RT, meta, A.DRIVER_RETURN, { nearest: true }));
+      } catch (e) { /* the next Controls refresh tries this driver again */ }
+    });
+  }
+  // Keeps the comp size in step with the composition in every repeating layer's frame inputs (the layers can't read it).
+  // mapLayers: the list the sync read (a layer upgraded in this refresh already has the size).
+  function fitLayers(mapLayers) {
+    var s = compSize(), MA = A.MAP_ARRAY_ATTR;
+    mapLayers.forEach(function (l) {
+      if (!l.frame) return;
+      try {
+        var o = {}, w = MA + "." + l.frame.w, h = MA + "." + l.frame.h;
+        if (Number(api.get(l.id, w)) !== s.width) o[w] = s.width;
+        if (Number(api.get(l.id, h)) !== s.height) o[h] = s.height;
+        if (Object.keys(o).length) api.set(l.id, o);
+      } catch (e) { /* the next Controls refresh tries this layer again */ }
+    });
+  }
+
   // The ids of every part of a map a style colours (see GeoStyles.targets).
   function styleParts(map) {
     var parts = { ocean: findOcean(map), layers: [], pins: [], stops: [], legs: [], markers: [], labels: [], valueLabels: [], legends: [], credits: [], furniture: [], regions: [], calloutLines: [], calloutDots: [], calloutBoxes: [], nightLayers: [], timeLabels: [] };
@@ -3309,9 +3512,10 @@ var GeoScene = (function () {
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
-    addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, findDayNight: findDayNight, dayNightParts: dayNightParts,
+    addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, imageryNote: imageryNote, findDayNight: findDayNight, dayNightParts: dayNightParts,
     nightMattes: nightMattes, dayNightComplete: dayNightComplete, NIGHT_TYPE: NIGHT_TYPE, DAYNIGHT_MISSING: DAYNIGHT_MISSING, layerTypeAvailable: layerTypeAvailable, nightAvailable: nightAvailable,
-    addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture,
+    addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture, fitLayers: fitLayers, upgradeMapLayers: upgradeMapLayers,
+    labelDrivers: labelDrivers,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer
   };
 })();

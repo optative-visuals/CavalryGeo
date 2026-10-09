@@ -75,7 +75,7 @@ test("label visibility expression returns 100 when visible and 0 behind the glob
 });
 
 test("map layer expression keeps an explicit ellipseScale of 0", () => {
-  assert.ok(E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 0 }).includes("ellipseScale: 0}"));
+  assert.ok(E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 0 }).includes("ellipseScale: 0,"));
 });
 
 test("route layer expression draws a leg and reads lift from n7 or the renamed input", () => {
@@ -214,7 +214,8 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
   assert.deepEqual(E.HANDLE_INPUTS, [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
     ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
-    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]]);
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0],
+    ["aChainLon", 0], ["bChainLon", 0], ["refLon", 0]]);
   // Great circle branch: shape 1 uses greatCircleHandles, shape 0 stays Arc, hand still wins.
   const bundle = require("../tools/buildlib.js").buildCurveSource();
   const gcIn = ins.concat([1, 20, 10, 3, 15, 2, 0, 51, 100, 35]);
@@ -512,6 +513,11 @@ test("highlight shape: a large outline grows by scaling about its box centre, no
   assert.deepEqual(calls, [["boundingBox"], ["translate", -50, -25], ["scale", s, s], ["translate", 50, 25]]);
 });
 
+test("highlight shape: drawn whole (one shape, one copy) by buildPath", () => {
+  const expr = E.highlightLayerExpression("var GeoRuntime = {};", { kind: "polygon", features: [] }, { camera: "c", category: "highlight", effect: "fill" }, {});
+  assert.ok(expr.includes("{pointRadius: _i6, ellipseScale: 1, whole: true}"));
+});
+
 test("highlight shape: a failing offset still returns the plain outline", () => {
   const src = "var GeoRuntime = { buildPath: function () { return GEO_PATH; } };";
   const expr = E.highlightLayerExpression(src, { kind: "polygon", features: [] }, { camera: "c", category: "highlight", effect: "glow" }, {});
@@ -627,4 +633,160 @@ test("traveller show helper: also hides before the leg's clip start and after it
   assert.equal(run(show, Object.assign({}, base, { drawFull: 70 })), 0, "the draw has gone past the clipped end");
   assert.equal(run(show, Object.assign({}, base, { drawFull: 40 })), 100);
   assert.equal(run(show, Object.assign({}, base, { later1: 5 })), 0);
+});
+
+test("label driver expression: default output is unchanged and projects the place as given", () => {
+  const plain = E.labelDriverExpression(buildRuntimeSource(), meta, "array");
+  assert.equal(E.labelDriverExpression(buildRuntimeSource(), meta, "array", {}), plain);
+  assert.equal(E.labelDriverExpression(buildRuntimeSource(), meta, "array", { nearest: false }), plain);
+  assert.ok(plain.includes("GeoRuntime.projectPoint(_i5, _i6, "));
+  assert.ok(!plain.includes("GeoRuntime.projectNearest("));
+});
+
+test("label driver expression with nearest: true calls projectNearest and folds the place onto the camera's copy", () => {
+  const expr = E.labelDriverExpression(buildRuntimeSource(), meta, "array", { nearest: true });
+  assert.ok(expr.includes("GeoRuntime.projectNearest(_i5, _i6, "));
+  assert.ok(!expr.includes("GeoRuntime.projectPoint("));
+  const ctx = { cavalry: {}, n0: 0, n1: -179.9, n2: 0, n3: 0, n4: 0, n5: 179.5, n6: 0 };
+  const out = Array.from(vm.runInNewContext(expr, ctx));
+  assert.ok(Math.abs(out[0]) <= 128 + 1e-6, `x ${out[0]} is a whole world away`);
+});
+
+test("map layer expression: nearest is passed to buildPath only when asked for", () => {
+  const plain = E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 1 });
+  assert.ok(!plain.includes("nearest: true"));
+  const near = E.mapLayerExpression(buildRuntimeSource(), enc, meta, { ellipseScale: 1, nearest: true });
+  assert.ok(near.includes("nearest: true"));
+});
+
+// Date line: the input lists as they were at 82b4dbd. Map and data layers gained compW and compH at the end only.
+const MAP_BASE = [["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["detail", 100], ["pointRadius", 4]];
+const COMP_SIZE = [["compW", 1920], ["compH", 1080]];
+const COLOUR_BASE = [["low", "#f2e8cf", "color"], ["high", "#bc4749", "color"], ["useMiddle", 0], ["middle", "#ffffff", "color"], ["middleValue", 0], ["min", 0], ["max", 0]];
+test("input lists: earlier names, defaults and indices are unchanged; compW and compH are appended last", () => {
+  assert.deepEqual(E.MAP_INPUTS, MAP_BASE);
+  assert.deepEqual(E.MAP_LAYER_INPUTS, MAP_BASE.concat(COMP_SIZE));
+  assert.deepEqual(E.REGION_INPUTS, MAP_BASE.concat([["year", 0]], COLOUR_BASE, [["noData", "#dddddd", "color"]], COMP_SIZE));
+  assert.deepEqual(E.BUBBLE_INPUTS, MAP_BASE.concat([["year", 0], ["maxRadius", 40]], COMP_SIZE));
+  assert.deepEqual(E.VALUE_LABEL_INPUTS, MAP_BASE.concat([["year", 0], ["textSize", 16], ["format", 0], ["decimals", 1]], COMP_SIZE));
+  assert.deepEqual(E.ROUTE_INPUTS, MAP_BASE.concat([["lift", 30]]));
+  assert.equal(E.inputIndex(E.MAP_LAYER_INPUTS, "compW"), 7);
+  assert.equal(E.inputIndex(E.MAP_LAYER_INPUTS, "compH"), 8);
+  assert.equal(E.inputIndex(E.REGION_INPUTS, "compW"), 16);
+  assert.equal(E.inputIndex(E.BUBBLE_INPUTS, "compW"), 9);
+  assert.equal(E.inputIndex(E.VALUE_LABEL_INPUTS, "compH"), 12);
+});
+
+const wide = C.encodeLayer({ kind: "polygon", features: [{ name: "a", rank: 1, rings: [[[-178.5, 0], [-177.5, 0], [-177.5, 1], [-178.5, 0]]] }] });
+const copyCtx = (over) => Object.assign({ cavalry: { Path: FakePath }, n0: 0, n1: 175, n2: 4, n3: 0, n4: 0, n5: 100, n6: 4, n7: 1920, n8: 1080 }, over || {});
+test("map layer expression repeats on flat maps: one copy east of the date line", () => {
+  const expr = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1 });
+  assert.ok(expr.includes("frame: {w: _i7, h: _i8}"));
+  const ms = vm.runInNewContext(expr, copyCtx()).ops.filter((o) => o[0] === "M");
+  assert.equal(ms.length, 2);
+  assert.ok(ms[0][1] < -4000, "the original, 353 degrees west, is always drawn");
+  assert.ok(ms[1][1] > 0, "plus the copy at +1 world-width, on the frame");
+});
+
+test("single things and old layers get no frame: the shape is drawn once at its own longitude", () => {
+  const single = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1, single: true });
+  assert.ok(!single.includes("frame: {w:"));
+  const x = vm.runInNewContext(single, copyCtx()).ops[0][1];
+  assert.ok(x < -4000, `x ${x} is the copy 353 degrees west`);
+  const nearest = E.mapLayerExpression(buildRuntimeSource(), wide, meta, { ellipseScale: 1, nearest: true });
+  assert.ok(!nearest.includes("frame: {w:"));
+});
+
+test("regions and bubbles expressions pass the comp frame into the data helpers", () => {
+  const data = { geo: wide, series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } };
+  const regions = E.regionsExpression(buildDataRuntimeSource(), data, meta);
+  assert.ok(regions.includes("frame: {w: _i16, h: _i17}"));
+  const mesh = vm.runInNewContext(regions, copyCtx({ n7: 2010, cavalry: { Path: FakePath, Mesh: class { constructor() { this.paths = []; } addPath(p) { this.paths.push([p]); } }, Material: class {} } }));
+  assert.equal(mesh.paths[1][0].ops.filter((o) => o[0] === "M").length, 2); // the original (off the frame) and its copy on the frame
+  const bubbles = E.bubblesExpression(buildDataRuntimeSource(), { pts: [[170, 0]], series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } }, meta);
+  assert.ok(bubbles.includes("frame: {w: _i9, h: _i10}"));
+  const dots = vm.runInNewContext(bubbles, copyCtx({ n1: 0, n2: 0, n7: 2010, n8: 40, n9: 1920, n10: 1080, cavalry: { Path: FakePath } })).ops;
+  assert.equal(dots.length, 8);
+  assert.ok(E.valueLabelsExpression(buildDataRuntimeSource(), { pts: [], series: [], range: {} }, meta).includes("frame: {w: _i11, h: _i12}"));
+});
+
+test("routes, highlights and the legends never take a frame", () => {
+  assert.ok(!E.routeLayerExpression(buildRuntimeSource(), wide, meta, {}).includes("frame: {w:"));
+  assert.ok(!E.highlightLayerExpression(buildRuntimeSource(), wide, { effect: "outline" }, {}).includes("frame: {w:"));
+  assert.ok(!E.legendExpression(buildDataRuntimeSource(), { range: {}, title: "" }, meta).includes("frame: {w:"));
+});
+
+test("route stop driver: flat maps move a stop by the route's shift, globe and Equal Earth project its own longitude", () => {
+  const GP = require("../src/core/projection.js");
+  const src = buildRuntimeSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const at = (lon, lat, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, lat, o); return o; };
+  const near = (a, b) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), a + " is not " + b);
+  const expr = E.routeStopDriverExpression(src, { camera: "c", category: "stopDriver" }, "array");
+  // Inputs: camLat, camLon, zoom, rotation, projection, labelLon, labelLat, chainLon, refLon.
+  // Tokyo (chained 139.69) -> Los Angeles (chained 241.76): the route's midpoint is 190.73, so the camera at 0 gets shift -360.
+  const cam0 = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 0, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(-220.31, 35.68, cam0));
+  near(run(expr, [10, 0, 2, 0, 0, -118.24, 34.05, 241.76, 190.725]), at(-118.24, 34.05, cam0));
+  // Camera at 180: the route is already nearest, so no shift.
+  const cam180 = { lat: 10, lon: 180, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 180, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(139.69, 35.68, cam180));
+  // Globe and Equal Earth ignore the chain: each stop projects its own longitude.
+  [1, 2].forEach((projection) => {
+    const cam = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection };
+    near(run(expr, [10, 0, 2, 0, projection, -118.24, 34.05, 241.76, 190.725]), at(-118.24, 34.05, cam));
+  });
+  assert.throws(() => E.routeStopDriverExpression(src, {}, "middle"), /Unknown driver return form/);
+  assert.deepEqual(E.ROUTE_STOP_INPUTS.map((i) => i[0]), E.LABEL_INPUTS.map((i) => i[0]).concat(["chainLon", "refLon"]));
+});
+
+test("route handle expression: chained stops on flat maps use their chained longitudes moved by the route's shift", () => {
+  const GP = require("../src/core/projection.js"), GC = require("../src/core/curve.js");
+  const bundle = require("../tools/buildlib.js").buildCurveSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const H = (name) => E.inputIndex(E.HANDLE_INPUTS, name);
+  assert.equal(E.HANDLE_INPUTS.length, 27);
+  assert.deepEqual(E.HANDLE_INPUTS.slice(24).map((i) => i[0]), ["aChainLon", "bChainLon", "refLon"]);
+  // First leg of Tokyo -> Los Angeles: Tokyo 139.69, LA chained 241.76; the route's midpoint 190.725 puts it on the copy at -360 from camera 0.
+  const cam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 0 };
+  const proj = GP.makeProjector(cam, true);
+  const p0 = [0, 0], p1 = [0, 0];
+  proj(-220.31, 35.68, p0); proj(-118.24, 34.05, p1);
+  const ins = new Array(27).fill(0);
+  Object.assign(ins, { 0: p0[0], 1: p0[1], 2: 0, 3: 0, 4: p1[0], 5: p1[1], 6: 0, 7: 0 });
+  Object.assign(ins, { 8: 40, 9: 20, 10: 0, 11: 0, 12: 0, 13: 0, 14: 1, 15: 20, 16: 0, 17: 1, 18: 0, 19: 0, 20: 139.69, 21: 35.68, 22: -118.24, 23: 34.05 });
+  Object.assign(ins, { 24: 139.69, 25: 241.76, 26: 190.725 });
+  const want = GC.greatCircleHandles(p0, p1, { cam, aLon: -220.31, aLat: 35.68, bLon: -118.24, bLat: 34.05, offA: [0, 0], offB: [0, 0] }, { arc: 40, lean: 20, flip: 0 });
+  const expr = (which) => E.routeHandleExpression(bundle, { camera: "c", category: "legHandle" }, which, { chained: true });
+  assert.deepEqual(run(expr("start"), ins), want.start);
+  assert.deepEqual(run(expr("end"), ins), want.end);
+  // Unchained (older routes): the same helper keeps the old expression, which ignores the chain inputs.
+  const old = E.routeHandleExpression(bundle, { camera: "c", category: "legHandle" }, "start");
+  const oldIns = ins.slice(); oldIns[24] = 0; oldIns[25] = 0; oldIns[26] = 0;
+  assert.deepEqual(run(old, ins), run(old, oldIns));
+  // Globe: the chain is ignored and the raw longitudes are used.
+  const gcam = { lat: 20, lon: 0, zoom: 1, rotation: 0, projection: 2 }, gproj = GP.makeProjector(gcam, true), g0 = [0, 0], g1 = [0, 0];
+  gproj(139.69, 35.68, g0); gproj(-118.24, 34.05, g1);
+  const globe = ins.slice(); globe[19] = 2; globe[15] = 20; globe[0] = g0[0]; globe[1] = g0[1]; globe[4] = g1[0]; globe[5] = g1[1];
+  const gwant = GC.greatCircleHandles(g0, g1, { cam: gcam, aLon: 139.69, aLat: 35.68, bLon: -118.24, bLat: 34.05, offA: [0, 0], offB: [0, 0] }, { arc: 40, lean: 20, flip: 0 });
+  assert.deepEqual(run(expr("start"), globe), gwant.start);
+  assert.equal(H("refLon"), 26);
+  assert.equal(H("aChainLon"), 24);
+});
+
+test("route stop driver: a keyed labelLon folds onto the copy its chain picks, so the animation still moves the place (flat)", () => {
+  const GP = require("../src/core/projection.js");
+  const src = buildRuntimeSource();
+  const run = (expr, ins) => Array.from(vm.runInNewContext(expr, Object.fromEntries(ins.map((v, i) => ["n" + i, v]))));
+  const at = (lon, lat, cam) => { const o = [0, 0]; GP.makeProjector(cam)(lon, lat, o); return o; };
+  const near = (a, b) => assert.ok(a.every((v, k) => Math.abs(v - b[k]) < 1e-9), a + " is not " + b);
+  const expr = E.routeStopDriverExpression(src, { camera: "c", category: "stopDriver" }, "array");
+  // Tokyo chained to 139.69 and keyed to labelLon 150: the chain picks the copy, the route's shift is -360 from camera 0.
+  const cam0 = { lat: 10, lon: 0, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 0, 2, 0, 0, 150, 35.68, 139.69, 190.725]), at(-210, 35.68, cam0));
+  // Camera at 180: no shift, so the keyed place itself.
+  const cam180 = { lat: 10, lon: 180, zoom: 2, rotation: 0, projection: 0 };
+  near(run(expr, [10, 180, 2, 0, 0, 150, 35.68, 139.69, 190.725]), at(150, 35.68, cam180));
+  // A static stop (labelLon = chain) is unchanged: -220.31 from camera 0.
+  near(run(expr, [10, 0, 2, 0, 0, 139.69, 35.68, 139.69, 190.725]), at(-220.31, 35.68, cam0));
 });

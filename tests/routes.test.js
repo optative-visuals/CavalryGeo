@@ -56,3 +56,22 @@ test("unwrapLons keeps each step within 180°", () => {
   assert.deepEqual(G.unwrapLons([-170, 179]), [-170, -181]);
   assert.deepEqual(G.unwrapLons([]), []);
 });
+
+test("chainLons: each lon moved by whole turns to be within 180 of the previous one", () => {
+  assert.deepEqual(G.chainLons([139.7, -118.2]), [139.7, 241.8]);
+  assert.deepEqual(G.chainLons([139.7, -118.2, -74]), [139.7, 241.8, 286]);
+  assert.deepEqual(G.chainLons([-10, 10]), [-10, 10]);
+  assert.deepEqual(G.chainLons([]), []);
+});
+
+test("routeShift: the turn that puts the route's midpoint nearest the camera", () => {
+  const chained = G.chainLons([139.7, -118.2]);
+  assert.equal(G.routeShift(chained, 0), -360);
+  assert.equal(G.routeShift(chained, 180), 0);
+  assert.equal(G.routeShift(chained, 200), 0);
+  assert.equal(G.routeShift(chained, -170), -360);
+  assert.equal(G.routeShift([-10, 10], 0), 0);
+  // Three stops: the midpoint is of the first and last only.
+  const three = G.chainLons([139.7, -118.2, -74]);
+  assert.equal(G.routeShift(three, 0), -360);
+});

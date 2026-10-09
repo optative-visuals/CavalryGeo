@@ -199,3 +199,19 @@ test("unproject (Mercator) clamps the latitude to the map's edge, so it re-proje
   assert.equal(P.unproject(cam, 0, 1e6 * P.worldScale(2)).lat, P.MAX_LAT);
   assert.equal(P.unproject(cam, 0, -1e6 * P.worldScale(2)).lat, -P.MAX_LAT);
 });
+
+test("nearestLon: the copy of a longitude nearest the camera", () => {
+  near(P.nearestLon(179, -179), -181);
+  near(P.nearestLon(-179, 179), 181);
+  near(P.nearestLon(10, 0), 10);
+  near(P.nearestLon(-10, 0), -10);
+});
+
+test("nearestLon: a pin's flat x stays within half a world of the camera across the date line", () => {
+  const R = P.worldScale(0);
+  [179.9, 180, -180, -179.9].forEach((camLon) => {
+    const out = [0, 0];
+    P.makeProjector(cam({ lon: camLon }))(P.nearestLon(179.5, camLon), 0, out);
+    assert.ok(Math.abs(out[0]) <= Math.PI * R + 1e-6, `camera ${camLon}: x ${out[0]} is more than half a world away`);
+  });
+});
