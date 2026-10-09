@@ -342,13 +342,16 @@ var GeoNet = (function () {
 
   // ---- Map style files: one JSON file per saved style in the "Map styles" folder --------
   function stylesDir() { return settingsDir() + "/" + GeoStyleFiles.FOLDER; }
-  // Reads the style folder: { styles, skipped, paths } (see GeoStyleFiles.readAll). Files are read in
-  // path order, so the first of two same-named files is the one kept.
+  // Style files need a Cavalry that can list folders. Without one, saved styles stay in settings.json.
+  function filesSupported() { return typeof api.listDirectory === "function"; }
+  // Reads the style folder: { styles, skipped, paths, reasons, names } (see GeoStyleFiles.readAll). Paths are
+  // read with forward slashes, in path order, so the first of two same-named files is the one kept.
   function readStyleFiles() {
-    var dir = stylesDir(), none = { styles: [], skipped: [], paths: {} };
-    if (typeof api.listDirectory !== "function") return none;
+    if (!filesSupported()) return GeoStyleFiles.readAll([]);
+    var dir = stylesDir();
     ensureDir(dir);
-    var paths = (api.listDirectory(dir) || []).filter(function (p) { return /\.json$/i.test(String(p)); }).sort();
+    var paths = (api.listDirectory(dir) || []).map(function (p) { return String(p).replace(/\\/g, "/"); })
+      .filter(function (p) { return /\.json$/i.test(p); }).sort();
     var entries = paths.map(function (p) {
       var text = "";
       try { text = String(api.readFromFile(p)); } catch (e) { /* unreadable: skipped below */ }
@@ -370,20 +373,35 @@ var GeoNet = (function () {
     api.writeToFile(path, GeoStyleFiles.toText(style), true);
     return path;
   }
-  // Deletes the file of the saved style with this name (nothing when no such file). Throws when this Cavalry
-  // can't delete files, naming the file so it can be deleted by hand.
+  // Removes the style with this name from settings.json's "mapStyles" (the key goes when none is left).
+  function dropSettingsStyle(name) {
+    var s = loadSettings(), key = String(name).trim().toLowerCase();
+    if (!("mapStyles" in s)) return;
+    var keep = GeoStyleFiles.movePlan(s).filter(function (st) { return st.name.toLowerCase() !== key; });
+    if (keep.length) updateSettings({ mapStyles: keep }); else removeSettings(["mapStyles"]);
+  }
+  // Deletes the saved style with this name: its file, and its settings.json entry when it has one. Throws when
+  // this Cavalry can't delete files, or the file is still there afterwards. Returns the file's path ("" if none).
   function deleteStyleFile(name) {
-    var path = readStyleFiles().paths[String(name).trim().toLowerCase()];
-    if (!path) return "";
-    if (typeof api.deleteFilePath !== "function") throw new Error("This Cavalry can't delete files: delete " + path + " by hand.");
-    api.deleteFilePath(path);
+    var path = readStyleFiles().paths[String(name).trim().toLowerCase()] || "";
+    if (path) {
+      if (typeof api.deleteFilePath !== "function") throw new Error("This Cavalry can't delete files: delete " + path + " by hand.");
+      api.deleteFilePath(path);
+      if (api.filePathExists(path)) throw new Error("Couldn't delete " + path + ": it may be open elsewhere.");
+    }
+    dropSettingsStyle(name);
     return path;
   }
-  // Moves the styles in settings.json ("mapStyles") into style files. A style that can't be written stays
-  // in settings.json for the next start; the key is removed once nothing is left. Returns how many moved.
+  // Moves the styles in settings.json ("mapStyles") into style files, once. A style whose name is already a file
+  // keeps that file (the folder wins) and leaves settings.json. One that can't be written stays in settings.json
+  // for the next start. Nothing moves when this Cavalry can't list folders. Returns how many were moved.
   function moveStylesToFiles() {
+    if (!filesSupported()) return 0;
     var s = loadSettings(), plan = GeoStyleFiles.movePlan(s), failures = [], moved = 0;
+    if (!plan.length && !("mapStyles" in s)) return 0;
+    var listed = readStyleFiles().paths;
     plan.forEach(function (style) {
+      if (listed[style.name.toLowerCase()]) { moved++; return; }
       try { writeStyleFile(style); moved++; } catch (e) { failures.push(style); }
     });
     if (failures.length) updateSettings({ mapStyles: failures });
@@ -395,6 +413,6 @@ var GeoNet = (function () {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings, removeSettings: removeSettings,
-    stylesDir: stylesDir, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
+    stylesDir: stylesDir, filesSupported: filesSupported, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
   };
 })();

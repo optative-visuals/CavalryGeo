@@ -241,24 +241,35 @@ function previewMapColors() {
 // Files that were skipped and already reported this session, by path (see reloadStyleFiles).
 var reportedSkips = {};
 function fileNameOf(path) { return String(path).replace(/\\/g, "/").split("/").pop(); }
-// Reloads the saved styles from their files and keeps the picked one. Returns the note for the first skipped
-// file not reported yet ("" when there is none). A quiet reload (start-up) reports nothing and leaves the
-// note for the next Refresh.
+// Reloads the saved styles: the style files, then each style still only in settings.json (one that could not be
+// moved) unless a file of that name exists. Keeps the picked name. Returns the note for the skipped files not
+// reported yet ("" when there are none). A quiet reload (start-up) reports nothing and leaves the notes for Refresh.
 function reloadStyleFiles(quiet) {
-  var r = GeoNet.readStyleFiles();
-  savedStyles = r.styles;
+  var r;
+  try { r = GeoNet.readStyleFiles(); } catch (e) { r = GeoStyleFiles.readAll([]); }
+  savedStyles = r.styles.slice();
+  var listed = {};
+  savedStyles.forEach(function (st) { listed[st.name.toLowerCase()] = true; });
+  var fromSettings = [];
+  try { fromSettings = GeoStyleFiles.movePlan(GeoNet.loadSettings()); } catch (e) { fromSettings = []; }
+  fromSettings.forEach(function (st) {
+    if (listed[st.name.toLowerCase()]) return;
+    savedStyles.push(st); listed[st.name.toLowerCase()] = true;
+  });
   refreshStylePicker(pickedStyle().name);
   if (quiet) return "";
-  var fresh = r.skipped.filter(function (p) { return !reportedSkips[p]; })[0];
-  if (!fresh) return "";
-  reportedSkips[fresh] = true;
-  return "Skipped Map styles/" + fileNameOf(fresh) + ": not a Cavalry Geo style.";
+  var fresh = r.skipped.filter(function (p) { return !reportedSkips[p]; });
+  if (!fresh.length) return "";
+  fresh.forEach(function (p) { reportedSkips[p] = true; });
+  var first = fresh[0];
+  var why = r.reasons[first] === "duplicate" ? "\"" + r.names[first] + "\" is already saved." : "not a Cavalry Geo style.";
+  return "Skipped Map styles/" + fileNameOf(first) + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
 }
 (function () {
   var s = {};
   try { GeoNet.moveStylesToFiles(); } catch (e) { /* the styles stay in settings.json until the next start */ }
   try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
-  try { reloadStyleFiles(true); } catch (e) { savedStyles = []; }
+  reloadStyleFiles(true);
   refreshStylePicker(s.mapStyle);
 })();
 var preview = GeoPreviewPanel.create({
@@ -594,9 +605,15 @@ saveStyleBtn.onClick = guardAction(function () {
     name = existing.name;
   }
   var style = GeoScene.readMapStyle(map, name);
-  GeoNet.writeStyleFile(style);
-  GeoNet.updateSettings({ mapStyle: style.name });
-  reloadStyleFiles(true);
+  if (GeoNet.filesSupported()) {
+    GeoNet.writeStyleFile(style);
+    GeoNet.updateSettings({ mapStyle: style.name });
+    reloadStyleFiles(true);
+  } else {
+    var at = savedStyles.indexOf(existing);
+    if (at >= 0) savedStyles[at] = style; else savedStyles.push(style);
+    GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: style.name });
+  }
   GeoScene.setMapStyle(map, style);
   refreshStylePicker(style.name);
   previewStyle();

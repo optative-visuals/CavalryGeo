@@ -53,6 +53,7 @@ test("file names: Windows device names get a dash so they are never device files
   assert.equal(F.fileName("lpt1 "), "lpt1-.json");
   assert.equal(F.fileName("com9."), "com9-.json");
   assert.equal(F.fileName("Console"), "Console.json");
+  assert.equal(F.fileName("CON.x"), "CON-.x.json");
 });
 
 test("file names: tabs and backslashes become dashes", () => {
@@ -77,4 +78,15 @@ test("readAll skips a third file whose name differs only in case", () => {
   assert.equal(out.styles.length, 1);
   assert.deepEqual(out.skipped, ["A/OCEAN.json"]);
   assert.deepEqual(out.paths, { ocean: "A/Ocean.json" });
+});
+
+test("readAll says why each file was skipped, and names the styles it read", () => {
+  const out = F.readAll([
+    { path: "A/a.json", text: F.toText(s) },
+    { path: "A/b.json", text: F.toText(s) },
+    { path: "A/n.json", text: "{}" }
+  ]);
+  assert.deepEqual(out.reasons, { "A/b.json": "duplicate", "A/n.json": "not-style" });
+  assert.equal(out.names["A/b.json"], "Ocean");
+  assert.equal(out.names["A/n.json"], undefined);
 });

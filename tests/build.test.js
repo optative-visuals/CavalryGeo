@@ -5808,6 +5808,7 @@ function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}");
 const STYLES_DIR = "C:/fake/AppData/CavalryGeo/Map styles";
 function styleFilesOf(api) { return Object.keys(api._files).filter((p) => p.indexOf(STYLES_DIR + "/") === 0).map((p) => p.slice(STYLES_DIR.length + 1)).sort(); }
 function styleFileOf(api, file) { return JSON.parse(api._files[STYLES_DIR + "/" + file]); }
+function styleText(name, color) { return JSON.stringify({ cavalryGeoStyle: 1, name: name, colors: { ocean: color }, widths: {} }, null, 2); }
 function pickStyle(context, name) {
   const i = context.mapStylePicker._entries.indexOf(name);
   assert.ok(i >= 0, name + " is listed");
@@ -6020,7 +6021,7 @@ test("A new style never overwrites a file that is not that style", () => {
   assert.equal(context.statusLabel.getText(), "Saved style \"Mine\" from Map.");
 });
 
-test("Dropped-in files appear on Refresh; duplicates and non-styles are skipped, one note per Refresh", () => {
+test("Dropped-in files appear on Refresh; duplicates and non-styles are skipped, each reported once", () => {
   const { context, api } = buildSandbox();
   const ocean = JSON.stringify({ cavalryGeoStyle: 1, name: "Ocean", colors: { ocean: "#0a0b0c" }, widths: {} });
   api._files[STYLES_DIR + "/a.json"] = ocean;
@@ -6029,11 +6030,12 @@ test("Dropped-in files appear on Refresh; duplicates and non-styles are skipped,
   context.refreshMapsBtn.onClick();
   assert.equal(context.mapStylePicker._entries.filter((n) => n === "Ocean").length, 1);
   assert.equal(context.mapStylePicker._entries.length, 7);
-  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: not a Cavalry Geo style\./);
-  context.refreshMapsBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Skipped Map styles\/notes\.json/);
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: "Ocean" is already saved\. \(and 1 more\)/);
   context.refreshMapsBtn.onClick();
   assert.doesNotMatch(context.statusLabel.getText(), /Skipped/);
+  api._files[STYLES_DIR + "/n2.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/n2\.json: not a Cavalry Geo style\./);
 });
 
 test("No mapStyles in settings.json: nothing is moved", () => {
@@ -6042,6 +6044,75 @@ test("No mapStyles in settings.json: nothing is moved", () => {
   assert.ok(!("mapStyles" in s));
   assert.equal(s.source, "eox");
   assert.deepEqual(styleFilesOf(api), []);
+});
+
+test("The folder wins: a settings style with a file's name is dropped, the file is kept", () => {
+  const kept = styleText("Sand", "#aaaaaa");
+  const { api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Sand.json"] = kept;
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand", colors: { ocean: "#bbbbbb" } }] });
+  } });
+  assert.equal(api._files[STYLES_DIR + "/Sand.json"], kept);
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  assert.deepEqual(styleFilesOf(api), ["Sand.json"]);
+});
+
+test("A style that can't be written still works from settings.json, and Delete removes it there", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) throw new Error("locked"); return real(p, c, o); };
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Sand", mapStyles: [{ name: "Sand" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+  assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Sand");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Sand\".");
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  assert.equal(context.mapStylePicker._entries.includes("Sand"), false);
+});
+
+test("Without a folder listing, styles stay in settings.json and Save writes them there", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    delete a.listDirectory;
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Mine" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Mine"));
+  createWorldMap(context);
+  context.styleNameField.setText("Other");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Mine", "Other"]);
+  assert.deepEqual(styleFilesOf(api), []);
+});
+
+test("A folder listing that fails at start-up still shows the styles in settings.json", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a.listDirectory = () => { throw new Error("denied"); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand" }] });
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+});
+
+test("Folder listings with backslash paths read the same files", () => {
+  const { context } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    const list = a.listDirectory;
+    a.listDirectory = (p) => list(p).map((f) => f.replace(/\//g, "\\"));
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Ocean"));
+  assert.equal(context.GeoNet.readStyleFiles().paths.ocean, STYLES_DIR + "/Ocean.json");
+});
+
+test("Delete says so when the style's file is still there afterwards", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Mine.json"] = styleText("Mine", "#010203");
+    a.deleteFilePath = () => {};
+  } });
+  pickStyle(context, "Mine");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Couldn't delete " + STYLES_DIR + "/Mine.json: it may be open elsewhere.");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
 });
 
 test("Map tab Style: a broken styles entry in settings.json never stops the panel", () => {

@@ -11,7 +11,7 @@ var GeoStyleFiles = (function () {
   // device name (CON, COM1...) gets a dash so it is never taken for a device.
   function fileName(name) {
     var base = String(name == null ? "" : name).trim().replace(/[\/\\:*?"<>|\x00-\x1f]/g, "-").replace(/[. ]+$/, "");
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) base += "-";
+    base = base.replace(/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?=\s*(\.|$))/i, "$1-");
     return (base || "Style") + ".json";
   }
 
@@ -30,16 +30,20 @@ var GeoStyleFiles = (function () {
 
   // entries: [{ path, text }] in folder order. The first of each name wins; the rest are skipped.
   // paths maps each kept style's lowercased name to its file, so a save or delete finds the file.
+  // skipped lists the skipped paths; reasons says why ("not-style" or "duplicate"); names maps each path
+  // that holds a style to that style's name, so a note can name a duplicate.
   function readAll(entries) {
-    var styles = [], skipped = [], paths = {}, seen = {};
+    var styles = [], skipped = [], paths = {}, reasons = {}, names = {}, seen = {};
     (entries || []).forEach(function (e) {
       var s = fromText(e.text), k = s ? s.name.toLowerCase() : null;
-      if (!s || seen[k]) { skipped.push(e.path); return; }
+      if (!s) { skipped.push(e.path); reasons[e.path] = "not-style"; return; }
+      names[e.path] = s.name;
+      if (seen[k]) { skipped.push(e.path); reasons[e.path] = "duplicate"; return; }
       seen[k] = true;
       paths[k] = e.path;
       styles.push(s);
     });
-    return { styles: styles, skipped: skipped, paths: paths };
+    return { styles: styles, skipped: skipped, paths: paths, reasons: reasons, names: names };
   }
 
   // The styles a move carries over from a settings object, normalised and de-duplicated.
