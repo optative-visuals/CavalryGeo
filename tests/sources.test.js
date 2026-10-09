@@ -24,11 +24,27 @@ test("MapTiler and Mapbox URLs use @2x and the key", () => {
 });
 
 test("missing keys, bad styles and bad links explain themselves", () => {
-  assert.throws(() => S.tileUrl(src("maptiler"), {}, 0, 0, 0), /Paste your MapTiler key first/);
-  assert.throws(() => S.tileUrl(src("mapbox"), {}, 0, 0, 0), /Paste your Mapbox access token first/);
+  assert.throws(() => S.tileUrl(src("maptiler"), {}, 0, 0, 0), /^Error: Needs a MapTiler key: set it in \u2699 Settings\.$/);
+  assert.throws(() => S.tileUrl(src("mapbox"), {}, 0, 0, 0), /^Error: Needs a Mapbox token: set it in \u2699 Settings\.$/);
   assert.throws(() => S.tileUrl(src("mapbox"), { key: "T", style: "satellite" }, 0, 0, 0), /mapbox\/satellite-v9/);
-  assert.throws(() => S.tileUrl(src("custom"), { template: "https://x/{z}/{x}.png" }, 0, 0, 0), /\{z\}, \{x\} and \{y\}/);
+  assert.throws(() => S.tileUrl(src("custom"), {}, 0, 0, 0), /^Error: Needs a custom tile link: set it in \u2699 Settings\.$/);
+  assert.throws(() => S.tileUrl(src("custom"), { template: "https://x/{z}/{x}.png" }, 0, 0, 0), /^Error: The custom tile link must start with https:\/\/ and contain \{z\}, \{x\} and \{y\}: fix it in \u2699 Settings\.$/);
   assert.equal(S.tileUrl(src("custom"), { template: " https://t.example/{z}/{x}/{y}.png " }, 5, 6, 7), "https://t.example/5/6/7.png");
+});
+
+test("missingSetting: a keyed or linked source names what to set in Settings, otherwise null", () => {
+  const SET = (what) => "Needs " + what + ": set it in \u2699 Settings.";
+  assert.equal(S.missingSetting(src("maptiler"), {}), SET("a MapTiler key"));
+  assert.equal(S.missingSetting(src("maptiler")), SET("a MapTiler key"), "no opts at all");
+  assert.equal(S.missingSetting(src("maptiler"), { key: "K1" }), null);
+  assert.equal(S.missingSetting(src("mapbox"), {}), SET("a Mapbox token"));
+  assert.equal(S.missingSetting(src("mapbox"), { key: "T" }), null);
+  assert.equal(S.missingSetting(src("custom"), {}), SET("a custom tile link"));
+  assert.equal(S.missingSetting(src("custom"), { template: "" }), SET("a custom tile link"), "empty link is missing");
+  assert.equal(S.missingSetting(src("custom"), { template: "https://x/{z}/{x}.png" }), "The custom tile link must start with https:// and contain {z}, {x} and {y}: fix it in \u2699 Settings.", "malformed link");
+  assert.equal(S.missingSetting(src("custom"), { template: " https://t.example/{z}/{x}/{y}.png " }), null);
+  assert.equal(S.missingSetting(src("eox"), {}), null);
+  assert.equal(S.missingSetting(src("nasa"), {}), null);
 });
 
 test("cache keys, labels and meta never contain keys or links", () => {

@@ -199,8 +199,8 @@ var flyStartBox = GeoStyle.frameField(flyStartField);
 var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 // Map styles: picked here for the next new map, applied to the picked map, saved from it.
-// settings.json keeps the picked name ("mapStyle") and the saved styles ("mapStyles"); the
-// imagery settings already own "style". (GeoStyle = the panel's widget kit; GeoStyles = map colour styles.)
+// settings.json keeps the picked name ("mapStyle"); each saved style is a file in the Map styles folder.
+// The imagery settings already own "style". (GeoStyle = the panel's widget kit; GeoStyles = map colour styles.)
 var mapStylePicker = new ui.DropDown();
 var applyStyleBtn = GeoStyle.button("Apply to map");
 var styleNameField = new ui.LineEdit(); styleNameField.setPlaceholder("Name for a new style");
@@ -238,10 +238,41 @@ function previewMapColors() {
   }
   if (colors && colors.water && colors.land && colors.border) setPreviewColors(colors); else previewStyle();
 }
+// Files that were skipped and already reported this session, by path (see reloadStyleFiles).
+var reportedSkips = {};
+function fileNameOf(path) { return String(path).replace(/\\/g, "/").split("/").pop(); }
+// Reloads the saved styles: the style files, then each style still only in settings.json (one that could not be
+// moved) unless a file of that name exists. Keeps the picked name. Returns the note for the skipped files not
+// reported yet ("" when there are none). A quiet reload (start-up) reports nothing and leaves the notes for Refresh.
+function reloadStyleFiles(quiet) {
+  var r, before = pickedStyle().name;
+  try { r = GeoNet.readStyleFiles(); } catch (e) { r = GeoStyleFiles.readAll([]); }
+  savedStyles = r.styles.slice();
+  var listed = {};
+  savedStyles.forEach(function (st) { listed[st.name.toLowerCase()] = true; });
+  var fromSettings = [];
+  try { fromSettings = GeoStyleFiles.movePlan(GeoNet.loadSettings()); } catch (e) { fromSettings = []; }
+  fromSettings.forEach(function (st) {
+    if (listed[st.name.toLowerCase()]) return;
+    savedStyles.push(st); listed[st.name.toLowerCase()] = true;
+  });
+  refreshStylePicker(before);
+  // The picked style's file was deleted or moved away: the picker fell back to Dark, so the preview follows it.
+  if (pickedStyle().name !== before) { try { previewStyle(); } catch (e) { /* the preview is a courtesy */ } }
+  if (quiet) return "";
+  var fresh = r.skipped.filter(function (p) { return !reportedSkips[p]; });
+  if (!fresh.length) return "";
+  fresh.forEach(function (p) { reportedSkips[p] = true; });
+  var first = fresh[0];
+  var why = r.reasons[first] === "duplicate" ? "\"" + String(r.names[first]).replace(/</g, "‹") + "\" is already saved." : "not a Cavalry Geo style.";
+  // The file name is shown in the status line, which reads "<" as markup: a file named a<b.json shows as a‹b.json.
+  return "Skipped Map styles/" + fileNameOf(first).replace(/</g, "‹") + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
+}
 (function () {
   var s = {};
+  try { GeoNet.moveStylesToFiles(); } catch (e) { /* the styles stay in settings.json until the next start */ }
   try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
-  savedStyles = GeoStyles.normalise(s.mapStyles);
+  reloadStyleFiles(true);
   refreshStylePicker(s.mapStyle);
 })();
 var preview = GeoPreviewPanel.create({
@@ -379,7 +410,11 @@ function pickedTarget(projection) {
 refreshResultPicker();
 resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
-refreshMapsBtn.onClick = guardAction(function () { refreshMaps(); say(maps.length + " map(s) in this composition."); });
+refreshMapsBtn.onClick = guardAction(function () {
+  refreshMaps();
+  var note = reloadStyleFiles(false);
+  say(maps.length + " map(s) in this composition." + (note ? " " + note : ""));
+});
 
 // The query the Map box last searched: pressing Enter again, or Search after Enter, doesn't ask the network twice.
 var lastMapQuery = null;
@@ -573,9 +608,15 @@ saveStyleBtn.onClick = guardAction(function () {
     name = existing.name;
   }
   var style = GeoScene.readMapStyle(map, name);
-  var at = savedStyles.indexOf(existing);
-  if (at >= 0) savedStyles[at] = style; else savedStyles.push(style);
-  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: style.name });
+  if (GeoNet.filesSupported()) {
+    GeoNet.writeStyleFile(style);
+    GeoNet.updateSettings({ mapStyle: style.name });
+    reloadStyleFiles(true);
+  } else {
+    var at = savedStyles.indexOf(existing);
+    if (at >= 0) savedStyles[at] = style; else savedStyles.push(style);
+    GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: style.name });
+  }
   GeoScene.setMapStyle(map, style);
   refreshStylePicker(style.name);
   previewStyle();
@@ -585,17 +626,19 @@ saveStyleBtn.onClick = guardAction(function () {
 deleteStyleBtn.onClick = guardAction(function () {
   var style = pickedStyle();
   if (GeoStyles.isBuiltIn(style.name)) throw new Error("Built-in styles can't be deleted.");
+  GeoNet.deleteStyleFile(style.name);
   savedStyles = savedStyles.filter(function (s) { return s !== style; });
-  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: GeoStyles.DARK.name });
+  GeoNet.updateSettings({ mapStyle: GeoStyles.DARK.name });
   refreshStylePicker(GeoStyles.DARK.name);
   previewStyle();
   say("Deleted style \"" + style.name + "\".");
 });
 
 // ---- Start here tips -------------------------------------------------------
-// Shown on the Map tab until "Got it"; the Tips button (bottom of the Map tab) brings them back.
+// Shown on the Map tab until "Got it"; Show tips again (in the settings' Preferences) brings them back.
 // A missing showTips setting means a first run, so the box shows.
 var tipsGotItBtn = GeoStyle.primaryButton("Got it");
+// The button sits in the settings' Preferences, where it reads Show tips again.
 var tipsBtn = GeoStyle.quietButton("Tips");
 // The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
 var tipsTitle = new ui.Label("Start here");
@@ -629,8 +672,6 @@ tipsBtn.onClick = guardAction(function () {
 })();
 
 TAB_BUILDERS.push(function (tabs) {
-  var tipsRow = row(tipsBtn);
-  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
   tabs.add("Map", column(tipsBox.concat([
     GeoStyle.panel([
       row(mapPicker, refreshMapsBtn),
@@ -661,8 +702,7 @@ TAB_BUILDERS.push(function (tabs) {
       GeoStyle.heading("Style"),
       row(mapStylePicker, applyStyleBtn),
       row(styleNameField, saveStyleBtn, deleteStyleBtn)
-    ]),
-    tipsRow
+    ])
   ])));
 });
 
@@ -1058,8 +1098,7 @@ TAB_BUILDERS.push(function (tabs) {
       GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
       modePicker,
       row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
-      addLayersBtn,
-      clearCacheBtn
+      addLayersBtn
     ])
   ]));
   layersPages.add(column([
@@ -1663,6 +1702,8 @@ var imagerySettings = GeoNet.loadSettings();
 var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1000;
 var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false, map: null };
 var sourcePicker = new ui.DropDown();
+// Says what the picked source still needs from Settings (a key, a token or a link); blank when nothing is missing.
+var keyHint = new ui.Label("");
 GeoSources.list().forEach(function (s) { sourcePicker.addEntry(s.label); });
 var licenceLabel = GeoStyle.note("");
 var maptilerKeyField = new ui.LineEdit(); maptilerKeyField.setPlaceholder("MapTiler key (free at maptiler.com)");
@@ -1696,6 +1737,11 @@ function sourceOptions(src) {
     customAttribution: customAttrField.getText().trim()
   };
 }
+function refreshKeyHint() {
+  var src = currentSource(), miss = GeoSources.missingSetting(src, sourceOptions(src));
+  keyHint.setText(miss || "");
+  if (typeof keyHint.setHidden === "function") keyHint.setHidden(!miss);
+}
 function resetImageryPlan() { imageryState.plan = null; buildImageryBtn.setText("Build imagery"); disarmClearTiles(); }
 // "Clear imagery tiles" sits just below Cancel; in Cavalry a mid-build Cancel click once
 // landed on it and deleted every tile, so it needs a confirming second press.
@@ -1717,6 +1763,7 @@ var refreshingSource = false;
 function refreshSourceUi() {
   var src = currentSource();
   licenceLabel.setText(src.licence);
+  refreshKeyHint();
   refreshingSource = true;
   try {
     stylePicker.clear();
@@ -1763,7 +1810,7 @@ function runImageryTimer(intervalMs, tick) {
 }
 // The keys, token, style, link and credit boxes are saved when you leave them, not only by Build imagery.
 [maptilerKeyField, mapboxKeyField, styleField, customUrlField, customAttrField].forEach(function (f) {
-  f.onValueCommitted = guard(function () { saveImagerySettings(); });
+  f.onValueCommitted = guard(function () { saveImagerySettings(); refreshKeyHint(); });
 });
 refreshSourceUi();
 sourcePicker.onValueChanged = guard(function () { refreshSourceUi(); });
@@ -1864,7 +1911,7 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
 
 // 401/403: a keyed source rejected the key; a source without one turned the request down.
 function refusedMessage(src, code) {
-  return src.key ? GeoSources.providerName(src) + " rejected your key — check it in the Imagery tab."
+  return src.key ? GeoSources.providerName(src) + " rejected your key — check it in ⚙ Settings."
     : GeoSources.providerName(src) + " refused the request (HTTP " + code + ") — try again later or choose another source.";
 }
 
@@ -2070,25 +2117,150 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.panel([
       GeoStyle.heading("Source"),
       sourcePicker,
+      keyHint,
       licenceLabel
-    ]),
-    GeoStyle.panel([
-      GeoStyle.heading("Keys and links"),
-      row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
-      row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
-      row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
-      row(GeoStyle.fieldLabel("Custom link"), customUrlField),
-      row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
     ]),
     GeoStyle.panel([
       GeoStyle.heading("Build"),
       row(buildImageryBtn, cancelImageryBtn),
       imageryProgress,
-      imageryAttrBtn,
-      clearTilesBtn
+      imageryAttrBtn
     ])
   ]));
 });
+
+// ---- Settings (the cog) ----------------------------------------------------------
+// The cog beside the tab bar opens these settings: a popover under it where this Cavalry can show one, else a
+// Settings page that the cog shows in place of the tabs (buildUi adds it). Keys and links, the style folder and
+// the storage buttons live here now.
+var openStylesBtn = GeoStyle.button("Open styles folder");
+var exportStyleBtn = GeoStyle.button("Export style…");
+openStylesBtn.onClick = guardAction(function () {
+  var dir = GeoNet.stylesDir();
+  GeoNet.ensureDir(dir);
+  if (!GeoNet.openPath(dir)) say("Your styles are in " + dir + ".");
+  else say("Opened the Map styles folder.");
+});
+exportStyleBtn.onClick = guardAction(function () {
+  if (typeof ui.chooseFileToSave !== "function") throw new Error("This Cavalry has no save dialog: copy the file from the Map styles folder instead.");
+  // The dialog starts in the CavalryGeo folder (beside settings.json), not in the Map styles folder.
+  var start = typeof GeoNet.settingsDir === "function" ? GeoNet.settingsDir() : "";
+  if (start) GeoNet.ensureDir(start);
+  var p = String(ui.chooseFileToSave(start, "JSON (*.json)") || "");
+  if (!p) { say("Nothing was exported."); return; }
+  if (!/\.json$/i.test(p)) p += ".json";
+  var style = pickedStyle();
+  api.writeToFile(p, GeoStyleFiles.toText(style), true);
+  if (!api.filePathExists(p)) throw new Error("Couldn't write " + p + ".");
+  say("Exported \"" + style.name + "\" to " + p + ".");
+});
+// Preferences: the update check's switch, the tips button (moved here from the Map tab), and the reset of the
+// remembered choices. About: the version and the download link.
+var updateCheck = GeoStyle.toggle("Check for updates", (function () {
+  try { return (GeoNet.loadSettings() || {}).checkForUpdates !== false; } catch (e) { return true; }
+})());
+updateCheck.onValueChanged = function (on) { guard(function () { GeoNet.updateSettings({ checkForUpdates: on ? true : false }); })(); };
+tipsBtn.setText("Show tips again");
+var resetChoicesBtn = GeoStyle.quietButton("Reset remembered choices");
+// Like Clear imagery tiles: without a dialog the first press asks, and a second press resets.
+var resetChoicesArmed = false;
+function disarmResetChoices() { resetChoicesArmed = false; resetChoicesBtn.setText("Reset remembered choices"); }
+// The pickers first: their change handlers write settings, so the keys are removed after them.
+function resetRememberedChoices() {
+  easingPicker.setValue(0);
+  arcPicker.setValue(1);
+  driftPicker.setValue(0);
+  routeShapePicker.setValue(0);
+  sourcePicker.setValue(0);
+  refreshStylePicker(GeoStyles.DARK.name);
+  GeoNet.removeSettings(GeoStyleFiles.RESET_KEYS);
+  refreshSourceUi();
+  previewStyle();
+  say("Remembered choices reset to their defaults.");
+}
+resetChoicesBtn.onClick = guardAction(function () {
+  var dialog = questionDialog();
+  if (dialog) {
+    disarmResetChoices();
+    if (!dialog.showQuestion("Reset remembered choices", "Put easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults? Keys and saved styles are kept.")) {
+      say("Nothing was reset.");
+      return;
+    }
+    resetRememberedChoices();
+    return;
+  }
+  if (!resetChoicesArmed) {
+    resetChoicesArmed = true;
+    resetChoicesBtn.setText("Confirm: reset choices");
+    say("This puts easing, zoom-out, drift move, route shape, imagery source and the default map style back to their defaults. Keys and saved styles are kept. Press \"Confirm: reset choices\" to reset.");
+    return;
+  }
+  disarmResetChoices();
+  resetRememberedChoices();
+});
+var aboutVersion = GeoStyle.note("Cavalry Geo v" + GEO_VERSION);
+var getUpdatesBtn = GeoStyle.button("Get updates…");
+getUpdatesBtn.onClick = guardAction(function () {
+  if (!GeoNet.openPath(GeoUpdate.RELEASES_URL)) { say("Download updates from " + GeoUpdate.RELEASES_URL); return; }
+  say("Opened the Cavalry Geo download page.");
+});
+var settingsColumn = column([
+  GeoStyle.panel([
+    GeoStyle.heading("Keys and links"),
+    row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
+    row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
+    row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
+    row(GeoStyle.fieldLabel("Custom link"), customUrlField),
+    row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("Map styles"),
+    row(openStylesBtn, exportStyleBtn)
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("Storage"),
+    row(clearCacheBtn, clearTilesBtn)
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("Preferences"),
+    updateCheck.widget,
+    tipsBtn,
+    resetChoicesBtn
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("About"),
+    aboutVersion,
+    getUpdatesBtn
+  ])
+]);
+// The popover's box, built once: null when this Cavalry has no popover (the Settings page is used then).
+var settingsContainer = (function () {
+  if (typeof ui.Container !== "function") return null;
+  var box = new ui.Container();
+  if (typeof box.showAsPopover !== "function") return null;
+  var inset = new ui.VLayout();
+  inset.setMargins(8, 8, 8, 8);
+  inset.add(settingsColumn);
+  box.setLayout(inset);
+  box.setBackgroundColor(GeoStyle.PAGE_BACKGROUND);
+  if (typeof box.setRadius === "function") box.setRadius(6, 6, 6, 6);
+  return box;
+})();
+// The section the Settings page covered, so the cog can go back to it.
+var settingsReturn = null;
+function toggleSettingsPage() {
+  if (sectionTabs.selected() === "Settings") { showSection(settingsReturn || sectionNames[0]); return; }
+  settingsReturn = sectionTabs.selected();
+  showSection("Settings");
+}
+// Opening the settings first re-reads the style files, so a style dropped into the folder is listed.
+function openSettings() {
+  disarmResetChoices();
+  disarmClearTiles();
+  reloadStyleFiles(true);
+  GeoCog.open(settingsContainer, cogBtn, toggleSettingsPage);
+}
+var cogBtn = GeoCog.button(guard(openSettings));
 
 // ---- Hover help -----------------------------------------------------------
 // Every control gets its tooltip from GeoTips (src/cavalry/tips.js); one table pairs them.
@@ -2204,7 +2376,13 @@ var TIP_TARGETS = [
   [lookupCheck, "data.lookup"],
   [addDataBtn, "data.add"],
   [refreshDataBtn, "data.refresh"],
-  [dataUnmatchedList, "data.unmatched"]
+  [dataUnmatchedList, "data.unmatched"],
+  [cogBtn, "settings.cog"],
+  [openStylesBtn, "settings.openStyles"],
+  [exportStyleBtn, "settings.exportStyle"],
+  [updateCheck, "settings.updateCheck"],
+  [resetChoicesBtn, "settings.reset"],
+  [getUpdatesBtn, "settings.getUpdates"]
 ];
 // (Dropdowns keep Cavalry's own look: setBackgroundColor on a DropDown only paints its open list.)
 TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
@@ -2274,14 +2452,17 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
+  var tabNames = sectionNames.slice();
+  // Without a popover the settings are a page of their own: the cog shows it, and the tab bar leaves it out.
+  if (!settingsContainer) sectionNames.push("Settings");
   sectionPages = GeoStyle.pageStack(GeoStyle.PAGE_BACKGROUND);
-  sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
+  sectionNames.forEach(function (name) { sectionPages.add(name === "Settings" ? settingsColumn : layouts[name]); });
   sectionPages.finish();
-  sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
+  sectionTabs = GeoStyle.tabBar(tabNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
   root.setMargins(4, 4, 4, 4);
-  root.add(sectionTabs.widget);
+  root.add(row(sectionTabs.widget, cogBtn)); // the cog sits right of the tab bar
   root.add(sectionPages.widget);
   // The stretch keeps the status line at the bottom when the page is shorter than the window.
   if (typeof root.addStretch === "function") root.addStretch();
@@ -2292,9 +2473,12 @@ function buildUi() {
   function fitPreview() {
     try {
       var g = sectionTabs.widget.geometry();
+      // The tab bar and the cog share a row: the previews run from the tab bar's left edge to the cog's right edge.
+      var c = typeof cogBtn.geometry === "function" ? cogBtn.geometry() : null;
+      var w = g ? (c && c.width ? c.x + c.width - g.x : g.width) : 0;
       // The panel's insets plus the coloured page's: they exist only when panels are Containers.
       var inset = GeoStyle.hasContainer() ? GeoStyle.PANEL_INSET + 2 * GeoStyle.PAGE_INSET : 0;
-      if (g && g.width > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - inset); });
+      if (w > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(w - inset); });
     } catch (e) { /* older Cavalry */ }
   }
   ui.onResize = fitPreview;
