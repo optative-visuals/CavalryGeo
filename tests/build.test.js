@@ -4070,7 +4070,7 @@ test("Imagery tab: missing and rejected keys", () => {
   context.buildImageryBtn.onClick();
   context.buildImageryBtn.onClick();
   runTimers(api);
-  assert.match(context.statusLabel.getText(), /MapTiler rejected your key/);
+  assert.equal(context.statusLabel.getText(), "MapTiler rejected your key — check it in \u2699 Settings.");
   assert.equal(context.buildImageryBtn.getText(), "Build imagery");
 });
 
@@ -14779,4 +14779,30 @@ test("Delete style drops the settings entry even when the style folder can't be 
   context.deleteStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Deleted style \"Sand\".");
   assert.ok(!("mapStyles" in settingsOf(api)));
+});
+
+// ---- Settings cog: review fixes (round 1) ------------------------------------------
+test("Map tab: the previews run from the tab bar's left edge to the cog's right edge", () => {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container;
+  installNe(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  context.sectionTabs.widget.geometry = () => ({ x: 0, y: 0, width: 470, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 472, y: 0, width: 28, height: 24 });
+  ui.onResize();
+  assert.equal(plain(context.preview._draw._size)[0], 500);
+});
+
+test("Export style: a file that doesn't appear after the write is an error, not \"Exported\"", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p === "C:/out/Ocean.json") return; return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+  } });
+  pickStyle(context, "Ocean");
+  ui._saveAnswer = "C:/out/Ocean";
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: Couldn't write C:/out/Ocean.json.");
+  assert.equal(api._files["C:/out/Ocean.json"], undefined);
 });

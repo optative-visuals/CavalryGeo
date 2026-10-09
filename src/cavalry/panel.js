@@ -1900,7 +1900,7 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
 
 // 401/403: a keyed source rejected the key; a source without one turned the request down.
 function refusedMessage(src, code) {
-  return src.key ? GeoSources.providerName(src) + " rejected your key — check it in the Imagery tab."
+  return src.key ? GeoSources.providerName(src) + " rejected your key — check it in ⚙ Settings."
     : GeoSources.providerName(src) + " refused the request (HTTP " + code + ") — try again later or choose another source.";
 }
 
@@ -2137,6 +2137,7 @@ exportStyleBtn.onClick = guardAction(function () {
   if (!/\.json$/i.test(p)) p += ".json";
   var style = pickedStyle();
   api.writeToFile(p, GeoStyleFiles.toText(style), true);
+  if (!api.filePathExists(p)) throw new Error("Couldn't write " + p + ".");
   say("Exported \"" + style.name + "\" to " + p + ".");
 });
 var settingsColumn = column([
@@ -2161,19 +2162,18 @@ var settingsColumn = column([
   GeoStyle.panel([GeoStyle.heading("About")])
 ]);
 // The popover's box, built once: null when this Cavalry has no popover (the Settings page is used then).
-var settingsContainer = null;
-if (typeof ui.Container === "function") {
-  var popoverBox = new ui.Container();
-  if (typeof popoverBox.showAsPopover === "function") {
-    settingsContainer = popoverBox;
-    var inset = new ui.VLayout();
-    inset.setMargins(8, 8, 8, 8);
-    inset.add(settingsColumn);
-    settingsContainer.setLayout(inset);
-    settingsContainer.setBackgroundColor(GeoStyle.PAGE_BACKGROUND);
-    if (typeof settingsContainer.setRadius === "function") settingsContainer.setRadius(6, 6, 6, 6);
-  }
-}
+var settingsContainer = (function () {
+  if (typeof ui.Container !== "function") return null;
+  var box = new ui.Container();
+  if (typeof box.showAsPopover !== "function") return null;
+  var inset = new ui.VLayout();
+  inset.setMargins(8, 8, 8, 8);
+  inset.add(settingsColumn);
+  box.setLayout(inset);
+  box.setBackgroundColor(GeoStyle.PAGE_BACKGROUND);
+  if (typeof box.setRadius === "function") box.setRadius(6, 6, 6, 6);
+  return box;
+})();
 // The section the Settings page covered, so the cog can go back to it.
 var settingsReturn = null;
 function toggleSettingsPage() {
@@ -2186,7 +2186,7 @@ function openSettings() {
   reloadStyleFiles(true);
   GeoCog.open(settingsContainer, cogBtn, toggleSettingsPage);
 }
-var cogBtn = GeoCog.button(guardAction(openSettings));
+var cogBtn = GeoCog.button(guard(openSettings));
 
 // ---- Hover help -----------------------------------------------------------
 // Every control gets its tooltip from GeoTips (src/cavalry/tips.js); one table pairs them.
@@ -2396,9 +2396,12 @@ function buildUi() {
   function fitPreview() {
     try {
       var g = sectionTabs.widget.geometry();
+      // The tab bar and the cog share a row: the previews run from the tab bar's left edge to the cog's right edge.
+      var c = typeof cogBtn.geometry === "function" ? cogBtn.geometry() : null;
+      var w = g ? (c && c.width ? c.x + c.width - g.x : g.width) : 0;
       // The panel's insets plus the coloured page's: they exist only when panels are Containers.
       var inset = GeoStyle.hasContainer() ? GeoStyle.PANEL_INSET + 2 * GeoStyle.PAGE_INSET : 0;
-      if (g && g.width > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(g.width - inset); });
+      if (w > 50 + inset) [preview, pinsPreview, routesPreview].forEach(function (p) { p.setWidth(w - inset); });
     } catch (e) { /* older Cavalry */ }
   }
   ui.onResize = fitPreview;
