@@ -47,3 +47,34 @@ test("constants", () => {
   assert.equal(F.MARKER, "cavalryGeoStyle");
   assert.equal(F.FOLDER, "Map styles");
 });
+
+test("file names: Windows device names get a dash so they are never device files", () => {
+  assert.equal(F.fileName("CON"), "CON-.json");
+  assert.equal(F.fileName("lpt1 "), "lpt1-.json");
+  assert.equal(F.fileName("com9."), "com9-.json");
+  assert.equal(F.fileName("Console"), "Console.json");
+});
+
+test("file names: tabs and backslashes become dashes", () => {
+  assert.equal(F.fileName("a\\b\tc"), "a-b-c.json");
+});
+
+test("readAll reports the path of each kept style by lowercased name", () => {
+  const out = F.readAll([
+    { path: "A/a.json", text: F.toText(s) },
+    { path: "A/b.json", text: F.toText(s) },
+    { path: "A/n.json", text: "{}" }
+  ]);
+  assert.deepEqual(out.paths, { ocean: "A/a.json" });
+});
+
+test("readAll skips a third file whose name differs only in case", () => {
+  const upper = F.toText(G.normalise([{ name: "OCEAN", colors: {}, widths: {} }])[0]);
+  const out = F.readAll([
+    { path: "A/Ocean.json", text: F.toText(s) },
+    { path: "A/OCEAN.json", text: upper }
+  ]);
+  assert.equal(out.styles.length, 1);
+  assert.deepEqual(out.skipped, ["A/OCEAN.json"]);
+  assert.deepEqual(out.paths, { ocean: "A/Ocean.json" });
+});

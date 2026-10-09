@@ -315,22 +315,86 @@ var GeoNet = (function () {
     return (raw === null ? null : parseSettings(raw)) || {};
   }
   function saveSettings(obj) { ensureDir(settingsDir()); api.writeToFile(settingsFile(), JSON.stringify(obj, null, 2), true); }
-  // Merges patch's keys into settings.json, keeping every other key.
-  function updateSettings(patch) {
+  // The settings to change and save back: an unreadable file is copied to .bak and starts again.
+  function editableSettings() {
     var raw = readSettingsRaw(), s = raw === null ? {} : parseSettings(raw);
     if (!s) {
       // The file is there but unreadable: keep a copy before it is replaced.
       s = {};
       if (raw !== null && raw !== "") { try { ensureDir(settingsDir()); api.writeToFile(settingsFile() + ".bak", raw, true); } catch (e) { /* the copy is a courtesy */ } }
     }
+    return s;
+  }
+  // Merges patch's keys into settings.json, keeping every other key.
+  function updateSettings(patch) {
+    var s = editableSettings();
     Object.keys(patch || {}).forEach(function (k) { s[k] = patch[k]; });
     saveSettings(s);
     return s;
+  }
+  // Deletes the given keys from settings.json, keeping every other key.
+  function removeSettings(keys) {
+    var s = editableSettings();
+    (keys || []).forEach(function (k) { delete s[k]; });
+    saveSettings(s);
+    return s;
+  }
+
+  // ---- Map style files: one JSON file per saved style in the "Map styles" folder --------
+  function stylesDir() { return settingsDir() + "/" + GeoStyleFiles.FOLDER; }
+  // Reads the style folder: { styles, skipped, paths } (see GeoStyleFiles.readAll). Files are read in
+  // path order, so the first of two same-named files is the one kept.
+  function readStyleFiles() {
+    var dir = stylesDir(), none = { styles: [], skipped: [], paths: {} };
+    if (typeof api.listDirectory !== "function") return none;
+    ensureDir(dir);
+    var paths = (api.listDirectory(dir) || []).filter(function (p) { return /\.json$/i.test(String(p)); }).sort();
+    var entries = paths.map(function (p) {
+      var text = "";
+      try { text = String(api.readFromFile(p)); } catch (e) { /* unreadable: skipped below */ }
+      return { path: p, text: text };
+    });
+    return GeoStyleFiles.readAll(entries);
+  }
+  // Writes a style to its file and returns the path. A style already in the folder is written over its own
+  // file; a new one takes "<name>.json", or "<name> 2.json", "<name> 3.json"... when that name holds another
+  // file, so no other file is ever overwritten.
+  function writeStyleFile(style) {
+    var known = readStyleFiles().paths[style.name.toLowerCase()], path = known;
+    if (!path) {
+      var dir = stylesDir(), base = GeoStyleFiles.fileName(style.name).replace(/\.json$/, ""), n = 1;
+      ensureDir(dir);
+      path = dir + "/" + base + ".json";
+      while (api.filePathExists(path)) { n++; path = dir + "/" + base + " " + n + ".json"; }
+    }
+    api.writeToFile(path, GeoStyleFiles.toText(style), true);
+    return path;
+  }
+  // Deletes the file of the saved style with this name (nothing when no such file). Throws when this Cavalry
+  // can't delete files, naming the file so it can be deleted by hand.
+  function deleteStyleFile(name) {
+    var path = readStyleFiles().paths[String(name).trim().toLowerCase()];
+    if (!path) return "";
+    if (typeof api.deleteFilePath !== "function") throw new Error("This Cavalry can't delete files: delete " + path + " by hand.");
+    api.deleteFilePath(path);
+    return path;
+  }
+  // Moves the styles in settings.json ("mapStyles") into style files. A style that can't be written stays
+  // in settings.json for the next start; the key is removed once nothing is left. Returns how many moved.
+  function moveStylesToFiles() {
+    var s = loadSettings(), plan = GeoStyleFiles.movePlan(s), failures = [], moved = 0;
+    plan.forEach(function (style) {
+      try { writeStyleFile(style); moved++; } catch (e) { failures.push(style); }
+    });
+    if (failures.length) updateSettings({ mapStyles: failures });
+    else if ("mapStyles" in s) removeSettings(["mapStyles"]);
+    return moved;
   }
 
   return {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
-    loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings
+    loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings, removeSettings: removeSettings,
+    stylesDir: stylesDir, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
   };
 })();

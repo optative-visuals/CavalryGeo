@@ -199,8 +199,8 @@ var flyStartBox = GeoStyle.frameField(flyStartField);
 var flyEndBox = GeoStyle.frameField(flyEndField);
 var createHereBtn = GeoStyle.primaryButton("Create map here");
 // Map styles: picked here for the next new map, applied to the picked map, saved from it.
-// settings.json keeps the picked name ("mapStyle") and the saved styles ("mapStyles"); the
-// imagery settings already own "style". (GeoStyle = the panel's widget kit; GeoStyles = map colour styles.)
+// settings.json keeps the picked name ("mapStyle"); each saved style is a file in the Map styles folder.
+// The imagery settings already own "style". (GeoStyle = the panel's widget kit; GeoStyles = map colour styles.)
 var mapStylePicker = new ui.DropDown();
 var applyStyleBtn = GeoStyle.button("Apply to map");
 var styleNameField = new ui.LineEdit(); styleNameField.setPlaceholder("Name for a new style");
@@ -238,10 +238,27 @@ function previewMapColors() {
   }
   if (colors && colors.water && colors.land && colors.border) setPreviewColors(colors); else previewStyle();
 }
+// Files that were skipped and already reported this session, by path (see reloadStyleFiles).
+var reportedSkips = {};
+function fileNameOf(path) { return String(path).replace(/\\/g, "/").split("/").pop(); }
+// Reloads the saved styles from their files and keeps the picked one. Returns the note for the first skipped
+// file not reported yet ("" when there is none). A quiet reload (start-up) reports nothing and leaves the
+// note for the next Refresh.
+function reloadStyleFiles(quiet) {
+  var r = GeoNet.readStyleFiles();
+  savedStyles = r.styles;
+  refreshStylePicker(pickedStyle().name);
+  if (quiet) return "";
+  var fresh = r.skipped.filter(function (p) { return !reportedSkips[p]; })[0];
+  if (!fresh) return "";
+  reportedSkips[fresh] = true;
+  return "Skipped Map styles/" + fileNameOf(fresh) + ": not a Cavalry Geo style.";
+}
 (function () {
   var s = {};
+  try { GeoNet.moveStylesToFiles(); } catch (e) { /* the styles stay in settings.json until the next start */ }
   try { s = GeoNet.loadSettings() || {}; } catch (e) { s = {}; }
-  savedStyles = GeoStyles.normalise(s.mapStyles);
+  try { reloadStyleFiles(true); } catch (e) { savedStyles = []; }
   refreshStylePicker(s.mapStyle);
 })();
 var preview = GeoPreviewPanel.create({
@@ -379,7 +396,11 @@ function pickedTarget(projection) {
 refreshResultPicker();
 resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
-refreshMapsBtn.onClick = guardAction(function () { refreshMaps(); say(maps.length + " map(s) in this composition."); });
+refreshMapsBtn.onClick = guardAction(function () {
+  refreshMaps();
+  var note = reloadStyleFiles(false);
+  say(maps.length + " map(s) in this composition." + (note ? " " + note : ""));
+});
 
 // The query the Map box last searched: pressing Enter again, or Search after Enter, doesn't ask the network twice.
 var lastMapQuery = null;
@@ -573,9 +594,9 @@ saveStyleBtn.onClick = guardAction(function () {
     name = existing.name;
   }
   var style = GeoScene.readMapStyle(map, name);
-  var at = savedStyles.indexOf(existing);
-  if (at >= 0) savedStyles[at] = style; else savedStyles.push(style);
-  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: style.name });
+  GeoNet.writeStyleFile(style);
+  GeoNet.updateSettings({ mapStyle: style.name });
+  reloadStyleFiles(true);
   GeoScene.setMapStyle(map, style);
   refreshStylePicker(style.name);
   previewStyle();
@@ -585,8 +606,9 @@ saveStyleBtn.onClick = guardAction(function () {
 deleteStyleBtn.onClick = guardAction(function () {
   var style = pickedStyle();
   if (GeoStyles.isBuiltIn(style.name)) throw new Error("Built-in styles can't be deleted.");
+  GeoNet.deleteStyleFile(style.name);
   savedStyles = savedStyles.filter(function (s) { return s !== style; });
-  GeoNet.updateSettings({ mapStyles: savedStyles, mapStyle: GeoStyles.DARK.name });
+  GeoNet.updateSettings({ mapStyle: GeoStyles.DARK.name });
   refreshStylePicker(GeoStyles.DARK.name);
   previewStyle();
   say("Deleted style \"" + style.name + "\".");

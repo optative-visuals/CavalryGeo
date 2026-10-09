@@ -7,9 +7,11 @@ var GeoStyleFiles = (function () {
   // The settings a reset clears, in the order the panel lists them.
   var RESET_KEYS = ["flyEasing", "flyArc", "driftMove", "routeShape", "source", "mapStyle"];
 
-  // A safe file name for a style: characters Windows and macOS refuse become "-".
+  // A safe file name for a style: characters Windows and macOS refuse become "-", and a Windows
+  // device name (CON, COM1...) gets a dash so it is never taken for a device.
   function fileName(name) {
     var base = String(name == null ? "" : name).trim().replace(/[\/\\:*?"<>|\x00-\x1f]/g, "-").replace(/[. ]+$/, "");
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) base += "-";
     return (base || "Style") + ".json";
   }
 
@@ -27,15 +29,17 @@ var GeoStyleFiles = (function () {
   }
 
   // entries: [{ path, text }] in folder order. The first of each name wins; the rest are skipped.
+  // paths maps each kept style's lowercased name to its file, so a save or delete finds the file.
   function readAll(entries) {
-    var styles = [], skipped = [], seen = {};
+    var styles = [], skipped = [], paths = {}, seen = {};
     (entries || []).forEach(function (e) {
       var s = fromText(e.text), k = s ? s.name.toLowerCase() : null;
       if (!s || seen[k]) { skipped.push(e.path); return; }
       seen[k] = true;
+      paths[k] = e.path;
       styles.push(s);
     });
-    return { styles: styles, skipped: skipped };
+    return { styles: styles, skipped: skipped, paths: paths };
   }
 
   // The styles a move carries over from a settings object, normalised and de-duplicated.

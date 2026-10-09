@@ -5804,6 +5804,10 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
 const SETTINGS_FILE = "C:/fake/AppData/CavalryGeo/settings.json"; // outside the Scripts folder, so an update can't wipe it
 const OLD_SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
 function settingsOf(api) { return JSON.parse(api._files[SETTINGS_FILE] || "{}"); }
+// Saved styles are one file each in the Map styles folder beside settings.json.
+const STYLES_DIR = "C:/fake/AppData/CavalryGeo/Map styles";
+function styleFilesOf(api) { return Object.keys(api._files).filter((p) => p.indexOf(STYLES_DIR + "/") === 0).map((p) => p.slice(STYLES_DIR.length + 1)).sort(); }
+function styleFileOf(api, file) { return JSON.parse(api._files[STYLES_DIR + "/" + file]); }
 function pickStyle(context, name) {
   const i = context.mapStylePicker._entries.indexOf(name);
   assert.ok(i >= 0, name + " is listed");
@@ -5913,9 +5917,10 @@ test("Map tab Style: Save as style saves the map's colours, lists and picks the 
   assert.equal(s.source, "eox");
   assert.equal(s.maptilerKey, "k");
   assert.equal(s.mapStyle, "Mine");
-  assert.equal(s.mapStyles.length, 1);
-  assert.equal(s.mapStyles[0].name, "Mine");
-  assert.equal(s.mapStyles[0].colors.ocean, "#010203");
+  assert.ok(!("mapStyles" in s), "saved styles live in files, not settings.json");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").name, "Mine");
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#010203");
   assert.deepEqual(context.mapStylePicker._entries.slice(-1), ["Mine"]);
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
   assert.equal(plain(api.getUserDataKey(map.groupId, "geoStyle")).name, "Mine");
@@ -5940,12 +5945,12 @@ test("Map tab Style: saving over a saved name asks first; No keeps the old one",
   context.saveStyleBtn.onClick();
   assert.equal(asked.length, 1);
   assert.match(asked[0].question, /Replace the saved style Mine\?/);
-  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#111111");
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#111111");
   assert.equal(context.statusLabel.getText(), "Nothing was saved.");
   withModal(ui, true);
   context.saveStyleBtn.onClick();
-  assert.equal(settingsOf(api).mapStyles.length, 1);
-  assert.equal(settingsOf(api).mapStyles[0].colors.ocean, "#1d2a33");
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#1d2a33");
 });
 
 test("Map tab Style: saving over a saved name with no dialog refuses", () => {
@@ -5957,15 +5962,86 @@ test("Map tab Style: saving over a saved name with no dialog refuses", () => {
 });
 
 test("Map tab Style: Delete removes the picked saved style and refuses built-ins", () => {
-  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); } });
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyle: "Mine", mapStyles: [{ name: "Mine" }, { name: "Other" }] }); a.deleteFilePath = (p) => { delete a._files[p]; }; } });
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Mine");
   context.deleteStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
-  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Other"]);
+  assert.deepEqual(styleFilesOf(api), ["Other.json"]);
   assert.equal(settingsOf(api).mapStyle, "Dark");
   assert.equal(context.mapStylePicker._entries[context.mapStylePicker.getValue()], "Dark");
   context.deleteStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Error: Built-in styles can't be deleted.");
+});
+
+test("Styles move from settings.json to files once", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox", mapStyles: [{ name: "Ocean" }, { name: "Sand" }] }); } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json", "Sand.json"]);
+  assert.equal(styleFileOf(api, "Sand.json").name, "Sand");
+  const s = settingsOf(api);
+  assert.ok(!("mapStyles" in s), "settings.json no longer holds the styles");
+  assert.equal(s.source, "eox");
+  assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night", "Ocean", "Sand"]);
+});
+
+test("A style that can't be written stays in settings.json", () => {
+  const { api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) throw new Error("locked"); return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"]);
+});
+
+test("Save as style writes a file; Delete style deletes it", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox" }); a.deleteFilePath = (p) => { delete a._files[p]; }; } });
+  createWorldMap(context);
+  api.set(oceanOf(api, context.currentMap()), { "material.materialColor": "#010203" });
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.deepEqual(styleFilesOf(api), ["Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine.json").colors.ocean, "#010203");
+  assert.equal(settingsOf(api).mapStyle, "Mine");
+  assert.ok(!("mapStyles" in settingsOf(api)));
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Mine\".");
+  assert.deepEqual(styleFilesOf(api), []);
+  assert.equal(settingsOf(api).mapStyle, "Dark");
+});
+
+test("A new style never overwrites a file that is not that style", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[STYLES_DIR + "/Mine.json"] = "{}"; } });
+  createWorldMap(context);
+  context.styleNameField.setText("Mine");
+  context.saveStyleBtn.onClick();
+  assert.equal(api._files[STYLES_DIR + "/Mine.json"], "{}");
+  assert.deepEqual(styleFilesOf(api), ["Mine 2.json", "Mine.json"]);
+  assert.equal(styleFileOf(api, "Mine 2.json").name, "Mine");
+  assert.equal(context.statusLabel.getText(), "Saved style \"Mine\" from Map.");
+});
+
+test("Dropped-in files appear on Refresh; duplicates and non-styles are skipped, one note per Refresh", () => {
+  const { context, api } = buildSandbox();
+  const ocean = JSON.stringify({ cavalryGeoStyle: 1, name: "Ocean", colors: { ocean: "#0a0b0c" }, widths: {} });
+  api._files[STYLES_DIR + "/a.json"] = ocean;
+  api._files[STYLES_DIR + "/b.json"] = ocean;
+  api._files[STYLES_DIR + "/notes.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.equal(context.mapStylePicker._entries.filter((n) => n === "Ocean").length, 1);
+  assert.equal(context.mapStylePicker._entries.length, 7);
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: not a Cavalry Geo style\./);
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/notes\.json/);
+  context.refreshMapsBtn.onClick();
+  assert.doesNotMatch(context.statusLabel.getText(), /Skipped/);
+});
+
+test("No mapStyles in settings.json: nothing is moved", () => {
+  const { api } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ source: "eox" }); } });
+  const s = settingsOf(api);
+  assert.ok(!("mapStyles" in s));
+  assert.equal(s.source, "eox");
+  assert.deepEqual(styleFilesOf(api), []);
 });
 
 test("Map tab Style: a broken styles entry in settings.json never stops the panel", () => {
@@ -5979,7 +6055,7 @@ test("Imagery settings are merged into settings.json, never replacing other keys
   context.saveImagerySettings();
   const s = settingsOf(api);
   assert.equal(s.mapStyle, "Mono");
-  assert.equal(s.mapStyles[0].name, "Mine");
+  assert.equal(styleFileOf(api, "Mine.json").name, "Mine");
   assert.equal(s.updateCheckedAt, 5);
   assert.ok("source" in s);
 });
