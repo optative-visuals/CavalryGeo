@@ -3,7 +3,8 @@
 Everything the panel does, section by section. New here? Start with the
 [quick start](../README.md#quick-start) in the README.
 
-The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top. Each section's
+The panel's sections — **Map, Layers, Imagery, Label, Data** — are tabs along the top, and the **⚙** button
+at the right end of that row opens **Settings** (see [Settings (⚙)](#settings-)). Each section's
 controls sit in shaded panels. **Layers** has its own **Add / Overlays / Extract** switch (Add: the
 layer categories; Overlays: Day & night and Map furniture; Extract: Extract, Highlight and Bake), and
 **Label** has a **Pins / Routes** switch. Hover any control for a short tip about what it does.
@@ -15,7 +16,8 @@ layer categories; Overlays: Day & night and Map furniture; Extract: Extract, Hig
 - [Label: pins and labels](#label-pins-and-labels)
 - [Label: routes](#label-routes)
 - [Data](#data)
-- [Cache and settings](#cache-and-settings)
+- [Settings (⚙)](#settings-)
+- [Cache and downloads](#cache-and-downloads)
 - [Known limits](#known-limits)
 
 ## Map
@@ -24,7 +26,7 @@ A map is a group with a **Camera** layer. Everything you add to the map follows 
 
 The first time you open the panel, a **Start here** box at the top of this tab gives four quick steps
 (make a map, add layers, mark places, animate). Press **Got it** to hide it; it stays hidden next time.
-The small **Tips** button at the bottom of the Map tab brings it back.
+**Show tips again** (in **⚙ Settings → Preferences**) brings it back.
 
 - **Making a map:** with **New map** picked in the Map list (the only entry in a scene without
   maps), choose a projection — **Web Mercator** for streets and cities, **Equal Earth** for a flat
@@ -87,7 +89,10 @@ The **Style** section at the bottom of the Map tab colours a whole map in one go
 
 - **Pick a style** — Dark (the original look), Light, Blueprint, Vintage, Mono or Neon night. The preview shows its colours, and the next map you make uses it.
 - **Apply to map** — restyles the map picked at the top of the tab. Colours shared in the map's Controls change there; a colour you animated or connected to something else is left alone (the status line says how many).
-- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. It is kept in `CavalryGeo/settings.json` in Cavalry's app-data folder (on Windows, `AppData/Roaming/Cavalry/CavalryGeo`), outside the Scripts folder, so updating never wipes your saved styles or keys. Settings from an older version are copied there the first time the panel opens. **Delete style** removes the saved style picked in the list; the built-in styles can't be deleted.
+- **Save as style** — type a name and press it to save the picked map's current colours (fine-tune them in its Controls first) as your own style. Each saved style is one file in the **Map styles** folder, inside the CavalryGeo folder in Cavalry's app-data folder, beside `settings.json` (on Windows, `AppData/Roaming/Cavalry/CavalryGeo/Map styles`). The folder is outside the Scripts folder, so updating never wipes your saved styles or keys. Saving a name that's already used asks before it replaces the file. Styles saved by an older version are moved into the folder the first time the plugin starts after updating; a file already in the folder with the same name is kept. **Delete style** removes the saved style picked in the list and its file; the built-in styles can't be deleted.
+- **Dropping in a style** — copy a style file into the **Map styles** folder, then press **Refresh** on the Map tab (or reopen **⚙ Settings**) and it joins the list. A file that isn't a Cavalry Geo style, or that uses a built-in name or a name already saved, is skipped, and the status line names it.
+- **Export style…** (in **⚙ Settings → Map styles**) saves a copy of the style picked in the Map tab's list to a file you choose. Type the name in the save dialog; `.json` is added if you leave it off. Save the copy outside the **Map styles** folder: a copy inside it is skipped as a duplicate of the style it came from.
+- **Open styles folder** (in **⚙ Settings → Map styles**) opens the **Map styles** folder in Explorer or Finder. If that isn't possible, the status line shows the folder's path.
 
 Each map remembers its style, so pins, routes, labels and layers you add later match it.
 
@@ -141,7 +146,7 @@ kept, after the plugin's — including settings of the map's own layers, such as
 
 The **Add** page of Layers has two panels, **World · Natural Earth** and **Streets · OpenStreetMap**.
 Turn on the categories you want (each shows a green tick) and press **Add layers** (in the Streets
-panel, which also holds **Clear download cache**).
+panel).
 
 - **World categories** (Countries, States, Coastlines, Lakes, Rivers, Cities) come from the
   bundled Natural Earth data, at low or medium detail, or high detail downloaded on demand.
@@ -179,8 +184,10 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 
 - **Sources:** **EOX Sentinel‑2** (free for non‑commercial use) and **NASA Blue Marble** (public
   domain) work straight away; **MapTiler** and **Mapbox** need your own free key; **Custom tile
-  link** takes any `{z}/{x}/{y}` address. Keys stay on your computer
-  (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
+  link** takes any `{z}/{x}/{y}` address. Type keys and links in **⚙ Settings → Keys and links**. Under the
+  source dropdown, a line says what the chosen source still needs, for example "Needs a MapTiler key: set it in
+  ⚙ Settings." A custom link that doesn't start with https:// or lacks `{z}`, `{x}` or `{y}` gets its own line.
+  Keys stay on your computer (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
 - **Assets window:** each map's imagery images (and its
   "Imagery source" composition) are filed in one group in the Assets window,
   **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
@@ -208,8 +215,8 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
 - **Rebuild** after changing the camera animation — downloaded images and tiles are reused when a
   rebuild needs the same areas.
 - **Add attribution** adds the source's credit as its own "Imagery credit" layer. When the map has night lights, the credit also names NASA Black Marble 2016 (public domain).
-- **Clear imagery tiles** (press twice to confirm) deletes the downloaded imagery; built imagery
-  shows missing images until you rebuild.
+- **Clear imagery tiles** (in **⚙ Settings → Storage**; press twice to confirm) deletes the downloaded
+  imagery; built imagery shows missing images until you rebuild.
 
 ### Imagery on every projection
 
@@ -233,8 +240,7 @@ Geo bends them to fit the map on every projection, flat included. Build imagery 
 ## Extract and Bake
 
 Both are on **Layers → Extract**, in the **Extract** and **Bake** panels; **Highlight** has its own
-panel between them. (**Refresh controls** is on the Map tab and **Clear download cache** is in the
-Streets panel on Layers → Add.)
+panel between them. (**Refresh controls** is on the Map tab.)
 
 - **Extract:** pick a layer, search by name (for example "France" or a street name), and extract
   the matching features into their own layer to style or animate separately.
@@ -374,17 +380,31 @@ can't be baked: Bake skips them.
   there too (`Data 1 · Low colour`, `Data 1 · Bubble size`…); the range is on the layers. After
   editing the sheet, press **Refresh data** — your styling and keyframes are kept.
 
-## Cache and settings
+## Settings (⚙)
+
+The **⚙** button at the right end of the tab row opens the settings: a popover under the button, where
+everything you set once lives. Press outside it to close it. In an older Cavalry that can't show popovers,
+**⚙** opens a Settings page in place of the tabs instead, and pressing **⚙** again goes back. The settings are
+in five groups:
+
+- **Keys and links** — MapTiler key, Mapbox token, Map ID / style (with its picker), Custom link and Custom
+  credit. They work as the Imagery tab's key boxes did, and save the same way.
+- **Map styles** — **Open styles folder** and **Export style…**, described under [Styles](#styles).
+- **Storage** — **Clear download cache** deletes downloaded map data and shows how much space was freed. It
+  keeps imagery (built imagery points at those files) and can't be used while imagery is downloading or
+  building. **Clear imagery tiles** deletes the downloaded imagery. Both ask you to press again to confirm.
+- **Preferences** — **Check for updates**, a switch that is on by default. Once a day, opening the panel asks
+  GitHub (in the background) whether a newer version is out. If one is, the status line and Cavalry's console
+  say so, with the download link, each time the panel opens until you update. Switch it off here, and it stays
+  off after a restart. **Show tips again** brings back the **Start here** box on the Map tab. **Reset remembered
+  choices** asks first, then puts easing, zoom-out, drift move, route shape, imagery source and the default map
+  style back to their defaults. Keys and saved styles are kept.
+- **About** — the version, and **Get updates…**, which opens the download page.
+
+## Cache and downloads
 
 - Downloads are cached in `CavalryGeo_assets/cache` inside the Scripts folder
-  (**Help → Show Scripts Folder** in Cavalry).
-- **Clear download cache** (Layers → Add, in the Streets panel) deletes downloaded map data and shows how much space was
-  freed. It keeps imagery (built imagery points at those files) and can't be used while
-  imagery is downloading or building; use **Clear imagery tiles** (Imagery) for imagery.
-- **Updates:** once a day, opening the panel asks GitHub (in the background) whether a newer
-  version is out. If one is, the status line and Cavalry's console say so, with the download
-  link, each time the panel opens until you update. To switch it off, add
-  `"checkForUpdates": false` to `CavalryGeo/settings.json` in Cavalry's app-data folder.
+  (**Help → Show Scripts Folder** in Cavalry). **Clear download cache** is in **⚙ Settings → Storage**.
 - Place search and street downloads use OpenStreetMap's Nominatim and Overpass services under
   their fair‑use policies: keep searches occasional and don't script bulk requests.
 

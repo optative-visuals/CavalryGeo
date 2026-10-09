@@ -223,7 +223,7 @@ Night filter is checked here.
 - [ ] 19d. Date line: Map tab → "New map", Web Mercator, search "Taveuni, Fiji" (makes the map), set
       centerLon to 180 and zoom to ~13, Layers → Roads (Main) → roads appear on both
       sides of the frame's centre line (two downloads merged into one layer).
-- [ ] 19c. Layers → Add → **Clear download cache** (in the Streets panel) → the status line reports how many
+- [ ] 19c. ⚙ → Storage → **Clear download cache** → the status line reports how many
       files and how much space were freed; adding a street layer again re-downloads it.
 - [ ] 19e. Search "Eiffel Tower", pick the result, **Callout here** → a "Callout 1: Eiffel Tower" group:
       a boxed text label, a dot on the tower and a line joining them; the status asks you to drag the
@@ -381,8 +381,8 @@ Night filter is checked here.
       fade in, no flashes or see-through frames; past zoom Z the top level just gets softer.
 - [ ] 43. Rotate the camera 20° → imagery turns with the map.
 - [ ] 44. NASA Blue Marble on a world view → whole-Earth imagery.
-- [ ] 45. MapTiler with your key (if you have one) → the plan counts tiles (limit 300, warning
-      above 150) → satellite, then `streets-v2`; a wrong key → "MapTiler rejected your key".
+- [ ] 45. MapTiler with the key typed in ⚙ Settings → Keys and links (if you have one) → the plan counts tiles (limit 300, warning
+      above 150) → satellite, then `streets-v2`; a wrong key → "MapTiler rejected your key — check it in ⚙ Settings."
 - [ ] 46. Bent imagery, globe: with the Cavalry Geo Reproject plugin installed (drag `CavalryGeo_plugin`
       into Cavalry and confirm), a world flight on the globe → Build imagery → a group "Imagery: <source>"
       holding "Imagery source", and an "Imagery source: <source> · <map name>" composition in Assets →
@@ -401,7 +401,7 @@ Night filter is checked here.
       "Cancelled — no imagery was built.", and the previous imagery is untouched.
 - [ ] 47b. Once everything for the current camera is already downloaded (e.g. press Build imagery
       again right after a build), Build imagery → builds straight away with no question.
-- [ ] 48. Add attribution → an "Imagery credit" line appears above the OSM credit; Clear download cache →
+- [ ] 48. Add attribution → an "Imagery credit" line appears above the OSM credit; ⚙ → Storage → Clear download cache →
       built imagery still shows; Clear imagery tiles → asks for a second press (and refuses while
       downloading or building); confirm → tiles and downloaded images are removed and re-download on the next Build.
 
@@ -468,7 +468,21 @@ Imagery needs the Cavalry Geo plugin (drag the CavalryGeo_plugin folder in once)
 - [ ] Add a pin and a route after applying: they match the style.
 - [ ] Change colours in the Controls, Save as style "Mine", Apply "Mine" to a second map: same look. Reopen the panel: "Mine" is still listed and picked.
 - [ ] Save "Mine" again: asked to replace; No keeps the old one. Delete style removes "Mine"; Delete on a built-in refuses.
-- [ ] Imagery keys and source are still there after saving a style (and vice versa).
+- [ ] The keys in ⚙ Settings → Keys and links and the imagery source are still there after saving a style (and vice versa).
+
+## Settings cog
+
+Run after the Map styles checks. SC4 needs a settings.json that still holds a `mapStyles` list (from before this change).
+
+- [ ] SC1. Click ⚙ at the right end of the tab row → a popover opens just below the ⚙ with the groups Keys and links, Map styles, Storage, Preferences and About. Click on the Map tab's preview, outside the popover → it closes. Press ⚙ again → it opens; press ⚙ again → it closes. (In a Cavalry without popovers, ⚙ shows a Settings page in place of the tabs, and pressing ⚙ again goes back.)
+- [ ] SC2. ⚙ → Keys and links: type a MapTiler key and leave the box. Imagery tab → MapTiler → Build imagery → the plan counts tiles and the build downloads satellite imagery (not "MapTiler rejected your key").
+- [ ] SC3. Imagery tab → MapTiler with no key set → a line under the source dropdown reads "Needs a MapTiler key: set it in ⚙ Settings."; Build imagery stops with the same wording. Type the key in ⚙ → the line clears. Clear the key → it comes back. Pick EOX → no line. Custom link with no {z}, {x} or {y} → "The custom tile link must start with https:// and contain {z}, {x} and {y}: fix it in ⚙ Settings."
+- [ ] SC4. Start Cavalry with a settings.json that holds `mapStyles` and no Map styles folder → the folder CavalryGeo/Map styles appears with one .json file per saved style, named after it, `mapStyles` is gone from settings.json, and each style is still in the Map tab's dropdown with the same colours. Before the first start, put a file with a saved style's name in the folder with different colours → after the start that file is kept and its colours win.
+- [ ] SC5. Copy a valid style file into the Map styles folder (say, "Drop test.json") → press Refresh on the Map tab → "Drop test" is in the style dropdown. Drop in notes.json with plain text → the status line says "Skipped Map styles/notes.json: not a Cavalry Geo style." and it is not listed.
+- [ ] SC6. Pick a style in the Map tab's dropdown → ⚙ → Map styles → Export style… → the save dialog opens filtered to .json → type "Exported test" → Exported test.json is written where you chose (outside Map styles) with the picked style's colours, and the status line says so. Export style…, then Cancel → "Nothing was exported."
+- [ ] SC7. ⚙ → Map styles → Open styles folder → Explorer (Windows) or Finder (Mac) opens the Map styles folder. Where that fails, the status line shows the folder's path.
+- [ ] SC8. Set the Map tab's style, the Imagery source, Fly here easing and Zoom-out to non-default values; type a MapTiler key in ⚙. ⚙ → Preferences → Reset remembered choices → confirm → those dropdowns show their defaults, the MapTiler key is still typed in ⚙ → Keys and links, and saved styles are still listed. (In a Cavalry without a question box, the first press asks and the second resets.)
+- [ ] SC9. ⚙ → Preferences → untick Check for updates → close and reopen Cavalry → open the panel → the box is still unticked, and settings.json has "checkForUpdates": false. Tick it again → the box stays ticked after a restart too.
 
 ## Scale bar and north arrow
 
@@ -494,16 +508,16 @@ Imagery needs the Cavalry Geo plugin (drag the CavalryGeo_plugin folder in once)
 
 - [ ] On a first open (no `showTips` in settings.json) the Map tab starts with a **Start here** box: four numbered steps and a line about the Map controls in the Scene Window, then a **Got it** button. Nothing in it is cut off (no `<` in any text).
 - [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
-- [ ] **Got it** is a green button (like Search). The **Tips** button sits at the bottom of the Map tab only (nothing above the status line on the other tabs); press it → the box shows again. Close and reopen → it is still shown.
+- [ ] **Got it** is a green button (like Search). The Map tab has no Tips button: in ⚙ → Preferences, press **Show tips again** → the box shows again. Close and reopen → it is still shown.
 - [ ] Create map here with the name blank twice → "Map 1", then "Map 2" (and "Map 1 Map controls" in the Scene Window). Delete Map 1, press again → the new one is "Map 1". A typed name is used as typed; the name box hint reads "Map name (blank = the place's name, or Map 1, Map 2…)".
 - [ ] Layers → Add: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
 - [ ] The Start here box ends with the line "Every map's settings are in "(map name) Map controls" in the Scene Window." in full. **Refresh controls** is on the Map tab, under the map and projection pickers (it is no longer on Layers); with a map picked it brings that map's Controls up to date.
 
 ## Panel layout and hover help
 
-- [ ] Every tab shows its controls in shaded, rounded panels, each with a small grey heading. Map: the map pickers and Refresh controls, Search, Preview, Camera, Style. Layers → Add: World · Natural Earth, Streets · OpenStreetMap. Layers → Overlays: Day & night, Map furniture. Layers → Extract: Extract, Highlight, Bake. Label → Pins: Place, Preview, At coordinates; Label → Routes: Stops, Preview, Style. Imagery: Source, Keys and links, Build. Data: Sheet, Columns, Show, Unmatched rows.
+- [ ] Every tab shows its controls in shaded, rounded panels, each with a small grey heading. Map: the map pickers and Refresh controls, Search, Preview, Camera, Style. Layers → Add: World · Natural Earth, Streets · OpenStreetMap. Layers → Overlays: Day & night, Map furniture. Layers → Extract: Extract, Highlight, Bake. Label → Pins: Place, Preview, At coordinates; Label → Routes: Stops, Preview, Style. Imagery: Source, Build. ⚙ Settings: Keys and links, Map styles, Storage, Preferences, About. Data: Sheet, Columns, Show, Unmatched rows.
 - [ ] Layers has an **Add / Overlays / Extract** switch below the tab bar, Label a **Pins / Routes** switch. Clicking each shows its page and highlights its button. Extract selected, Highlight selected and Bake all work from the Extract page.
-- [ ] **Clear download cache** is in the Streets panel (Layers → Add), and **Refresh controls** is on the Map tab; neither is anywhere else.
+- [ ] **Clear download cache** and **Clear imagery tiles** are in ⚙ Settings → Storage, and **Refresh controls** is on the Map tab. Layers → Add has no Clear download cache, and the Imagery tab has no key boxes or Clear imagery tiles; under its source dropdown a hint appears when the source needs a key or link.
 - [ ] With **New map** picked, the **Camera** panel is gone altogether (no empty box with only a heading); pick a map → it comes back with the Fly and Drift controls.
 - [ ] Labels line up: in each panel the field labels (Detail, Day, Place, Shape, Source, MapTiler key and so on) share one left edge and their boxes line up.
 - [ ] Hover help: rest the pointer on a button, a dropdown, a text box, a number box, a tick box, a category toggle (Roads) and a list (Stops) on each tab → a short tip appears for each. Tips are plain sentences with no stray symbols. Examples: Detail reads "Bundled detail works offline. High downloads 10–40 MB once."; Refresh controls reads "Brings this map's Controls (Map, Overlay, Data, Extract, Time) up to date, and upgrades layers made by older versions."
@@ -524,7 +538,7 @@ Imagery needs the Cavalry Geo plugin (drag the CavalryGeo_plugin folder in once)
 
 - [ ] Build imagery on a map: its images sit in one Assets group "Cavalry Geo imagery · <map name>". Rename the map and build again: a new group is made and the old one is left alone. Refresh controls gathers older loose assets into the group.
 - [ ] Other actions (Add layers, Pin here and so on) feel no slower in a scene with many assets: only Refresh controls gathers imagery assets.
-- [ ] Settings: after updating, keys and saved styles are still there; they live in Cavalry's app-data folder (CavalryGeo/settings.json), and an old settings.json in CavalryGeo_assets is left behind untouched.
+- [ ] Settings: after updating, keys are still there (CavalryGeo/settings.json) and saved styles are still listed (one file each in CavalryGeo/Map styles), both in Cavalry's app-data folder; an old settings.json in CavalryGeo_assets is left behind untouched.
 - [ ] Press a panel button with a layer selected in the Scene Window: groups stay collapsed and the viewport redraws (no black viewport). Changing a dropdown or leaving a text box does not move the playhead or change the selection.
 - [ ] Callout here: the new callout's label is selected, ready to drag.
 - [ ] Following the comp: with maps in two compositions, switching comp changes the Map list, previews and Extract layers to that comp's maps ("Showing maps in <comp>."). During a bent imagery build the panel does not flicker between comps, and the build's result message is kept when it ends.
