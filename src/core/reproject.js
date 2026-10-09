@@ -137,9 +137,10 @@ var GeoReproject = (function () {
     var rot = (cam.rotation || 0) * D2R, cr = Math.cos(rot), sr = Math.sin(rot);
     var dlon, my;
     if (proj === 0) {
-      // Web Mercator: one world, as the vector map; see-through past its top / bottom and sides.
+      // Web Mercator: see-through past its top / bottom; past the date line it repeats (wrapped
+      // below), as the source does. Mirrors reproject.sksl: change both together.
       var x = (X * cr + Y * sr) / R, y = (-X * sr + Y * cr) / R;
-      if (Math.abs(y + mercY(cam.lat)) > Math.PI || Math.abs(cam.lon + x / D2R) > 180) return null;
+      if (Math.abs(y + mercY(cam.lat)) > Math.PI) return null;
       dlon = wrap(x / D2R);
       my = y;
     } else if (proj === 1) {

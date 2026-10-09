@@ -20,6 +20,7 @@ var GeoCurve = (function () {
   }
 
   var D2R = Math.PI / 180;
+  function wrap180(x) { return ((x + 540) % 360 + 360) % 360 - 180; }
   function unit(lon, lat) {
     var p = lat * D2R, l = lon * D2R;
     return [Math.cos(p) * Math.cos(l), Math.cos(p) * Math.sin(l), Math.sin(p)];
@@ -49,7 +50,12 @@ var GeoCurve = (function () {
     var project = GeoProjection.makeProjector(gc.cam, true);
     var g1 = greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, 1 / 3);
     var g2 = greatCirclePoint(gc.aLon, gc.aLat, gc.bLon, gc.bLat, 2 / 3);
-    // On the flat projections a leg that crosses +-180 between samples would streak across the map: draw the plain arc.
+    // Flat maps: the samples go on the copy that continues from aLon (the stops' longitudes may be chained past 180), so
+    // a leg across the date line keeps its great circle. Where b is not on that copy the plain arc is drawn instead.
+    if (gc.cam && Math.round(gc.cam.projection || 0) <= 0) {
+      g1[0] = gc.aLon + wrap180(g1[0] - gc.aLon);
+      g2[0] = g1[0] + wrap180(g2[0] - g1[0]);
+    }
     if (gc.cam && gc.cam.projection < 2 && (Math.abs(g1[0] - gc.aLon) > 180 || Math.abs(g2[0] - g1[0]) > 180 || Math.abs(gc.bLon - g2[0]) > 180)) return handles(p0, p1, opts);
     var q1 = [0, 0], q2 = [0, 0];
     project(g1[0], g1[1], q1);

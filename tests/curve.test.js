@@ -271,3 +271,15 @@ test("arcSpan: both stops in front is whole, both hidden follows visibleSpan, fl
   const w = leg({ lat: 0, lon: -30, zoom: 2, rotation: 0, projection: 2 });
   assert.deepEqual(plainSpan(C.legSpan(w.p0, w.p1, w.h.start, w.h.end, w.gc, 1)), plainSpan(w.span));
 });
+
+test("greatCircleHandles: chained longitudes past 180 keep the great circle on flat projections", () => {
+  // Tokyo -> Los Angeles the short way: LA's chained longitude is 241.76, past the date line.
+  const TK = [139.69, 35.68], LA = [241.76, 34.05], opts = { arc: 30, lean: 10, flip: 0 };
+  const cam = { lat: 20, lon: 190, zoom: 1, rotation: 0, projection: 0 }, proj = P.makeProjector(cam, true), p0 = [0, 0], p1 = [0, 0];
+  proj(TK[0], TK[1], p0); proj(LA[0], LA[1], p1);
+  const g = C.greatCircleHandles(p0, p1, { cam, aLon: TK[0], aLat: TK[1], bLon: LA[0], bLat: LA[1], offA: [0, 0], offB: [0, 0] }, opts);
+  assert.notDeepEqual(g, C.handles(p0, p1, opts));
+  // The same leg with LA's raw longitude is still the plain arc (its copy is a whole turn away).
+  const raw = C.greatCircleHandles(p0, p1, { cam, aLon: TK[0], aLat: TK[1], bLon: -118.24, bLat: LA[1], offA: [0, 0], offB: [0, 0] }, opts);
+  assert.deepEqual(raw, C.handles(p0, p1, opts));
+});

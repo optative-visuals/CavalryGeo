@@ -98,3 +98,41 @@ test("legend: gradient strips plus a text path; bubble legend: two circles", () 
   assert.equal(circles.length, 2);
   near(circles[1][3], 40 * Math.sqrt(0.5));
 });
+
+// Date line: data layers repeat side by side on flat maps when given the comp frame (o.frame).
+const FRAME = { w: 1920, h: 1080 };
+const world0 = { lat: 0, lon: 0, zoom: 0, rotation: 0, projection: 0 };
+const pitch = 256; // one world-width at zoom 0
+test("bubbles: a bubble at lon 170 is drawn on each copy that reaches the frame, none that misses it", () => {
+  const data = { pts: [[170, 0]], series: [[[2020, 10]]], range: { min: 10, max: 10, maxAbs: 10 } };
+  const framed = G.bubbles(data, world0, { year: 2020, maxRadius: 10, ellipseScale: 1, frame: FRAME }, FakePath).ops;
+  assert.equal(framed.length, 8);
+  framed.forEach((o, i) => { assert.equal(o[0], "E"); near(o[1], 170 / 360 * pitch + pitch * (i - 4)); near(o[3], 10); });
+  const plain = G.bubbles(data, world0, { year: 2020, maxRadius: 10, ellipseScale: 1 }, FakePath).ops;
+  assert.equal(plain.length, 1);
+  near(plain[0][1], 170 / 360 * pitch);
+});
+
+test("bubbles: a bubble off the frame is still drawn once, at its own position", () => {
+  const data = { pts: [[120, 0]], series: [[[2020, 10]]], range: { min: 10, max: 10, maxAbs: 10 } };
+  const ops = G.bubbles(data, { ...world0, zoom: 4 }, { year: 2020, maxRadius: 10, ellipseScale: 1, frame: FRAME }, FakePath).ops;
+  assert.equal(ops.length, 1);
+  near(ops[0][1], 120 / 360 * pitch * 16);
+});
+
+test("value labels: each copy that reaches the frame gets its own text", () => {
+  const data = { pts: [[170, 0]], series: [[[2020, 10]]], range: { min: 10, max: 10, maxAbs: 10 }, fmt: { prefix: "", suffix: "" } };
+  const ops = G.valueLabels(data, world0, { year: 2020, textSize: 16, format: 0, decimals: 0, frame: FRAME }, cav).ops;
+  assert.equal(ops.length, 8);
+  ops.forEach((o, i) => { assert.equal(o[1], "10"); near(o[3], 170 / 360 * pitch + pitch * (i - 4) - 8); });
+  assert.equal(G.valueLabels(data, world0, { year: 2020, textSize: 16, format: 0, decimals: 0 }, cav).ops.length, 1);
+});
+
+test("choropleth: each region is drawn on each copy that reaches the frame", () => {
+  const shape = C.encodeLayer({ kind: "polygon", features: [{ name: "A", rank: 1, rings: [[[170, -1], [171, -1], [171, 1], [170, -1]]] }] });
+  const data = { geo: shape, series: [[[2010, 5]]], range: { min: 0, max: 10, maxAbs: 10 } };
+  const framed = G.choropleth(data, world0, Object.assign({ year: 2010, frame: FRAME }, colours), cav);
+  assert.equal(framed.paths[1][0].ops.filter((o) => o[0] === "M").length, 8);
+  const plain = G.choropleth(data, world0, Object.assign({ year: 2010 }, colours), cav);
+  assert.equal(plain.paths[1][0].ops.filter((o) => o[0] === "M").length, 1);
+});

@@ -3,12 +3,15 @@
 var GeoExpression = (function () {
   var CAMERA_INPUTS = [["centerLat", 0], ["centerLon", 0], ["zoom", 2], ["rotation", 0], ["projection", 0]];
   var MAP_INPUTS = [["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["detail", 100], ["pointRadius", 4]];
+  // The comp size (appended, so no older index moves): a flat map's layers repeat on each copy of the world that reaches it.
+  var COMP_INPUTS = [["compW", 1920], ["compH", 1080]];
+  var MAP_LAYER_INPUTS = MAP_INPUTS.concat(COMP_INPUTS);
   var ROUTE_INPUTS = MAP_INPUTS.concat([["lift", 30]]);
   var LABEL_INPUTS = [["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["labelLon", 0], ["labelLat", 0]];
   var COLOR_DEFAULTS = [["low", "#f2e8cf", "color"], ["high", "#bc4749", "color"], ["useMiddle", 0], ["middle", "#ffffff", "color"], ["middleValue", 0], ["min", 0], ["max", 0]];
-  var REGION_INPUTS = MAP_INPUTS.concat([["year", 0]], COLOR_DEFAULTS, [["noData", "#dddddd", "color"]]);
-  var BUBBLE_INPUTS = MAP_INPUTS.concat([["year", 0], ["maxRadius", 40]]);
-  var VALUE_LABEL_INPUTS = MAP_INPUTS.concat([["year", 0], ["textSize", 16], ["format", 0], ["decimals", 1]]);
+  var REGION_INPUTS = MAP_INPUTS.concat([["year", 0]], COLOR_DEFAULTS, [["noData", "#dddddd", "color"]], COMP_INPUTS);
+  var BUBBLE_INPUTS = MAP_INPUTS.concat([["year", 0], ["maxRadius", 40]], COMP_INPUTS);
+  var VALUE_LABEL_INPUTS = MAP_INPUTS.concat([["year", 0], ["textSize", 16], ["format", 0], ["decimals", 1]], COMP_INPUTS);
   // Numbers first: a new script layer's slot 0 already exists as a number input.
   var LEGEND_INPUTS = ["min", "max", "useMiddle", "middleValue", "low", "high", "middle"].map(function (n) {
     return COLOR_DEFAULTS.filter(function (inp) { return inp[0] === n; })[0];
@@ -21,11 +24,19 @@ var GeoExpression = (function () {
   var END_POINT_INPUTS = [["holderX", 0], ["holderY", 0], ["stopX", 0], ["stopY", 0]];
   var HANDLE_INPUTS = [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
     ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
-    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0]];
+    ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0],
+    ["aChainLon", 0], ["bChainLon", 0], ["refLon", 0]];
+  // New-style route stops: the label inputs plus the stop's chained longitude and the route's reference longitude (its
+  // midpoint). Flat maps move the stop by the route's shift; globe and Equal Earth project labelLon as they do for labels.
+  var ROUTE_STOP_INPUTS = LABEL_INPUTS.concat([["chainLon", 0], ["refLon", 0]]);
   var FADE_INPUTS = [["fromOpacity", 100], ["toOpacity", 100]];
   function inputIndex(inputs, name) {
     for (var i = 0; i < inputs.length; i++) if (inputs[i][0] === name) return i;
     return -1;
+  }
+  // The comp frame option (compW, compH inputs) that a repeating layer's runtime call takes.
+  function frameOption(inputs) {
+    return "frame: {w: _i" + inputIndex(inputs, "compW") + ", h: _i" + inputIndex(inputs, "compH") + "}";
   }
   var RETURN_FORMS = { array: "[_p[0], _p[1]];", object: "({x: _p[0], y: _p[1]});", point: "new cavalry.Point(_p[0], _p[1]);" };
   var CAM = "{lat: _i0, lon: _i1, zoom: _i2, rotation: _i3, projection: _i4}";
@@ -62,14 +73,14 @@ var GeoExpression = (function () {
       DATA_OPEN + JSON.stringify(data) + DATA_CLOSE + "\n" + callSrc + "\n";
   }
   function regionsExpression(src, data, meta) {
-    return customExpression(REGION_INPUTS, src, data, meta, "GeoData.choropleth(GEO_DATA, " + CAM + ", {year: _i7, low: _i8, high: _i9, useMiddle: _i10, middle: _i11, middleValue: _i12, min: _i13, max: _i14, noData: _i15}, cavalry);");
+    return customExpression(REGION_INPUTS, src, data, meta, "GeoData.choropleth(GEO_DATA, " + CAM + ", {year: _i7, low: _i8, high: _i9, useMiddle: _i10, middle: _i11, middleValue: _i12, min: _i13, max: _i14, noData: _i15, " + frameOption(REGION_INPUTS) + "}, cavalry);");
   }
   function bubblesExpression(src, data, meta, opts) {
     var es = Number(opts && opts.ellipseScale != null ? opts.ellipseScale : 1);
-    return customExpression(BUBBLE_INPUTS, src, data, meta, "GeoData.bubbles(GEO_DATA, " + CAM + ", {year: _i7, maxRadius: _i8, ellipseScale: " + es + "}, cavalry.Path);");
+    return customExpression(BUBBLE_INPUTS, src, data, meta, "GeoData.bubbles(GEO_DATA, " + CAM + ", {year: _i7, maxRadius: _i8, ellipseScale: " + es + ", " + frameOption(BUBBLE_INPUTS) + "}, cavalry.Path);");
   }
   function valueLabelsExpression(src, data, meta) {
-    return customExpression(VALUE_LABEL_INPUTS, src, data, meta, "GeoData.valueLabels(GEO_DATA, " + CAM + ", {year: _i7, textSize: _i8, format: _i9, decimals: _i10}, cavalry);");
+    return customExpression(VALUE_LABEL_INPUTS, src, data, meta, "GeoData.valueLabels(GEO_DATA, " + CAM + ", {year: _i7, textSize: _i8, format: _i9, decimals: _i10, " + frameOption(VALUE_LABEL_INPUTS) + "}, cavalry);");
   }
   function legendExpression(src, data, meta) {
     return customExpression(LEGEND_INPUTS, src, data, meta, "GeoData.legend(GEO_DATA, {min: _i0, max: _i1, useMiddle: _i2, middleValue: _i3, low: _i4, high: _i5, middle: _i6}, cavalry);");
@@ -83,9 +94,14 @@ var GeoExpression = (function () {
     return expr.slice(0, a + DATA_OPEN.length) + JSON.stringify(data) + expr.slice(b);
   }
 
+  // opts.single: a single thing (pin, label, old-style route stop) draws once; any other map layer repeats on a flat map.
+  // opts.nearest (point and text layers) also folds each point onto the copy nearest the camera.
   function mapLayerExpression(runtimeSrc, enc, meta, opts) {
     var ellipseScale = Number(opts && opts.ellipseScale != null ? opts.ellipseScale : 1);
-    return layerExpression(MAP_INPUTS, runtimeSrc, enc, meta, "{pointRadius: _i6, ellipseScale: " + ellipseScale + "}");
+    var nearest = opts && opts.nearest === true ? ", nearest: true" : "";
+    var single = opts && (opts.single === true || opts.nearest === true);
+    var frame = single ? "" : ", " + frameOption(MAP_LAYER_INPUTS);
+    return layerExpression(MAP_LAYER_INPUTS, runtimeSrc, enc, meta, "{pointRadius: _i6, ellipseScale: " + ellipseScale + nearest + frame + "}");
   }
 
   function routeLayerExpression(runtimeSrc, enc, meta, opts) {
@@ -104,7 +120,7 @@ var GeoExpression = (function () {
     var grow = meta.effect === "pulse" ? "_i7 * " + HIGHLIGHT_GROW.pulse : meta.effect === "glow" ? String(HIGHLIGHT_GROW.glow) : "0";
     return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(HIGHLIGHT_SHAPE_INPUTS) +
       DATA_OPEN + JSON.stringify(enc) + DATA_CLOSE + "\n" +
-      "var _hp = GeoRuntime.buildPath(GEO_DATA, " + CAM + ", _i5, {pointRadius: _i6, ellipseScale: " + ellipseScale + "}, cavalry.Path);\n" +
+      "var _hp = GeoRuntime.buildPath(GEO_DATA, " + CAM + ", _i5, {pointRadius: _i6, ellipseScale: " + ellipseScale + ", whole: true}, cavalry.Path);\n" +
       "var _hg = " + grow + ";\n" +
       "if (_hg > 0) { try {\n" +
       "  if (_hp.pointCount() <= " + HIGHLIGHT_OFFSET_MAX_POINTS + ") { _hp.offset(_hg, true); }\n" +
@@ -116,6 +132,13 @@ var GeoExpression = (function () {
   var HIGHLIGHT_FADE_INPUTS = [["phase", 0]];
   function highlightFadeExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(HIGHLIGHT_FADE_INPUTS) + "(1 - _i0) * 100;\n";
+  }
+
+  // The input indices of a repeating layer's comp frame (compW, compH), read from its expression, or null
+  // for a layer that does not repeat (single things, routes, old layers without the frame option).
+  function frameInputs(expr) {
+    var m = /frame: \{w: _i(\d+), h: _i(\d+)\}/.exec(String(expr || ""));
+    return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
   }
 
   function readData(expr) {
@@ -130,11 +153,13 @@ var GeoExpression = (function () {
     return writeTag("GEO_CAMERA", meta) + "\n" + (body || "0;") + "\n";
   }
 
-  function labelDriverExpression(runtimeSrc, meta, returnForm) {
+  // opts.nearest: a single thing (pin, place label, callout) projects onto the copy nearest the camera.
+  function labelDriverExpression(runtimeSrc, meta, returnForm, opts) {
     var ret = RETURN_FORMS[returnForm];
     if (!ret) throw new Error("Unknown driver return form: " + returnForm);
+    var fn = opts && opts.nearest === true ? "projectNearest" : "projectPoint";
     return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(LABEL_INPUTS) +
-      "var _p = GeoRuntime.projectPoint(_i5, _i6, " + CAM + ");\n" + ret + "\n";
+      "var _p = GeoRuntime." + fn + "(_i5, _i6, " + CAM + ");\n" + ret + "\n";
   }
 
   // Drives a label's opacity: 100 on screen, 0 when its place is behind the globe.
@@ -172,12 +197,31 @@ var GeoExpression = (function () {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(END_POINT_INPUTS) + "[_i0 + _i2, _i1 + _i3];\n";
   }
 
-  function routeHandleExpression(curveSrc, meta, which) {
+  // opts.chained (new-style routes): on a flat map the great circle runs between the chained longitudes (aChainLon,
+  // bChainLon) moved by the route's shift from refLon, the same copy the stops are drawn on. Each end's aLon / bLon (a
+  // keyed stop moves it) is folded onto the copy nearest its chain, so the animation still drives the place. Other maps use aLon / bLon.
+  function routeHandleExpression(curveSrc, meta, which, opts) {
     if (which !== "start" && which !== "end") throw new Error("Unknown handle: " + which);
-    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) +
+    var chained = !!(opts && opts.chained);
+    var pre = chained ? "var _hf = Math.round(_i19) <= 0;\n" +
+      "var _hs = _hf ? GeoProjection.nearestLon(_i26, _i16) - _i26 : 0;\n" +
+      "var _ha = _hf ? GeoProjection.nearestLon(_i20, _i24) + _hs : _i20, _hb = _hf ? GeoProjection.nearestLon(_i22, _i25) + _hs : _i22;\n" : "";
+    var aLon = chained ? "_ha" : "_i20", bLon = chained ? "_hb" : "_i22";
+    return writeTag("GEO_META", meta) + "\n" + curveSrc + "\n;\n" + inputPrelude(HANDLE_INPUTS) + pre +
       "(_i11 ? [_i12, _i13] : (_i14 >= 0.5 ? GeoCurve.greatCircleHandles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], " +
-      "{cam: {lat: _i15, lon: _i16, zoom: _i17, rotation: _i18, projection: _i19}, aLon: _i20, aLat: _i21, bLon: _i22, bLat: _i23, offA: [_i2, _i3], offB: [_i6, _i7]}, " +
+      "{cam: {lat: _i15, lon: _i16, zoom: _i17, rotation: _i18, projection: _i19}, aLon: " + aLon + ", aLat: _i21, bLon: " + bLon + ", bLat: _i23, offA: [_i2, _i3], offB: [_i6, _i7]}, " +
       "{arc: _i8, lean: _i9, flip: _i10})." + which + " : GeoCurve.handles([_i0 + _i2, _i1 + _i3], [_i4 + _i6, _i5 + _i7], {arc: _i8, lean: _i9, flip: _i10})." + which + "));\n";
+  }
+
+  // A new-style route's stop driver: on a flat map the stop moves by the route's shift (the copy nearest the camera,
+  // from refLon), so every stop of the route moves together. labelLon (which a keyed stop animates) is folded onto the copy
+  // nearest its chain, so the chain only picks the copy. Globe and Equal Earth project labelLon.
+  function routeStopDriverExpression(runtimeSrc, meta, returnForm) {
+    var ret = RETURN_FORMS[returnForm];
+    if (!ret) throw new Error("Unknown driver return form: " + returnForm);
+    return writeTag("GEO_META", meta) + "\n" + runtimeSrc + "\n;\n" + inputPrelude(ROUTE_STOP_INPUTS) +
+      "var _sx = Math.round(_i4) <= 0 ? GeoProjection.nearestLon(_i5, _i7) + GeoProjection.nearestLon(_i8, _i1) - _i8 : _i5;\n" +
+      "var _p = GeoRuntime.projectPoint(_sx, _i6, " + CAM + ");\n" + ret + "\n";
   }
 
   var ROUTE_DRAW_INPUTS = [["travel", 100], ["index", 0], ["count", 1]];
@@ -324,13 +368,13 @@ var GeoExpression = (function () {
     timeLabelExpression: timeLabelExpression,
     SCALE_BAR_INPUTS: SCALE_BAR_INPUTS, NORTH_ARROW_INPUTS: NORTH_ARROW_INPUTS, FURNITURE_FADE_INPUTS: FURNITURE_FADE_INPUTS,
     scaleBarExpression: scaleBarExpression, northArrowExpression: northArrowExpression, furnitureFadeExpression: furnitureFadeExpression,
-    CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
+    CAMERA_INPUTS: CAMERA_INPUTS, MAP_INPUTS: MAP_INPUTS, MAP_LAYER_INPUTS: MAP_LAYER_INPUTS, ROUTE_INPUTS: ROUTE_INPUTS, LABEL_INPUTS: LABEL_INPUTS,
     REGION_INPUTS: REGION_INPUTS, BUBBLE_INPUTS: BUBBLE_INPUTS, VALUE_LABEL_INPUTS: VALUE_LABEL_INPUTS,
     LEGEND_INPUTS: LEGEND_INPUTS, BUBBLE_LEGEND_INPUTS: BUBBLE_LEGEND_INPUTS, IMAGERY_INPUTS: IMAGERY_INPUTS,
-    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
+    END_POINT_INPUTS: END_POINT_INPUTS, HANDLE_INPUTS: HANDLE_INPUTS, ROUTE_STOP_INPUTS: ROUTE_STOP_INPUTS, routeStopDriverExpression: routeStopDriverExpression, FADE_INPUTS: FADE_INPUTS, TRAVELLER_TIP_INPUTS: TRAVELLER_TIP_INPUTS, TRAVELLER_SCALE_INPUTS: TRAVELLER_SCALE_INPUTS, inputIndex: inputIndex,
     HIGHLIGHT_SHAPE_INPUTS: HIGHLIGHT_SHAPE_INPUTS, HIGHLIGHT_FADE_INPUTS: HIGHLIGHT_FADE_INPUTS,
     highlightLayerExpression: highlightLayerExpression, highlightFadeExpression: highlightFadeExpression,
-    writeTag: writeTag, readTag: readTag, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
+    writeTag: writeTag, readTag: readTag, frameInputs: frameInputs, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression, imageryViewExpression: imageryViewExpression,
     routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
