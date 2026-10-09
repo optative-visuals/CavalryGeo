@@ -14831,7 +14831,7 @@ test("GeoCog.open: without a popover it calls the fallback, and with neither it 
 test("The cog button is 28 wide and 24 tall; it shows the cog icon when the file is there, else a gear", () => {
   const withIcon = buildSandbox({ setup: (a) => { a._files[ICONS + "cog.png"] = "<png>"; } }).context.cogBtn;
   assert.equal(withIcon._image, ICONS + "cog.png");
-  assert.deepEqual(plain(withIcon._imageSize), [16, 16]);
+  assert.deepEqual(plain(withIcon._imageSize), [22, 16]);
   assert.equal(withIcon.getText(), "");
   const plainCog = buildSandbox().context.cogBtn;
   assert.equal(plainCog._image, undefined);

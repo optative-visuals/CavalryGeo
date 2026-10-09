@@ -6,7 +6,8 @@ var GeoCog = (function () {
   // The cog button: its icon when the icon file is there (and Button.setImage exists), else a gear character.
   function button(onClick) {
     var b = new ui.Button("");
-    if (typeof b.setImageSize === "function") b.setImageSize(16, 16);
+    // Cavalry left-aligns a button's image, leaving room for text, so the icon file carries 3 px of transparent space either side to sit centred in the 28 px button.
+    if (typeof b.setImageSize === "function") b.setImageSize(22, 16);
     var icon = GeoAttrs.ASSETS_DIR() + ICON;
     if (typeof b.setImage === "function" && api.filePathExists(icon)) b.setImage(icon);
     else b.setText("⚙");
