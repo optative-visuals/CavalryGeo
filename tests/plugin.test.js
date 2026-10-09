@@ -43,6 +43,9 @@ for (const f of FILTERS) {
     assert.equal(defs.attributes.samplingQuality.default, 1);
     assert.deepEqual(defs.triggers.out, Object.keys(OWN));
     assert.deepEqual(defs.UI.attributeOrder, Object.keys(OWN));
+    assert.equal(defs.UI.icon, "cavalryGeo.png");
+    assert.ok(fs.existsSync(path.join(dir, defs.UI.icon)));
+    assert.ok(fs.existsSync(path.join(dir, defs.UI.icon.replace(/\.png$/, "@2x.png"))));
   });
 
   test(`${f.type}: defaults and ranges`, () => {
@@ -80,7 +83,7 @@ test("copyPlugin copies the plugin folder", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "geo-plugin-"));
   try {
     copyPlugin(tmp);
-    assert.deepEqual(fs.readdirSync(path.join(tmp, "CavalryGeo_plugin")).sort(), ["definitions.json", "night.sksl", "reproject.sksl", "strings.json"]);
+    assert.deepEqual(fs.readdirSync(path.join(tmp, "CavalryGeo_plugin")).sort(), ["cavalryGeo.png", "cavalryGeo@2x.png", "definitions.json", "night.sksl", "reproject.sksl", "strings.json"]);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -92,7 +95,7 @@ test("the release zip carries the plugin and the install text mentions it", () =
     fs.writeFileSync(path.join(tmp, "CavalryGeo_assets", "a.txt"), "a");
     copyPlugin(tmp);
     const names = packageFiles(tmp, "9.9.9").map((f) => f.name);
-    for (const n of ["definitions.json", "strings.json", "reproject.sksl", "night.sksl"]) assert.ok(names.includes("CavalryGeo_plugin/" + n), n);
+    for (const n of ["definitions.json", "strings.json", "reproject.sksl", "night.sksl", "cavalryGeo.png", "cavalryGeo@2x.png"]) assert.ok(names.includes("CavalryGeo_plugin/" + n), n);
     assert.ok(names.includes("INSTALL.txt") && names.includes("CavalryGeo.js"));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   assert.match(installText("9.9.9"), /CavalryGeo_plugin/);

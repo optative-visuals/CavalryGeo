@@ -19,7 +19,8 @@
     "out": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"]
   },
   "UI": {
-    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"]
+    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "viewScale", "viewOffset"],
+    "icon": "cavalryGeo.png"
   }
 },{
   "author": "cavalryGeo",
@@ -45,6 +46,7 @@
     "out": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]
   },
   "UI": {
-    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]
+    "attributeOrder": ["camLat", "camLon", "camZoom", "camRotation", "camProjection", "dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"],
+    "icon": "cavalryGeo.png"
   }
 }]
