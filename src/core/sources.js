@@ -44,13 +44,18 @@ var GeoSources = (function () {
   }
   function fill(template, z, x, y) { return template.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y); }
   function style(src, opts) { return String((opts && opts.style) || "").trim() || src.defaultStyle || ""; }
-  // A custom link must start with https:// and contain {z}, {x} and {y}.
+  // A custom link must start with http(s):// and contain {z}, {x} and {y}.
   function validTemplate(t) {
     return /^https?:\/\//.test(t) && t.indexOf("{z}") >= 0 && t.indexOf("{x}") >= 0 && t.indexOf("{y}") >= 0;
   }
+  // An empty link is missing; a link that is there but malformed has to be fixed.
+  function badTemplateText(t) {
+    return t ? "The custom tile link must start with https:// and contain {z}, {x} and {y}: fix it in \u2699 Settings."
+      : "Needs a custom tile link: set it in \u2699 Settings.";
+  }
   function customTemplate(opts) {
     var t = String((opts && opts.template) || "").trim();
-    if (!validTemplate(t)) throw new Error("Needs a custom tile link: set it in \u2699 Settings.");
+    if (!validTemplate(t)) throw new Error(badTemplateText(t));
     return t;
   }
   // What a source still needs from Settings before it can be used, or null when nothing is missing.
@@ -58,7 +63,10 @@ var GeoSources = (function () {
     opts = opts || {};
     if (src.id === "maptiler" && !opts.key) return "Needs a MapTiler key: set it in \u2699 Settings.";
     if (src.id === "mapbox" && !opts.key) return "Needs a Mapbox token: set it in \u2699 Settings.";
-    if (src.id === "custom" && !validTemplate(String(opts.template || "").trim())) return "Needs a custom tile link: set it in \u2699 Settings.";
+    if (src.id === "custom") {
+      var t = String(opts.template || "").trim();
+      if (!validTemplate(t)) return badTemplateText(t);
+    }
     return null;
   }
 
