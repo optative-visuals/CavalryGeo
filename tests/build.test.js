@@ -434,6 +434,9 @@ function makeFakeUi() {
   Draw.prototype.redraw = function () { this._redraws++; };
   Draw.prototype.useHoverEvents = function (on) { this._hover = !!on; }; // like Cavalry: moves with no button held only fire when on
   Container.prototype.geometry = function () { return { x: 0, y: 0, width: this._width || 320, height: 24 }; };
+  // Like Cavalry: a container can show itself as a popover under a point (the cog's settings).
+  Container.prototype.showAsPopover = function (x, y) { this._popoverAt = [x, y]; };
+  Container.prototype.setPreferredPopoverSide = function (s) { this._side = s; };
 
   // No ui.Modal by default (like an older Cavalry): tests that need the dialog install one
   // with withModal().
@@ -465,6 +468,8 @@ function makeFakeUi() {
     add: function (w) { root = w; },
     show: function () {},
     setTitle: function () {},
+    // Like Cavalry's save dialog: a path, or "" when cancelled. A test sets _saveAnswer.
+    chooseFileToSave: function () { return this._saveAnswer || ""; },
     // Like Cavalry: objects with onCompChanged / onSceneChanged (and more) are called back by the app.
     addCallbackObject: function (o) { (this._callbackObjects = this._callbackObjects || []).push(o); },
     setBackgroundColor: function (c) { this._background = c; },
@@ -560,26 +565,27 @@ function panelHeadings(context, p) {
   return panelContents(p).filter((n) => context.GeoStyle.isHeading(n)).map((n) => n._items[0].getText());
 }
 function pageHeadings(context, col) { return panelsOf(context, col).map((p) => panelHeadings(context, p)); }
-// Every page column: the Map, Imagery and Data pages, then Layers' three and Label's two.
+// Every page column: the Map, Imagery and Data pages, then Layers' three, Label's two and the settings column.
 function allColumns(context) {
   const pages = context.sectionPages.pages;
-  return [pages[0], pages[2], pages[4]].concat(context.layersPages.pages, context.labelPages.pages);
+  return [pages[0], pages[2], pages[4]].concat(context.layersPages.pages, context.labelPages.pages, [context.settingsColumn]);
 }
 
 test("buildPanel() runs against stub ui/api: a five-section tab bar above a page per section", () => {
   const { ui, context } = buildSandbox();
   const root = ui._root();
   assert.ok(root, "buildUi should have called ui.add(root)");
-  const bar = root._items[0], pages = context.sectionPages;
-  assert.ok(bar instanceof ui.Container, "the tab bar is a rounded box");
+  const pages = context.sectionPages;
+  assert.ok(root._items[0]._items[0] instanceof ui.Container, "the tab bar is a rounded box");
   assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"]);
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
   // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips lives on the Map tab).
   assert.equal(root._items.length, 3);
-  assert.deepEqual(root._items, [context.sectionTabs.widget, pages.widget, context.statusLabel]);
-  assert.ok(holds(pages.pages[0], context.tipsBtn), "Tips is held by the Map page");
+  assert.deepEqual(root._items[0]._items, [context.sectionTabs.widget, context.cogBtn], "the cog sits right of the tab bar");
+  assert.deepEqual(root._items.slice(1), [pages.widget, context.statusLabel]);
+  assert.ok(!holds(pages.pages[0], context.tipsBtn), "Tips is on no page until Preferences takes it");
   assert.equal(root._stretch, 1);
   pages.pages.forEach((layout, i) => assert.equal(pages.widget._items[i]._layout._items[0], layout, "page " + i)); // inside the coloured page's 8 px inset
   context.showSection("Imagery");
@@ -697,7 +703,7 @@ test("Map tab: Create map, Drop pin and Centre camera here are gone; Jump here a
   assert.equal(context.centreBtn, undefined);
   const texts = [];
   walkUi(context.sectionPages.pages[0], (n) => { if (n instanceof ui.Button) texts.push(n.getText()); });
-  assert.deepEqual(texts, ["Got it", "Refresh", "Refresh controls", "Search", "Jump here", "Create map here", "Fly here", "Update flight", "Drift", "Apply to map", "Save as style", "Delete style", "Tips"]);
+  assert.deepEqual(texts, ["Got it", "Refresh", "Refresh controls", "Search", "Jump here", "Create map here", "Fly here", "Update flight", "Drift", "Apply to map", "Save as style", "Delete style"]);
 });
 
 test("Map tab: Search and Fly here buttons share the same fixed width", () => {
@@ -4464,7 +4470,7 @@ test("each section has its panels, with their headings, in order", () => {
   assert.deepEqual(pageHeadings(context, lp[0]), [["World · Natural Earth"], ["Streets · OpenStreetMap"]]);
   assert.deepEqual(pageHeadings(context, lp[1]), [["Day & night"], ["Map furniture"]]);
   assert.deepEqual(pageHeadings(context, lp[2]), [["Extract"], ["Highlight"], ["Bake"]]);
-  assert.deepEqual(pageHeadings(context, pages[2]), [["Source"], ["Keys and links"], ["Build"]]);
+  assert.deepEqual(pageHeadings(context, pages[2]), [["Source"], ["Build"]]);
   assert.deepEqual(pageHeadings(context, context.labelPages.pages[0]), [["Place"], ["Preview (click to set the spot, drag to move)"], ["At coordinates"]]);
   assert.deepEqual(pageHeadings(context, context.labelPages.pages[1]), [["Stops"], ["Preview (click to add a stop, drag to move)"], ["Style"]]);
   assert.deepEqual(pageHeadings(context, pages[4]), [["Sheet"], ["Columns"], ["Show"], ["Unmatched rows"]]);
@@ -4489,7 +4495,7 @@ test("no heading has a rule: a heading row holds only labels", () => {
 test("panels sit 5 px apart in a page column (4 + 1) and each packs its items 4 apart, 8 more before a later heading", () => {
   const { context } = buildSandbox();
   const columns = allColumns(context);
-  assert.equal(columns.length, 8);
+  assert.equal(columns.length, 9);
   let panels = 0;
   columns.forEach((col, c) => {
     assert.equal(col._spacing, 4, "column " + c);
@@ -4551,12 +4557,13 @@ test("Layers has a tab bar Add / Overlays / Extract that switches its pages and 
   assert.ok(holds(context.sectionPages.pages[1], context.layersTabs.widget) && holds(context.sectionPages.pages[1], context.layersPages.widget));
 });
 
-test("buttons that moved: Refresh controls is in the Map tab's first panel, Clear download cache in the Streets panel", () => {
+test("buttons that moved: Refresh controls is in the Map tab's first panel, Clear download cache in Settings' Storage", () => {
   const { context } = buildSandbox();
   const mapPanels = panelsOf(context, context.sectionPages.pages[0]);
   assert.ok(holds(mapPanels[0], context.refreshControlsBtn) && holds(mapPanels[0], context.mapPicker) && holds(mapPanels[0], context.projPicker));
   const streets = panelsOf(context, context.layersPages.pages[0])[1];
-  assert.ok(holds(streets, context.clearCacheBtn) && holds(streets, context.addLayersBtn));
+  assert.ok(holds(streets, context.addLayersBtn) && !holds(streets, context.clearCacheBtn), "Clear download cache left the Streets panel");
+  assert.ok(holds(panelsOf(context, context.settingsColumn)[2], context.clearCacheBtn), "it is in Settings' Storage");
   assert.ok(!holds(context.layersPages.widget, context.refreshControlsBtn), "no longer on Layers");
   const cleared = [];
   context.GeoNet.clearCache = () => { cleared.push(1); return { files: 2, bytes: 2048 }; };
@@ -4585,7 +4592,7 @@ test("labelled rows use fieldLabel (fixed width 92): Map, Layers, Imagery, Label
   assert.ok(holds(rowLabel(add, "Detail"), context.scalePicker));
   assert.ok(holds(rowLabel(over, "Day"), context.dayNightDayField) && holds(rowLabel(over, "Day"), context.dayNightMonthPicker));
   assert.ok(holds(rowLabel(over, "UTC time (0-24)"), context.dayNightTimeField));
-  const img = context.sectionPages.pages[2];
+  const img = context.settingsColumn;
   [["MapTiler key", "maptilerKeyField"], ["Mapbox token", "mapboxKeyField"], ["Map ID / style", "styleField"], ["Custom link", "customUrlField"], ["Custom credit", "customAttrField"]].forEach((x) => assert.ok(holds(rowLabel(img, x[0]), context[x[1]]), x[0]));
   const routes = context.labelPages.pages[1];
   [["Shape", "routeShapePicker"], ["Arc height %", "arcField"], ["Traveller", "travellerPicker"]].forEach((x) => assert.ok(holds(rowLabel(routes, x[0]), context[x[1]]), x[0]));
@@ -5821,7 +5828,7 @@ test("Map tab Style: the section sits at the bottom of the Map tab, built-ins li
   assert.deepEqual(context.mapStylePicker._entries, ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night"]);
   assert.equal(context.mapStylePicker.getValue(), 0);
   const items = context.sectionPages.pages[0]._items;
-  const stylePanel = items[items.length - 2]; // the Tips row closes the tab
+  const stylePanel = items[items.length - 1]; // the Style panel closes the tab
   assert.ok(context.GeoStyle.isPanel(stylePanel));
   const last = panelContents(stylePanel);
   assert.ok(context.GeoStyle.isHeading(last[0]));
@@ -9636,14 +9643,9 @@ test("Start here: a first run shows the box at the top of the Map tab with the a
   assert.equal(context.tipsBtn.getText(), "Tips");
   assert.equal(context.tipsTitle._fontSize, 11, "the title is a small heading");
   assert.equal(context.tipsTitle._fixedHeight, 16);
-  const pageItems = mapPage._items, tipsRow = pageItems[pageItems.length - 1];
-  assert.ok(holds(tipsRow, context.tipsBtn), "the Tips button closes the Map tab");
-  assert.equal(tipsRow._stretch, 1, "a stretch after the button keeps it small");
-  assert.equal(holds(ui._root(), context.tipsBtn), true, "the Map page is inside the panel");
+  assert.equal(holds(ui._root(), context.tipsBtn), false, "Tips is on no page until Preferences takes it");
   const items = ui._root()._items;
-  assert.equal(items.some((n) => n === context.statusLabel), true);
   assert.equal(items[items.length - 1], context.statusLabel, "the status line is still last");
-  items.slice(0, -1).forEach((n) => assert.ok(n !== tipsRow && !(n._items || []).includes(context.tipsBtn), "root does not hold Tips directly"));
   assert.equal(context.tipsGotItBtn._background, "#1F8F4E", "Got it is the green primary button");
 });
 
@@ -12725,7 +12727,8 @@ function tippedControls(context, ui) {
   allColumns(context).forEach((col) => walkUi(col, (n) => {
     if (kinds.some((K) => n instanceof K) && bars.indexOf(n) < 0 && skip.indexOf(n) < 0 && found.indexOf(n) < 0) found.push(n);
   }));
-  return found;
+  // Outside the pages: the cog (on the tab bar's row) and Tips (on no page until Preferences takes it).
+  return found.concat([context.cogBtn, context.tipsBtn]);
 }
 
 test("hover help: every control on every page has a plain tooltip, and every GeoTips text is used once", () => {
@@ -14613,4 +14616,167 @@ test("date line upgrades: a pin or label the user moved into their own group get
   assert.ok(api.get(moved, EX).indexOf(", nearest: true") >= 0, "a pin in the user's group is nearest");
   assert.ok(api.get(driver, A.CAMERA_EXPR_ATTR).indexOf("GeoRuntime.projectNearest(") >= 0, "a label in the user's group is nearest");
   assert.equal(api.get(stop, EX), olds[stop], "an old route's stop is left as it is");
+});
+
+// ---- Settings cog --------------------------------------------------------------------
+// The cog beside the tab bar opens the settings: a popover under it where this Cavalry has one, else a
+// Settings page that the cog shows in place of the tabs.
+function noPopoverSandbox(setup) {
+  const api = makeFakeApi(), ui = makeFakeUi();
+  delete ui.Container.prototype.showAsPopover;
+  if (setup) setup(api);
+  const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
+  vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
+  return { context: context, api: api, ui: ui };
+}
+
+test("The cog sits right of the tab bar and opens the settings popover under itself, built once", () => {
+  const { context, ui } = buildSandbox();
+  const first = ui._root()._items[0];
+  assert.ok(first instanceof ui.HLayout, "the tab bar's row");
+  assert.deepEqual(first._items, [context.sectionTabs.widget, context.cogBtn]);
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  context.cogBtn.onClick();
+  assert.deepEqual(plain(context.settingsContainer._popoverAt), [14, 24]);
+  const box = context.settingsContainer;
+  context.cogBtn.onClick();
+  assert.equal(context.settingsContainer, box, "the same container is reused");
+  assert.ok(holds(context.settingsContainer, context.settingsColumn), "the container holds the settings column");
+  assert.equal(context.sectionPages.pageCount(), 5, "a settings column in a popover is not also a page");
+  assert.ok(holds(box, context.clearCacheBtn) && holds(box, context.maptilerKeyField));
+});
+
+test("Without showAsPopover the cog shows the Settings page, and the cog again goes back to the section it was on", () => {
+  const { context } = noPopoverSandbox();
+  assert.equal(context.settingsContainer, null, "no popover box");
+  assert.equal(context.sectionPages.pageCount(), 6);
+  assert.equal(context.sectionPages.pages[5], context.settingsColumn);
+  assert.deepEqual(plain(context.sectionTabs.buttons.map((b) => b.getText())), ["Map", "Layers", "Imagery", "Label", "Data"], "Settings is not a tab");
+  context.showSection("Imagery");
+  context.cogBtn.onClick();
+  assert.equal(context.sectionPages.currentPage(), 5);
+  assert.equal(context.sectionTabs.selected(), "Settings");
+  context.cogBtn.onClick();
+  assert.equal(context.sectionPages.currentPage(), 2);
+  assert.equal(context.sectionTabs.selected(), "Imagery");
+});
+
+test("GeoCog.open: without a popover it calls the fallback, and with neither it says why", () => {
+  const { context } = noPopoverSandbox();
+  let shown = 0;
+  context.GeoCog.open(null, context.cogBtn, () => { shown++; });
+  assert.equal(shown, 1);
+  assert.throws(() => context.GeoCog.open(null, context.cogBtn), { message: "This Cavalry can't show the settings window." });
+});
+
+test("The cog button is 28 wide and 24 tall; it shows the cog icon when the file is there, else a gear", () => {
+  const withIcon = buildSandbox({ setup: (a) => { a._files[ICONS + "cog.png"] = "<png>"; } }).context.cogBtn;
+  assert.equal(withIcon._image, ICONS + "cog.png");
+  assert.deepEqual(plain(withIcon._imageSize), [16, 16]);
+  assert.equal(withIcon.getText(), "");
+  const plainCog = buildSandbox().context.cogBtn;
+  assert.equal(plainCog._image, undefined);
+  assert.equal(plainCog.getText(), "\u2699");
+  [withIcon, plainCog].forEach((b) => { assert.equal(b._fixedWidth, 28); assert.equal(b._fixedHeight, 24); });
+});
+
+test("Keys and cache buttons moved: Settings holds them; Imagery, Layers and Map don't", () => {
+  const { context } = buildSandbox();
+  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "stylePicker", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
+  moved.forEach((n) => assert.ok(holds(context.settingsColumn, context[n]), n + " is in Settings"));
+  const elsewhere = [context.sectionPages.pages[0], context.sectionPages.pages[2], context.layersPages.widget];
+  moved.forEach((n) => elsewhere.forEach((page) => assert.ok(!holds(page, context[n]), n + " left its old page")));
+  assert.deepEqual(pageHeadings(context, context.settingsColumn), [["Keys and links"], ["Map styles"], ["Storage"], ["Preferences"], ["About"]]);
+  const styles = panelsOf(context, context.settingsColumn)[1];
+  assert.ok(holds(styles, context.openStylesBtn) && holds(styles, context.exportStyleBtn));
+  const storage = panelsOf(context, context.settingsColumn)[2];
+  assert.ok(holds(storage, context.clearCacheBtn) && holds(storage, context.clearTilesBtn));
+});
+
+test("Keys typed in Settings still reach the imagery options and settings.json", () => {
+  const { context, api } = buildSandbox();
+  const maptiler = context.GeoSources.list().findIndex((s) => s.key === "maptiler");
+  assert.ok(maptiler >= 0);
+  context.sourcePicker.setValue(maptiler);
+  context.maptilerKeyField.setText(" K1 ");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(settingsOf(api).maptilerKey, "K1");
+  assert.equal(context.sourceOptions(context.currentSource()).key, "K1");
+});
+
+test("Open styles folder runs explorer with backslashes, and makes the folder first", () => {
+  const calls = [];
+  const { context, api } = buildSandbox({ setup: (a) => { a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); }; } });
+  context.openStylesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "explorer", args: ["C:\\fake\\AppData\\CavalryGeo\\Map styles"] }]);
+  assert.equal(context.statusLabel.getText(), "Opened the Map styles folder.");
+  assert.equal(api._files[STYLES_DIR], "<dir>");
+});
+
+test("Open styles folder on macOS runs open on the folder; without runDetachedProcess the status names it", () => {
+  const calls = [];
+  const mac = buildSandbox({ setup: (a) => {
+    a.getAppDataFolder = () => "/home/x";
+    a.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); };
+  } });
+  mac.context.openStylesBtn.onClick();
+  assert.deepEqual(plain(calls), [{ cmd: "open", args: ["/home/x/CavalryGeo/Map styles"] }]);
+  const plainApi = buildSandbox();
+  plainApi.context.openStylesBtn.onClick();
+  assert.equal(plainApi.context.statusLabel.getText(), "Your styles are in C:/fake/AppData/CavalryGeo/Map styles.");
+});
+
+test("Export style writes the picked style as a JSON file, adding .json when missing", () => {
+  const { context, api, ui } = buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] }); } });
+  pickStyle(context, "Ocean");
+  const asked = [];
+  const real = ui.chooseFileToSave;
+  ui.chooseFileToSave = function (dir, filter) { asked.push([dir, filter]); return real.call(this, dir, filter); };
+  ui._saveAnswer = "C:/out/Ocean";
+  context.exportStyleBtn.onClick();
+  assert.deepEqual(plain(asked), [[STYLES_DIR, "JSON (*.json)"]]);
+  assert.equal(context.statusLabel.getText(), "Exported \"Ocean\" to C:/out/Ocean.json.");
+  const text = api._files["C:/out/Ocean.json"];
+  assert.equal(context.GeoStyleFiles.fromText(text).name, "Ocean");
+  assert.equal(text, context.GeoStyleFiles.toText(context.pickedStyle()));
+  ui._saveAnswer = "C:/out/Ocean.JSON";
+  context.exportStyleBtn.onClick();
+  assert.ok(api._files["C:/out/Ocean.JSON"] !== undefined, "an upper-case .JSON is kept as it is");
+});
+
+test("Export cancelled writes nothing and says so", () => {
+  const { context, api, ui } = buildSandbox();
+  ui._saveAnswer = "";
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Nothing was exported.");
+  assert.deepEqual(Object.keys(api._files).filter((p) => p.indexOf("C:/out") === 0), []);
+});
+
+test("Export without a save dialog says to copy the file from the folder instead", () => {
+  const { context, ui } = buildSandbox();
+  delete ui.chooseFileToSave;
+  context.exportStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Error: This Cavalry has no save dialog: copy the file from the Map styles folder instead.");
+});
+
+test("A style file that doesn't appear after its write is an error: the style stays in settings", () => {
+  const { api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile;
+    a.writeToFile = (p, c, o) => { if (p.endsWith("Sand.json")) return; return real(p, c, o); };
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"]);
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Sand"]);
+});
+
+test("Delete style drops the settings entry even when the style folder can't be listed", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Sand" }] });
+    a.listDirectory = () => { throw new Error("no listing"); };
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+  } });
+  pickStyle(context, "Sand");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Sand\".");
+  assert.ok(!("mapStyles" in settingsOf(api)));
 });

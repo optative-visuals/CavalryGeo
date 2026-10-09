@@ -451,3 +451,29 @@ test("reverse: an HTTP error does not back off", () => {
   assert.equal(GeoNet.reverse(48.86, 2.36, 12), null);
   assert.equal(api._state.constructed, 2, "the second lookup contacted the network");
 });
+
+// Opens a folder or link with the system's own handler: explorer on Windows (drive-letter app data), open elsewhere.
+test("openPath opens a folder with explorer on Windows and open elsewhere; a link goes unchanged", () => {
+  const calls = [];
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:\\fake\\AppData";
+  fakeApi.runDetachedProcess = (cmd, args) => { calls.push({ cmd: cmd, args: args }); };
+  const net = loadNetWith(fakeApi);
+  assert.equal(net.openPath("C:/fake/AppData/CavalryGeo/Map styles"), true);
+  assert.deepEqual(plainObj(calls), [{ cmd: "explorer", args: ["C:\\fake\\AppData\\CavalryGeo\\Map styles"] }]);
+  assert.equal(net.openPath("https://example.com/help/page"), true);
+  assert.deepEqual(plainObj(calls[1]), { cmd: "explorer", args: ["https://example.com/help/page"] });
+  calls.length = 0;
+  fakeApi.getAppDataFolder = () => "/home/x";
+  assert.equal(net.openPath("/home/x/CavalryGeo/Map styles"), true);
+  assert.deepEqual(plainObj(calls), [{ cmd: "open", args: ["/home/x/CavalryGeo/Map styles"] }]);
+});
+
+test("openPath is false when runDetachedProcess is missing or throws", () => {
+  const fakeApi = makeScriptedApi([]);
+  fakeApi.getAppDataFolder = () => "C:/fake/AppData";
+  const net = loadNetWith(fakeApi);
+  assert.equal(net.openPath("C:/fake/AppData/CavalryGeo/Map styles"), false);
+  fakeApi.runDetachedProcess = () => { throw new Error("blocked"); };
+  assert.equal(net.openPath("C:/fake/AppData/CavalryGeo/Map styles"), false);
+});

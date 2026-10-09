@@ -340,6 +340,19 @@ var GeoNet = (function () {
     return s;
   }
 
+  // Opens a folder, or a link, with the system's own handler; true when the request went out. Needs
+  // runDetachedProcess: explorer on Windows (app data on a drive letter), open elsewhere. A link goes unchanged.
+  function openPath(target) {
+    if (typeof api.runDetachedProcess !== "function") return false;
+    try {
+      var t = String(target), isLink = /^[a-z][a-z0-9+.-]*:\/\//i.test(t);
+      var windows = /^[A-Za-z]:\//.test(settingsDir());
+      if (windows && !isLink) t = t.replace(/\//g, "\\");
+      api.runDetachedProcess(windows ? "explorer" : "open", [t]);
+      return true;
+    } catch (e) { return false; }
+  }
+
   // ---- Map style files: one JSON file per saved style in the "Map styles" folder --------
   function stylesDir() { return settingsDir() + "/" + GeoStyleFiles.FOLDER; }
   // Style files need a Cavalry that can list folders. Without one, saved styles stay in settings.json.
@@ -371,6 +384,8 @@ var GeoNet = (function () {
       while (api.filePathExists(path)) { n++; path = dir + "/" + base + " " + n + ".json"; }
     }
     api.writeToFile(path, GeoStyleFiles.toText(style), true);
+    // A write that leaves no file (a folder Cavalry refuses to write to) is an error, so the style isn't dropped.
+    if (!api.filePathExists(path)) throw new Error("Couldn't write " + path + ".");
     return path;
   }
   // Removes the style with this name from settings.json's "mapStyles" (the key goes when none is left).
@@ -383,7 +398,9 @@ var GeoNet = (function () {
   // Deletes the saved style with this name: its file, and its settings.json entry when it has one. Throws when
   // this Cavalry can't delete files, or the file is still there afterwards. Returns the file's path ("" if none).
   function deleteStyleFile(name) {
-    var path = readStyleFiles().paths[String(name).trim().toLowerCase()] || "";
+    // A folder that can't be listed still lets the settings entry go (no file path is known then).
+    var path = "";
+    try { path = readStyleFiles().paths[String(name).trim().toLowerCase()] || ""; } catch (e) { path = ""; }
     if (path) {
       if (typeof api.deleteFilePath !== "function") throw new Error("This Cavalry can't delete files: delete " + path + " by hand.");
       api.deleteFilePath(path);
@@ -413,6 +430,6 @@ var GeoNet = (function () {
     search: search, osmLayer: osmLayer, neLayer: neLayer, clearCache: clearCache, clearTiles: clearTiles, fetchCsv: fetchCsv, geocodePlaces: geocodePlaces, reverse: reverse,
     tileBase: tileBase, imageBase: imageBase, cachePrefixes: cachePrefixes, USER_AGENT: USER_AGENT, ensureDir: ensureDir, cachedTile: cachedTile, downloadTile: downloadTile, markEmptyTile: markEmptyTile, isEmptyTile: isEmptyTile, savedImages: savedImages,
     loadSettings: loadSettings, saveSettings: saveSettings, updateSettings: updateSettings, removeSettings: removeSettings,
-    stylesDir: stylesDir, filesSupported: filesSupported, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
+    openPath: openPath, stylesDir: stylesDir, filesSupported: filesSupported, readStyleFiles: readStyleFiles, writeStyleFile: writeStyleFile, deleteStyleFile: deleteStyleFile, moveStylesToFiles: moveStylesToFiles
   };
 })();

@@ -632,9 +632,10 @@ deleteStyleBtn.onClick = guardAction(function () {
 });
 
 // ---- Start here tips -------------------------------------------------------
-// Shown on the Map tab until "Got it"; the Tips button (bottom of the Map tab) brings them back.
+// Shown on the Map tab until "Got it"; the Tips button brings them back (it moves to the settings' Preferences next).
 // A missing showTips setting means a first run, so the box shows.
 var tipsGotItBtn = GeoStyle.primaryButton("Got it");
+// The Tips button is on no page for now: the settings' Preferences take it (Show tips again).
 var tipsBtn = GeoStyle.quietButton("Tips");
 // The title is a plain Label (not GeoStyle.heading, which is a layout that can't be hidden).
 var tipsTitle = new ui.Label("Start here");
@@ -668,8 +669,6 @@ tipsBtn.onClick = guardAction(function () {
 })();
 
 TAB_BUILDERS.push(function (tabs) {
-  var tipsRow = row(tipsBtn);
-  if (typeof tipsRow.addStretch === "function") tipsRow.addStretch(); // keeps the Tips button small
   tabs.add("Map", column(tipsBox.concat([
     GeoStyle.panel([
       row(mapPicker, refreshMapsBtn),
@@ -700,8 +699,7 @@ TAB_BUILDERS.push(function (tabs) {
       GeoStyle.heading("Style"),
       row(mapStylePicker, applyStyleBtn),
       row(styleNameField, saveStyleBtn, deleteStyleBtn)
-    ]),
-    tipsRow
+    ])
   ])));
 });
 
@@ -1097,8 +1095,7 @@ TAB_BUILDERS.push(function (tabs) {
       GeoStyle.toggleGrid(toggles(OSM_CATS), 3),
       modePicker,
       row(creditCheck, new ui.Label("Add © OpenStreetMap contributors credit")),
-      addLayersBtn,
-      clearCacheBtn
+      addLayersBtn
     ])
   ]));
   layersPages.add(column([
@@ -2112,22 +2109,84 @@ TAB_BUILDERS.push(function (tabs) {
       licenceLabel
     ]),
     GeoStyle.panel([
-      GeoStyle.heading("Keys and links"),
-      row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
-      row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
-      row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
-      row(GeoStyle.fieldLabel("Custom link"), customUrlField),
-      row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
-    ]),
-    GeoStyle.panel([
       GeoStyle.heading("Build"),
       row(buildImageryBtn, cancelImageryBtn),
       imageryProgress,
-      imageryAttrBtn,
-      clearTilesBtn
+      imageryAttrBtn
     ])
   ]));
 });
+
+// ---- Settings (the cog) ----------------------------------------------------------
+// The cog beside the tab bar opens these settings: a popover under it where this Cavalry can show one, else a
+// Settings page that the cog shows in place of the tabs (buildUi adds it). Keys and links, the style folder and
+// the storage buttons live here now.
+var openStylesBtn = GeoStyle.button("Open styles folder");
+var exportStyleBtn = GeoStyle.button("Export style…");
+openStylesBtn.onClick = guardAction(function () {
+  var dir = GeoNet.stylesDir();
+  GeoNet.ensureDir(dir);
+  if (!GeoNet.openPath(dir)) say("Your styles are in " + dir + ".");
+  else say("Opened the Map styles folder.");
+});
+exportStyleBtn.onClick = guardAction(function () {
+  if (typeof ui.chooseFileToSave !== "function") throw new Error("This Cavalry has no save dialog: copy the file from the Map styles folder instead.");
+  GeoNet.ensureDir(GeoNet.stylesDir());
+  var p = String(ui.chooseFileToSave(GeoNet.stylesDir(), "JSON (*.json)") || "");
+  if (!p) { say("Nothing was exported."); return; }
+  if (!/\.json$/i.test(p)) p += ".json";
+  var style = pickedStyle();
+  api.writeToFile(p, GeoStyleFiles.toText(style), true);
+  say("Exported \"" + style.name + "\" to " + p + ".");
+});
+var settingsColumn = column([
+  GeoStyle.panel([
+    GeoStyle.heading("Keys and links"),
+    row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
+    row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
+    row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
+    row(GeoStyle.fieldLabel("Custom link"), customUrlField),
+    row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("Map styles"),
+    row(openStylesBtn, exportStyleBtn)
+  ]),
+  GeoStyle.panel([
+    GeoStyle.heading("Storage"),
+    row(clearCacheBtn, clearTilesBtn)
+  ]),
+  // Preferences and About stay empty until the next step fills them.
+  GeoStyle.panel([GeoStyle.heading("Preferences")]),
+  GeoStyle.panel([GeoStyle.heading("About")])
+]);
+// The popover's box, built once: null when this Cavalry has no popover (the Settings page is used then).
+var settingsContainer = null;
+if (typeof ui.Container === "function") {
+  var popoverBox = new ui.Container();
+  if (typeof popoverBox.showAsPopover === "function") {
+    settingsContainer = popoverBox;
+    var inset = new ui.VLayout();
+    inset.setMargins(8, 8, 8, 8);
+    inset.add(settingsColumn);
+    settingsContainer.setLayout(inset);
+    settingsContainer.setBackgroundColor(GeoStyle.PAGE_BACKGROUND);
+    if (typeof settingsContainer.setRadius === "function") settingsContainer.setRadius(6, 6, 6, 6);
+  }
+}
+// The section the Settings page covered, so the cog can go back to it.
+var settingsReturn = null;
+function toggleSettingsPage() {
+  if (sectionTabs.selected() === "Settings") { showSection(settingsReturn || sectionNames[0]); return; }
+  settingsReturn = sectionTabs.selected();
+  showSection("Settings");
+}
+// Opening the settings first re-reads the style files, so a style dropped into the folder is listed.
+function openSettings() {
+  reloadStyleFiles(true);
+  GeoCog.open(settingsContainer, cogBtn, toggleSettingsPage);
+}
+var cogBtn = GeoCog.button(guardAction(openSettings));
 
 // ---- Hover help -----------------------------------------------------------
 // Every control gets its tooltip from GeoTips (src/cavalry/tips.js); one table pairs them.
@@ -2243,7 +2302,10 @@ var TIP_TARGETS = [
   [lookupCheck, "data.lookup"],
   [addDataBtn, "data.add"],
   [refreshDataBtn, "data.refresh"],
-  [dataUnmatchedList, "data.unmatched"]
+  [dataUnmatchedList, "data.unmatched"],
+  [cogBtn, "settings.cog"],
+  [openStylesBtn, "settings.openStyles"],
+  [exportStyleBtn, "settings.exportStyle"]
 ];
 // (Dropdowns keep Cavalry's own look: setBackgroundColor on a DropDown only paints its open list.)
 TIP_TARGETS.forEach(function (t) { GeoStyle.tip(t[0], GeoTips.text(t[1])); });
@@ -2313,14 +2375,17 @@ function buildUi() {
     } });
   });
   sectionNames = SECTION_ORDER.filter(function (n) { return layouts[n]; }).concat(extra);
+  var tabNames = sectionNames.slice();
+  // Without a popover the settings are a page of their own: the cog shows it, and the tab bar leaves it out.
+  if (!settingsContainer) sectionNames.push("Settings");
   sectionPages = GeoStyle.pageStack(GeoStyle.PAGE_BACKGROUND);
-  sectionNames.forEach(function (name) { sectionPages.add(layouts[name]); });
+  sectionNames.forEach(function (name) { sectionPages.add(name === "Settings" ? settingsColumn : layouts[name]); });
   sectionPages.finish();
-  sectionTabs = GeoStyle.tabBar(sectionNames, function (name) { showSection(name); });
+  sectionTabs = GeoStyle.tabBar(tabNames, function (name) { showSection(name); });
   showSection(sectionNames[0]);
   var root = new ui.VLayout();
   root.setMargins(4, 4, 4, 4);
-  root.add(sectionTabs.widget);
+  root.add(row(sectionTabs.widget, cogBtn)); // the cog sits right of the tab bar
   root.add(sectionPages.widget);
   // The stretch keeps the status line at the bottom when the page is shorter than the window.
   if (typeof root.addStretch === "function") root.addStretch();
