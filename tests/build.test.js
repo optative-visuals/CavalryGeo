@@ -6176,6 +6176,26 @@ test("Style files: when the folder shows nothing after the writes, settings.json
   assert.ok(context.mapStylePicker._entries.includes("Sand"), "still listed from settings.json");
 });
 
+test("Style files: a listing that always misses the file writes no duplicate copy, on a second start too", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+    a.listDirectory = () => [];
+  } });
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"], "one copy written");
+  context.GeoNet.moveStylesToFiles();
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json"], "a second move adds no \"Ocean 2.json\"");
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Ocean"], "Ocean stays in settings.json while the listing misses it");
+});
+
+test("A skipped duplicate whose name holds < shows it with ‹ in the already-saved note", () => {
+  const { context, api } = buildSandbox();
+  api._files[STYLES_DIR + "/a.json"] = styleText("Oc<ean", "#0a0b0c");
+  api._files[STYLES_DIR + "/b.json"] = styleText("Oc<ean", "#0a0b0c");
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/b\.json: "Oc‹ean" is already saved\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /</);
+});
+
 test("Style files: listDirectoryPaths is used when present, and listDirectory is not called", () => {
   const pathCalls = [];
   let bareCalls = 0;

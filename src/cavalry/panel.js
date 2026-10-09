@@ -264,7 +264,7 @@ function reloadStyleFiles(quiet) {
   if (!fresh.length) return "";
   fresh.forEach(function (p) { reportedSkips[p] = true; });
   var first = fresh[0];
-  var why = r.reasons[first] === "duplicate" ? "\"" + r.names[first] + "\" is already saved." : "not a Cavalry Geo style.";
+  var why = r.reasons[first] === "duplicate" ? "\"" + String(r.names[first]).replace(/</g, "‹") + "\" is already saved." : "not a Cavalry Geo style.";
   // The file name is shown in the status line, which reads "<" as markup: a file named a<b.json shows as a‹b.json.
   return "Skipped Map styles/" + fileNameOf(first).replace(/</g, "‹") + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
 }

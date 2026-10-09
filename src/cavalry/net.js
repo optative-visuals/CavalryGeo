@@ -384,13 +384,23 @@ var GeoNet = (function () {
   // Writes a style to its file and returns the path. A style already in the folder is written over its own
   // file; a new one takes "<name>.json", or "<name> 2.json", "<name> 3.json"... when that name holds another
   // file, so no other file is ever overwritten.
-  function writeStyleFile(style) {
+  // keepExisting (a move at start-up): when the style's own file is there but the listing missed it, that file is
+  // kept as it is, so a second start doesn't add a "<name> 2.json" copy.
+  function writeStyleFile(style, keepExisting) {
     var known = readStyleFiles().paths[style.name.toLowerCase()], path = known;
     if (!path) {
-      var dir = stylesDir(), base = GeoStyleFiles.fileName(style.name).replace(/\.json$/, ""), n = 1;
+      var key = style.name.toLowerCase(), dir = stylesDir(), base = GeoStyleFiles.fileName(style.name).replace(/\.json$/, ""), n = 1;
       ensureDir(dir);
       path = dir + "/" + base + ".json";
-      while (api.filePathExists(path)) { n++; path = dir + "/" + base + " " + n + ".json"; }
+      while (api.filePathExists(path)) {
+        var held = GeoStyleFiles.fromText(readText(path));
+        if (held && held.name.toLowerCase() === key) { // the listing missed this style's own file
+          if (keepExisting) return path;
+          break;
+        }
+        n++;
+        path = dir + "/" + base + " " + n + ".json";
+      }
     }
     api.writeToFile(path, GeoStyleFiles.toText(style), true);
     // A write that leaves no file (a folder Cavalry refuses to write to) is an error, so the style isn't dropped.
@@ -435,7 +445,7 @@ var GeoNet = (function () {
     var listed = readStyleFiles().paths;
     plan.forEach(function (style) {
       if (listed[style.name.toLowerCase()]) return;
-      try { writeStyleFile(style); } catch (e) { /* stays in settings.json, checked below */ }
+      try { writeStyleFile(style, true); } catch (e) { /* stays in settings.json, checked below */ }
     });
     var there = readStyleFiles().paths;
     var keep = plan.filter(function (style) { return !there[style.name.toLowerCase()]; });
