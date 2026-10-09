@@ -1699,6 +1699,8 @@ var imagerySettings = GeoNet.loadSettings();
 var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1000;
 var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false, map: null };
 var sourcePicker = new ui.DropDown();
+// Says what the picked source still needs from Settings (a key, a token or a link); blank when nothing is missing.
+var keyHint = new ui.Label("");
 GeoSources.list().forEach(function (s) { sourcePicker.addEntry(s.label); });
 var licenceLabel = GeoStyle.note("");
 var maptilerKeyField = new ui.LineEdit(); maptilerKeyField.setPlaceholder("MapTiler key (free at maptiler.com)");
@@ -1732,6 +1734,11 @@ function sourceOptions(src) {
     customAttribution: customAttrField.getText().trim()
   };
 }
+function refreshKeyHint() {
+  var src = currentSource(), miss = GeoSources.missingSetting(src, sourceOptions(src));
+  keyHint.setText(miss || "");
+  if (typeof keyHint.setHidden === "function") keyHint.setHidden(!miss);
+}
 function resetImageryPlan() { imageryState.plan = null; buildImageryBtn.setText("Build imagery"); disarmClearTiles(); }
 // "Clear imagery tiles" sits just below Cancel; in Cavalry a mid-build Cancel click once
 // landed on it and deleted every tile, so it needs a confirming second press.
@@ -1753,6 +1760,7 @@ var refreshingSource = false;
 function refreshSourceUi() {
   var src = currentSource();
   licenceLabel.setText(src.licence);
+  refreshKeyHint();
   refreshingSource = true;
   try {
     stylePicker.clear();
@@ -1799,7 +1807,7 @@ function runImageryTimer(intervalMs, tick) {
 }
 // The keys, token, style, link and credit boxes are saved when you leave them, not only by Build imagery.
 [maptilerKeyField, mapboxKeyField, styleField, customUrlField, customAttrField].forEach(function (f) {
-  f.onValueCommitted = guard(function () { saveImagerySettings(); });
+  f.onValueCommitted = guard(function () { saveImagerySettings(); refreshKeyHint(); });
 });
 refreshSourceUi();
 sourcePicker.onValueChanged = guard(function () { refreshSourceUi(); });
@@ -2106,6 +2114,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.panel([
       GeoStyle.heading("Source"),
       sourcePicker,
+      keyHint,
       licenceLabel
     ]),
     GeoStyle.panel([

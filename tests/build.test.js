@@ -4064,7 +4064,7 @@ test("Imagery tab: missing and rejected keys", () => {
   createWorldMap(context);
   context.sourcePicker.setValue(2); // MapTiler
   context.buildImageryBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Paste your MapTiler key first/);
+  assert.equal(context.statusLabel.getText(), "Error: Needs a MapTiler key: set it in \u2699 Settings.");
   context.maptilerKeyField.setText("bad");
   fakeTileDownloads(context, api, 403);
   context.buildImageryBtn.onClick();
@@ -4072,6 +4072,46 @@ test("Imagery tab: missing and rejected keys", () => {
   runTimers(api);
   assert.equal(context.statusLabel.getText(), "MapTiler rejected your key — check it in \u2699 Settings.");
   assert.equal(context.buildImageryBtn.getText(), "Build imagery");
+});
+
+test("Imagery tab: the key hint sits under the source picker and clears once the key or link is set", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const imagery = context.sectionPages.pages[2];
+  assert.ok(holds(imagery, context.keyHint), "on the Imagery tab");
+  assert.equal(context.keyHint.getText(), "");
+  assert.ok(context.keyHint.isHidden(), "EOX needs nothing");
+  context.sourcePicker.setValue(2); // MapTiler, no key yet
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a MapTiler key: set it in \u2699 Settings.");
+  assert.ok(!context.keyHint.isHidden());
+  context.maptilerKeyField.setText("K1");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(context.keyHint.getText(), "");
+  assert.ok(context.keyHint.isHidden());
+  context.sourcePicker.setValue(3); // Mapbox
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a Mapbox token: set it in \u2699 Settings.");
+  context.mapboxKeyField.setText("T1");
+  context.mapboxKeyField.onValueCommitted();
+  assert.ok(context.keyHint.isHidden());
+  context.sourcePicker.setValue(4); // Custom tile link
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a custom tile link: set it in \u2699 Settings.");
+  context.customUrlField.setText("https://t.example/{z}/{x}/{y}.png");
+  context.customUrlField.onValueCommitted();
+  assert.ok(context.keyHint.isHidden());
+});
+
+test("Imagery tab: without setHidden on Label, the key hint is blank when there is nothing to say", () => {
+  const { context, ui } = buildSandbox();
+  delete ui.Label.prototype.setHidden;
+  context.sourcePicker.setValue(2);
+  context.sourcePicker.onValueChanged();
+  assert.equal(context.keyHint.getText(), "Needs a MapTiler key: set it in \u2699 Settings.");
+  context.maptilerKeyField.setText("K1");
+  context.maptilerKeyField.onValueCommitted();
+  assert.equal(context.keyHint.getText(), "");
 });
 
 // ---- Update check -------------------------------------------------------------------
@@ -14867,6 +14907,9 @@ test("Reset remembered choices: Yes asks the exact question, sets the pickers to
   assert.equal(context.easingPicker.getValue(), 2, "remembered easing shows");
   assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
   assert.equal(context.pickedStyle().name, "Mono");
+  context.maptilerKeyField.setText(""); // MapTiler with no key: the hint is showing
+  context.sourcePicker.onValueChanged();
+  assert.ok(!context.keyHint.isHidden(), "hint shows before the reset");
   const asked = withModal(ui, true);
   context.resetChoicesBtn.onClick();
   assert.equal(asked.length, 1);
@@ -14877,6 +14920,8 @@ test("Reset remembered choices: Yes asks the exact question, sets the pickers to
   assert.equal(context.driftPicker.getValue(), 0);
   assert.equal(context.routeShapePicker.getValue(), 0);
   assert.equal(context.sourcePicker.getValue(), 0, "imagery source back to the first");
+  assert.ok(context.keyHint.isHidden(), "EOX needs no key, so the hint is hidden after the reset");
+  assert.equal(context.keyHint.getText(), "");
   assert.equal(context.pickedStyle().name, "Dark");
   const s = settingsOf(api);
   sixKeysGone(s);
