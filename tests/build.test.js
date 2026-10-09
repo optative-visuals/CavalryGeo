@@ -581,7 +581,7 @@ test("buildPanel() runs against stub ui/api: a five-section tab bar above a page
   assert.equal(pages.pageCount(), 5);
   assert.equal(pages.currentPage(), 0);
   assert.equal(context.sectionTabs.selected(), "Map");
-  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips lives on the Map tab).
+  // Tab bar, the shown page only as tall as itself, a stretch, then the status line at the bottom (Tips is in the settings' Preferences).
   assert.equal(root._items.length, 3);
   assert.deepEqual(root._items[0]._items, [context.sectionTabs.widget, context.cogBtn], "the cog sits right of the tab bar");
   assert.deepEqual(root._items.slice(1), [pages.widget, context.statusLabel]);
@@ -14819,7 +14819,7 @@ function labelTextsIn(ui, node) { const out = []; walkUi(node, (n) => { if (n in
 function nonDefaultChoices(context) {
   const mt = context.GeoSources.list().find((s) => s.key === "maptiler");
   return { flyEasing: context.GeoFly.EASINGS[2].id, flyArc: context.GeoFly.ARCS[0].id, driftMove: context.GeoFly.DRIFTS[1].id,
-    routeShape: 1, source: mt.id, mapStyle: "Mono", maptilerKey: "kept-key", showTips: false, checkForUpdates: false };
+    routeShape: 1, source: mt.id, mapStyle: "Mono", maptilerKey: "kept-key", mapboxKey: "kept", showTips: false, checkForUpdates: false };
 }
 function sixKeysGone(s) { SIX_KEYS.forEach((k) => assert.ok(!(k in s), k + " was removed")); }
 // Builds a panel that remembers nonDefaultChoices(); the pickers show them before a reset.
@@ -14828,16 +14828,16 @@ function withChoices() {
   return buildSandbox({ setup: (a) => { a._files[SETTINGS_FILE] = JSON.stringify(choices); } });
 }
 
-test("Preferences: Check for updates is ticked unless settings say false, and changing it writes checkForUpdates", () => {
-  const { context, api, ui } = buildSandbox();
+test("Preferences: Check for updates is ticked unless settings say false, and clicking it writes checkForUpdates", () => {
+  const { context, api } = buildSandbox();
   assert.equal(context.updateCheck.getValue(), true, "on for a first run");
-  assert.ok(holds(prefsPanel(context), context.updateCheck));
-  assert.ok(labelTextsIn(ui, prefsPanel(context)).includes("Check for updates"));
-  context.updateCheck.setValue(false);
-  context.updateCheck.onValueChanged();
+  assert.ok(holds(prefsPanel(context), context.updateCheck.widget));
+  assert.ok(context.updateCheck.widget.getText().indexOf("Check for updates") >= 0);
+  context.updateCheck.widget.onClick();
+  assert.equal(context.updateCheck.getValue(), false);
   assert.equal(settingsOf(api).checkForUpdates, false);
-  context.updateCheck.setValue(true);
-  context.updateCheck.onValueChanged();
+  context.updateCheck.widget.onClick();
+  assert.equal(context.updateCheck.getValue(), true);
   assert.equal(settingsOf(api).checkForUpdates, true);
 });
 
@@ -14845,8 +14845,7 @@ test("Preferences: with Check for updates off the next open asks GitHub nothing"
   const first = openForUpdate();
   assert.equal(first.curl.calls.length, 1);
   assert.equal(first.context.updateCheck.getValue(), true);
-  first.context.updateCheck.setValue(false);
-  first.context.updateCheck.onValueChanged();
+  first.context.updateCheck.widget.onClick();
   const again = openForUpdate(readSettings(first.api));
   assert.equal(again.context.updateCheck.getValue(), false, "the box shows the saved choice");
   assert.equal(again.curl.calls.length, 0);
@@ -14882,6 +14881,7 @@ test("Reset remembered choices: Yes asks the exact question, sets the pickers to
   const s = settingsOf(api);
   sixKeysGone(s);
   assert.equal(s.maptilerKey, "kept-key");
+  assert.equal(s.mapboxKey, "kept");
   assert.equal(s.showTips, false);
   assert.equal(s.checkForUpdates, false);
   assert.equal(context.statusLabel.getText(), "Remembered choices reset to their defaults.");
@@ -14915,11 +14915,26 @@ test("Reset remembered choices without a dialog: the first press asks to confirm
   const { context, api } = withChoices();
   context.resetChoicesBtn.onClick();
   assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
+  assert.match(context.statusLabel.getText(), /Press "Confirm: reset choices" to reset\./);
   assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing, "nothing yet");
   context.resetChoicesBtn.onClick();
   assert.equal(context.resetChoicesBtn.getText(), "Reset remembered choices");
+  assert.equal(context.statusLabel.getText(), "Remembered choices reset to their defaults.");
   sixKeysGone(settingsOf(api));
   assert.equal(settingsOf(api).maptilerKey, "kept-key");
+  assert.equal(settingsOf(api).mapboxKey, "kept");
+});
+
+test("Reset remembered choices without a dialog: pressing the cog disarms the pending confirm", () => {
+  const { context, api } = withChoices();
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
+  context.cogBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Reset remembered choices");
+  context.resetChoicesBtn.onClick();
+  assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices", "the next press starts over");
+  assert.equal(settingsOf(api).flyEasing, nonDefaultChoices(context).flyEasing, "nothing was reset");
 });
 
 test("About: the version line reads Cavalry Geo v and GEO_VERSION; Get updates opens the releases page", () => {
@@ -14930,6 +14945,7 @@ test("About: the version line reads Cavalry Geo v and GEO_VERSION; Get updates o
   assert.equal(context.getUpdatesBtn.getText(), "Get updates…");
   context.getUpdatesBtn.onClick();
   assert.deepEqual(plain(calls), [{ cmd: "explorer", args: [RELEASES] }]);
+  assert.equal(context.statusLabel.getText(), "Opened the Cavalry Geo download page.");
 });
 
 test("About: without runDetachedProcess Get updates says where the download page is", () => {

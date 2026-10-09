@@ -2142,10 +2142,10 @@ exportStyleBtn.onClick = guardAction(function () {
 });
 // Preferences: the update check's switch, the tips button (moved here from the Map tab), and the reset of the
 // remembered choices. About: the version and the download link.
-var updateCheck = new ui.Checkbox((function () {
+var updateCheck = GeoStyle.toggle("Check for updates", (function () {
   try { return (GeoNet.loadSettings() || {}).checkForUpdates !== false; } catch (e) { return true; }
 })());
-updateCheck.onValueChanged = guard(function () { GeoNet.updateSettings({ checkForUpdates: updateCheck.getValue() ? true : false }); });
+updateCheck.onValueChanged = function (on) { guard(function () { GeoNet.updateSettings({ checkForUpdates: on ? true : false }); })(); };
 tipsBtn.setText("Show tips again");
 var resetChoicesBtn = GeoStyle.quietButton("Reset remembered choices");
 // Like Clear imagery tiles: without a dialog the first press asks, and a second press resets.
@@ -2209,7 +2209,7 @@ var settingsColumn = column([
   ]),
   GeoStyle.panel([
     GeoStyle.heading("Preferences"),
-    row(updateCheck, new ui.Label("Check for updates")),
+    updateCheck.widget,
     tipsBtn,
     resetChoicesBtn
   ]),
@@ -2241,6 +2241,7 @@ function toggleSettingsPage() {
 }
 // Opening the settings first re-reads the style files, so a style dropped into the folder is listed.
 function openSettings() {
+  disarmResetChoices();
   reloadStyleFiles(true);
   GeoCog.open(settingsContainer, cogBtn, toggleSettingsPage);
 }
