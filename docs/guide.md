@@ -392,7 +392,7 @@ in five groups:
 - **Map styles** — **Open styles folder** and **Export style…**, described under [Styles](#styles).
 - **Storage** — **Clear download cache** deletes downloaded map data and shows how much space was freed. It
   keeps imagery (built imagery points at those files) and can't be used while imagery is downloading or
-  building. **Clear imagery tiles** deletes the downloaded imagery. Both ask you to press again to confirm.
+  building. **Clear imagery tiles** deletes the downloaded imagery; it asks you to press again to confirm, while **Clear download cache** clears at once.
 - **Preferences** — **Check for updates**, a switch that is on by default. Once a day, opening the panel asks
   GitHub (in the background) whether a newer version is out. If one is, the status line and Cavalry's console
   say so, with the download link, each time the panel opens until you update. Switch it off here, and it stays

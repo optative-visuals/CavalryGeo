@@ -6151,6 +6151,104 @@ test("Folder listings with backslash paths read the same files", () => {
   assert.equal(context.GeoNet.readStyleFiles().paths.ocean, STYLES_DIR + "/Ocean.json");
 });
 
+test("Style files: a folder listing of bare file names still loads the styles, and the move completes", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }] });
+    a._files[STYLES_DIR + "/Sand.json"] = styleText("Sand", "#aaaaaa");
+    const list = a.listDirectory;
+    a.listDirectory = (p) => list(p).map((f) => f.slice(p.length + 1));
+  } });
+  assert.ok(context.mapStylePicker._entries.includes("Sand"), "a file listed by its bare name still loads");
+  assert.equal(context.GeoNet.readStyleFiles().paths.sand, STYLES_DIR + "/Sand.json");
+  assert.deepEqual(styleFilesOf(api), ["Ocean.json", "Sand.json"]);
+  assert.ok(!("mapStyles" in settingsOf(api)), "the move completed");
+});
+
+test("Style files: when the folder shows nothing after the writes, settings.json keeps every style", () => {
+  let wrote = false;
+  const { context, api } = buildSandbox({ setup: (a) => {
+    const real = a.writeToFile, list = a.listDirectory;
+    a.writeToFile = (p, c, o) => { wrote = true; return real(p, c, o); };
+    a.listDirectory = (p) => (wrote ? [] : list(p));
+    a._files[SETTINGS_FILE] = JSON.stringify({ mapStyles: [{ name: "Ocean" }, { name: "Sand" }] });
+  } });
+  assert.deepEqual(settingsOf(api).mapStyles.map((s) => s.name), ["Ocean", "Sand"], "nothing was lost");
+  assert.ok(context.mapStylePicker._entries.includes("Sand"), "still listed from settings.json");
+});
+
+test("Style files: listDirectoryPaths is used when present, and listDirectory is not called", () => {
+  const pathCalls = [];
+  let bareCalls = 0;
+  const { context } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    a.listDirectoryPaths = (p) => { pathCalls.push(p); return [STYLES_DIR + "/Ocean.json"]; };
+    a.listDirectory = () => { bareCalls++; return []; };
+  } });
+  assert.ok(pathCalls.length > 0, "the folder was listed with listDirectoryPaths");
+  assert.equal(bareCalls, 0, "listDirectory was not used");
+  assert.equal(context.GeoNet.readStyleFiles().paths.ocean, STYLES_DIR + "/Ocean.json");
+  assert.ok(context.mapStylePicker._entries.includes("Ocean"));
+  const only = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/Ocean.json"] = styleText("Ocean", "#0a0b0c");
+    a.listDirectoryPaths = () => [STYLES_DIR + "/Ocean.json"];
+    delete a.listDirectory;
+  } });
+  assert.equal(only.context.GeoNet.filesSupported(), true, "listDirectoryPaths alone is enough");
+  assert.ok(only.context.mapStylePicker._entries.includes("Ocean"));
+});
+
+test("Delete style removes every file that holds the style, not just the first", () => {
+  const { context, api } = buildSandbox({ setup: (a) => {
+    a._files[STYLES_DIR + "/a.json"] = styleText("Ocean", "#0a0b0c");
+    a._files[STYLES_DIR + "/b.json"] = styleText("ocean", "#0a0b0c");
+    a._files[STYLES_DIR + "/c.json"] = styleText("Sand", "#aaaaaa");
+    a.deleteFilePath = (p) => { delete a._files[p]; };
+  } });
+  pickStyle(context, "Ocean");
+  context.deleteStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Deleted style \"Ocean\".");
+  assert.deepEqual(styleFilesOf(api), ["c.json"]);
+  context.reloadStyleFiles(true);
+  assert.ok(!context.mapStylePicker._entries.includes("Ocean"), "gone after a reload");
+  assert.ok(context.mapStylePicker._entries.includes("Sand"));
+});
+
+test("Reloading when the picked style's file has gone previews the Dark fallback", () => {
+  const { context, api } = buildSandbox({ setup: (a) => { a._files[STYLES_DIR + "/Mine.json"] = styleText("Mine", "#010203"); } });
+  pickStyle(context, "Mine");
+  delete api._files[STYLES_DIR + "/Mine.json"];
+  let previews = 0;
+  const real = context.previewStyle;
+  context.previewStyle = () => { previews++; real(); };
+  context.reloadStyleFiles(true);
+  assert.equal(context.mapStylePicker.getValue(), 0, "Dark is picked");
+  assert.equal(previews, 1, "the preview follows the fallback");
+  context.reloadStyleFiles(true);
+  assert.equal(previews, 1, "nothing changed on the next reload, so no new preview");
+});
+
+test("A skipped file whose name holds < shows it with ‹ in the status line", () => {
+  const { context, api } = buildSandbox();
+  api._files[STYLES_DIR + "/a<b.json"] = "{}";
+  context.refreshMapsBtn.onClick();
+  assert.match(context.statusLabel.getText(), /Skipped Map styles\/a‹b\.json: not a Cavalry Geo style\./);
+  assert.doesNotMatch(context.statusLabel.getText(), /</);
+});
+
+test("Settings cog: opening it disarms a pending Clear imagery tiles confirm", () => {
+  const { context } = buildSandbox();
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  let cleared = 0;
+  context.GeoNet.clearTiles = () => { cleared++; return { files: 0, bytes: 0, fallback: false }; };
+  context.clearTilesBtn.onClick();
+  assert.equal(context.clearTilesBtn.getText(), "Confirm: clear imagery tiles");
+  context.cogBtn.onClick();
+  assert.equal(context.clearTilesBtn.getText(), "Clear imagery tiles");
+  context.clearTilesBtn.onClick();
+  assert.equal(cleared, 0, "the press after the cog only asks again");
+  assert.equal(context.clearTilesBtn.getText(), "Confirm: clear imagery tiles");
+});
+
 test("Delete says so when the style's file is still there afterwards", () => {
   const { context, api } = buildSandbox({ setup: (a) => {
     a._files[STYLES_DIR + "/Mine.json"] = styleText("Mine", "#010203");
@@ -14775,7 +14873,8 @@ test("Export style writes the picked style as a JSON file, adding .json when mis
   ui.chooseFileToSave = function (dir, filter) { asked.push([dir, filter]); return real.call(this, dir, filter); };
   ui._saveAnswer = "C:/out/Ocean";
   context.exportStyleBtn.onClick();
-  assert.deepEqual(plain(asked), [[STYLES_DIR, "JSON (*.json)"]]);
+  // The dialog starts in the CavalryGeo folder beside settings.json, not in the Map styles folder.
+  assert.deepEqual(plain(asked), [["C:/fake/AppData/CavalryGeo", "JSON (*.json)"]]);
   assert.equal(context.statusLabel.getText(), "Exported \"Ocean\" to C:/out/Ocean.json.");
   const text = api._files["C:/out/Ocean.json"];
   assert.equal(context.GeoStyleFiles.fromText(text).name, "Ocean");

@@ -245,7 +245,7 @@ function fileNameOf(path) { return String(path).replace(/\\/g, "/").split("/").p
 // moved) unless a file of that name exists. Keeps the picked name. Returns the note for the skipped files not
 // reported yet ("" when there are none). A quiet reload (start-up) reports nothing and leaves the notes for Refresh.
 function reloadStyleFiles(quiet) {
-  var r;
+  var r, before = pickedStyle().name;
   try { r = GeoNet.readStyleFiles(); } catch (e) { r = GeoStyleFiles.readAll([]); }
   savedStyles = r.styles.slice();
   var listed = {};
@@ -256,14 +256,17 @@ function reloadStyleFiles(quiet) {
     if (listed[st.name.toLowerCase()]) return;
     savedStyles.push(st); listed[st.name.toLowerCase()] = true;
   });
-  refreshStylePicker(pickedStyle().name);
+  refreshStylePicker(before);
+  // The picked style's file was deleted or moved away: the picker fell back to Dark, so the preview follows it.
+  if (pickedStyle().name !== before) { try { previewStyle(); } catch (e) { /* the preview is a courtesy */ } }
   if (quiet) return "";
   var fresh = r.skipped.filter(function (p) { return !reportedSkips[p]; });
   if (!fresh.length) return "";
   fresh.forEach(function (p) { reportedSkips[p] = true; });
   var first = fresh[0];
   var why = r.reasons[first] === "duplicate" ? "\"" + r.names[first] + "\" is already saved." : "not a Cavalry Geo style.";
-  return "Skipped Map styles/" + fileNameOf(first) + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
+  // The file name is shown in the status line, which reads "<" as markup: a file named a<b.json shows as a‹b.json.
+  return "Skipped Map styles/" + fileNameOf(first).replace(/</g, "‹") + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
 }
 (function () {
   var s = {};
@@ -2140,8 +2143,10 @@ openStylesBtn.onClick = guardAction(function () {
 });
 exportStyleBtn.onClick = guardAction(function () {
   if (typeof ui.chooseFileToSave !== "function") throw new Error("This Cavalry has no save dialog: copy the file from the Map styles folder instead.");
-  GeoNet.ensureDir(GeoNet.stylesDir());
-  var p = String(ui.chooseFileToSave(GeoNet.stylesDir(), "JSON (*.json)") || "");
+  // The dialog starts in the CavalryGeo folder (beside settings.json), not in the Map styles folder.
+  var start = typeof GeoNet.settingsDir === "function" ? GeoNet.settingsDir() : "";
+  if (start) GeoNet.ensureDir(start);
+  var p = String(ui.chooseFileToSave(start, "JSON (*.json)") || "");
   if (!p) { say("Nothing was exported."); return; }
   if (!/\.json$/i.test(p)) p += ".json";
   var style = pickedStyle();
@@ -2251,6 +2256,7 @@ function toggleSettingsPage() {
 // Opening the settings first re-reads the style files, so a style dropped into the folder is listed.
 function openSettings() {
   disarmResetChoices();
+  disarmClearTiles();
   reloadStyleFiles(true);
   GeoCog.open(settingsContainer, cogBtn, toggleSettingsPage);
 }

@@ -24,7 +24,7 @@ var GeoTips = (function () {
     "map.stylePicker": "The colour style for the next map you make, and the one Apply to map uses.",
     "map.applyStyle": "Recolours the picked map in this style. Colours you animated or connected are left alone.",
     "map.styleName": "A name for saving the picked map's colours as your own style.",
-    "map.saveStyle": "Saves the picked map's current colours under this name, in settings.json, so other maps can use them.",
+    "map.saveStyle": "Saves the picked map's current colours under this name, as a file in the Map styles folder, so other maps can use them.",
     "map.deleteStyle": "Deletes the saved style picked in the list. Built-in styles can't be deleted.",
     "map.tipsGotIt": "Hides the Start here steps. Show tips again (⚙ Settings, Preferences) brings them back.",
     "map.tips": "Shows the Start here steps on the Map tab again, and keeps them shown until Got it.",
