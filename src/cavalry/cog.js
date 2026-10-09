@@ -1,13 +1,13 @@
 // The settings cog: a small button beside the tab bar that opens the settings. Panel-only: uses `ui`, `api`
 // and GeoAttrs / GeoStyle.
 var GeoCog = (function () {
-  var COG_WIDTH = 28;
+  var COG_WIDTH = 22;
   var ICON = "/icons/cog.png";
   // The cog button: its icon when the icon file is there (and Button.setImage exists), else a gear character.
   function button(onClick) {
     var b = new ui.Button("");
-    // Cavalry left-aligns a button's image, leaving room for text, so the icon file carries 3 px of transparent space either side to sit centred in the 28 px button.
-    if (typeof b.setImageSize === "function") b.setImageSize(22, 16);
+    // Cavalry left-aligns a button's image 2 px in, so the button is just wide enough for the 16 px icon to sit centred.
+    if (typeof b.setImageSize === "function") b.setImageSize(16, 16);
     var icon = GeoAttrs.ASSETS_DIR() + ICON;
     if (typeof b.setImage === "function" && api.filePathExists(icon)) b.setImage(icon);
     else b.setText("⚙");

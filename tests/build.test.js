@@ -6257,7 +6257,7 @@ test("A skipped file whose name holds < shows it with ‹ in the status line", (
 
 test("Settings cog: opening it disarms a pending Clear imagery tiles confirm", () => {
   const { context } = buildSandbox();
-  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
   let cleared = 0;
   context.GeoNet.clearTiles = () => { cleared++; return { files: 0, bytes: 0, fallback: false }; };
   context.clearTilesBtn.onClick();
@@ -14794,9 +14794,9 @@ test("The cog sits right of the tab bar and opens the settings popover under its
   const first = ui._root()._items[0];
   assert.ok(first instanceof ui.HLayout, "the tab bar's row");
   assert.deepEqual(first._items, [context.sectionTabs.widget, context.cogBtn]);
-  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
   context.cogBtn.onClick();
-  assert.deepEqual(plain(context.settingsContainer._popoverAt), [14, 24]);
+  assert.deepEqual(plain(context.settingsContainer._popoverAt), [11, 24]);
   const box = context.settingsContainer;
   context.cogBtn.onClick();
   assert.equal(context.settingsContainer, box, "the same container is reused");
@@ -14828,15 +14828,15 @@ test("GeoCog.open: without a popover it calls the fallback, and with neither it 
   assert.throws(() => context.GeoCog.open(null, context.cogBtn), { message: "This Cavalry can't show the settings window." });
 });
 
-test("The cog button is 28 wide and 24 tall; it shows the cog icon when the file is there, else a gear", () => {
+test("The cog button is 22 wide and 24 tall; it shows the cog icon when the file is there, else a gear", () => {
   const withIcon = buildSandbox({ setup: (a) => { a._files[ICONS + "cog.png"] = "<png>"; } }).context.cogBtn;
   assert.equal(withIcon._image, ICONS + "cog.png");
-  assert.deepEqual(plain(withIcon._imageSize), [22, 16]);
+  assert.deepEqual(plain(withIcon._imageSize), [16, 16]);
   assert.equal(withIcon.getText(), "");
   const plainCog = buildSandbox().context.cogBtn;
   assert.equal(plainCog._image, undefined);
   assert.equal(plainCog.getText(), "\u2699");
-  [withIcon, plainCog].forEach((b) => { assert.equal(b._fixedWidth, 28); assert.equal(b._fixedHeight, 24); });
+  [withIcon, plainCog].forEach((b) => { assert.equal(b._fixedWidth, 22); assert.equal(b._fixedHeight, 24); });
 });
 
 test("Keys and cache buttons moved: Settings holds them; Imagery, Layers and Map don't", () => {
@@ -14949,9 +14949,9 @@ test("Map tab: the previews run from the tab bar's left edge to the cog's right 
   const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
   vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
   context.sectionTabs.widget.geometry = () => ({ x: 0, y: 0, width: 470, height: 24 });
-  context.cogBtn.geometry = () => ({ x: 472, y: 0, width: 28, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 472, y: 0, width: 22, height: 24 });
   ui.onResize();
-  assert.equal(plain(context.preview._draw._size)[0], 500);
+  assert.equal(plain(context.preview._draw._size)[0], 494);
 });
 
 test("Export style: a file that doesn't appear after the write is an error, not \"Exported\"", () => {
@@ -15091,7 +15091,7 @@ test("Reset remembered choices without a dialog: the first press asks to confirm
 
 test("Reset remembered choices without a dialog: pressing the cog disarms the pending confirm", () => {
   const { context, api } = withChoices();
-  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 28, height: 24 });
+  context.cogBtn.geometry = () => ({ x: 0, y: 0, width: 22, height: 24 });
   context.resetChoicesBtn.onClick();
   assert.equal(context.resetChoicesBtn.getText(), "Confirm: reset choices");
   context.cogBtn.onClick();
