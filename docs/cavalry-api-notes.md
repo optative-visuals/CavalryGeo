@@ -87,3 +87,16 @@ Confirmed for the Night filter (Day & night probe, run inside Cavalry):
 - **A filter paints over a plain rectangle**: a third-party filter on a plain rectangle layer reads the rectangle's fill colour from its input image and draws over it, so the Night layer needs no script or composition.
 - **Filter coordinates**: a filter's coordinates are centred on the layer, with +y up.
 - **Track mattes use filtered output**: a track matte takes the matte layer's filtered result, also while Cavalry auto-hides the matte layer (the matte source is unhidden after connecting, as before).
+
+Confirmed for the panel (settings cog and canvas catch-up, 2026-10-10):
+
+- **The panel `ui` module** is only available to Scripts-menu scripts; the JavaScript Editor (and the MCP connector) only has `ui.Modal`, which has showMessage, showQuestion, showConfirmation, showWarning, showIntInput and showStringInput and can't hold widgets.
+- **Application callbacks** (`ui.addCallbackObject`): onCompChanged, onSceneChanged, onSelectionChanged, onAttrChanged, onAttrConnected, onAttrDisconnected, onLayerAdded, onLayerRemoved, onAssetAdded / Updated / Removed / AsyncLoadFinished, onAttributeSelectionChanged, onPointSelectionChanged, onKeySelectionChanged, onJSError, onAppStateChanged, onToolChanged, onLicenceUpdated, onCavalryPreferenceChanged. There is no callback for the playhead moving, and no keyboard-shortcut API. `ui.Container` and `ui.Draw` get onMousePress / onMouseRelease (the panel catches up with the canvas on any press inside it).
+- **Popovers**: `Container.showAsPopover(x, y)` takes exactly two numbers; `(g.x + g.width / 2, g.y + g.height)` from `button.geometry()` opens it centred under the button. `setPreferredPopoverSide(n)`: 3 below (default), 2 above, 1 right, 0 left (strings are ignored). The popover grows to fit its contents; its corner icon tears it off into a floating window.
+- **Button images**: `Button.setImage(png)` with `setImageSize(16, 16)` works; Cavalry left-aligns the image 2 px in, so size the button to the icon to centre it. A padded, wider image is shrunk, so don't pad.
+- **Opening folders and links**: `api.runDetachedProcess("explorer", [path with backslashes])` opens a folder (spaces are fine) or a URL with no console flash; macOS uses `open`.
+- **Save dialog**: `ui.chooseFileToSave(startPath, "JSON (*.json)")` returns the chosen path, or "" on cancel; it can't pre-fill a file name.
+- **Plugin icons**: an 18×18 PNG plus an `@2x` 36×36, named in the filter's `"UI": { "icon": … }` in `definitions.json`; optional Attribute Editor icons are 16×16 / 32×32 with `_ae` / `_ae@2x`.
+- **Track-matte sources are auto-hidden**: connecting a layer into another layer's `trackMattes` sets the source layer's hidden to true; setting it back to false sticks and the matte keeps working. Several track mattes on one layer combine; a group ignores track mattes, a composition reference honours them.
+- **A deleted driver bakes its last value**: when the layer driving an attribute is deleted, the attribute keeps the last driven value rather than its stored one.
+- Unverified: whether `api.listDirectory` returns full paths or bare names (the style-file code copes with both and prefers `listDirectoryPaths`).

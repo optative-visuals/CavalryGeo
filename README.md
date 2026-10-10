@@ -18,7 +18,8 @@ layers you can style, keyframe and render.
 
 ### World and street maps
 Countries, coastlines, rivers and cities from Natural Earth, or buildings, roads, water and parks
-from OpenStreetMap — on a flat map, a spinning globe, or zoomed into a street.
+from OpenStreetMap — on a flat map, a spinning globe, or zoomed into a street. The flat map
+wraps past the date line, so a flight across the Pacific never runs off the edge of the world.
 
 ![A world map styled in Cavalry: countries, coastlines and cities](docs/images/maps.jpg)
 
@@ -45,11 +46,13 @@ then animate them through the years.
 A **Controls** layer for every map that gathers its camera, colours, layers, routes and data
 settings in one place, a map preview in the panel to find and frame a place before the camera
 moves, pins, labels and **callouts** (a boxed label with a line to its place) for places,
-a **Day & night** overlay that shades the night side for any date and time (over satellite
-imagery, with NASA's city lights on the night side; it needs the Cavalry Geo plugin),
+a **Day & night** overlay that shades the night side for any date and time with a smooth,
+real twilight drawn on the GPU (over satellite imagery, with NASA's city lights on the night side;
+it needs the Cavalry Geo plugin),
 **Extract** to pull one country or street into its own layer, **Highlights** (Fill in, Outline
 draw-on, Pulse and Glow on any extracted place), and **Bake** to turn any map layer into a plain
-editable shape. The panel tells you when a new version is out.
+editable shape. The **⚙ Settings** button keeps your keys, saved map styles, storage and
+preferences in one place, and the panel tells you when a new version is out (you can switch that off).
 
 ## Install
 
