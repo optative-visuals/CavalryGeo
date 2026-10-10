@@ -53,6 +53,16 @@ var GeoStyle = (function () {
     return h;
   }
 
+  // A press on a panel's background (a box, a page or the tab bar) calls the hook the app sets with
+  // onBackgroundPress. Read at press time, so the hook can be set after the widgets are made.
+  var pressHook = null;
+  function onBackgroundPress(fn) { pressHook = typeof fn === "function" ? fn : null; }
+  function pressable(box) {
+    if (box && typeof box === "object") {
+      try { box.onMousePress = function () { if (pressHook) pressHook(); }; } catch (e) { /* older Cavalry: no background presses */ }
+    }
+    return box;
+  }
   var panels = []; // what panel() made (the Container, or the plain VLayout on an older Cavalry)
   function isPanel(x) { return panels.indexOf(x) >= 0; }
   // One shaded, rounded block holding items 4 px apart, with 8 px more before a heading that
@@ -67,7 +77,7 @@ var GeoStyle = (function () {
     });
     var out = v;
     if (hasContainer()) {
-      out = new ui.Container();
+      out = pressable(new ui.Container());
       out.setLayout(v);
       out.setBackgroundColor(PANEL_BACKGROUND);
       maybe(out, "setBorder", PANEL_BORDER, 1);
@@ -181,7 +191,7 @@ var GeoStyle = (function () {
       maybe(view, "setMargins", 0, 0, 0, 0);
       var boxes = [];
       stack.add = function (layout) {
-        var box = new ui.Container();
+        var box = pressable(new ui.Container());
         if (background) {
           // An 8 px inset keeps the panels off the coloured page's edges.
           var inset = new ui.VLayout();
@@ -241,7 +251,7 @@ var GeoStyle = (function () {
     });
     bar.widget = row;
     if (hasContainer()) {
-      bar.widget = new ui.Container();
+      bar.widget = pressable(new ui.Container());
       bar.widget.setBackgroundColor(color("Shadow"));
       maybe(bar.widget, "setRadius", 6, 6, 6, 6);
       bar.widget.setLayout(row);
@@ -250,6 +260,6 @@ var GeoStyle = (function () {
     return bar;
   }
 
-  return { GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, TAB_HEIGHT: TAB_HEIGHT, PANEL_INSET: PANEL_INSET, hasContainer: hasContainer, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
+  return { onBackgroundPress: onBackgroundPress, GREEN: GREEN, PRIMARY: PRIMARY, HEADING_GREY: HEADING_GREY, HEADING_COLOR: HEADING_COLOR, color: color, LABEL_WIDTH: LABEL_WIDTH, TAB_HEIGHT: TAB_HEIGHT, PANEL_INSET: PANEL_INSET, hasContainer: hasContainer, WINDOW_BACKGROUND: WINDOW_BACKGROUND, PAGE_BACKGROUND: PAGE_BACKGROUND, PAGE_INSET: PAGE_INSET, heading: heading, isHeading: isHeading, panel: panel, isPanel: isPanel, fieldLabel: fieldLabel, tip: tip, note: note, frameField: frameField,
     button: button, primaryButton: primaryButton, quietButton: quietButton, toggle: toggle, toggleGrid: toggleGrid, pageStack: pageStack, tabBar: tabBar };
 })();

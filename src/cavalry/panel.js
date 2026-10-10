@@ -72,6 +72,8 @@ function runAsAction(fn) {
 function guardWork(fn) {
   return function () {
     if (refuseIfBusy()) return;
+    // A commit that starts work catches the panel up first, unless a preview press just did (its click follows at once).
+    if (Date.now() - syncedAt > SYNC_REPEAT_MS) syncToCanvas();
     runAsAction(guard(fn));
   };
 }
@@ -81,6 +83,7 @@ function guardWork(fn) {
 function guardAction(fn, keepSelection, allowNested) {
   return function () {
     if (!allowNested && refuseIfBusy()) return;
+    syncToCanvas(); // a click in the panel catches it up with the canvas first (a refused click does nothing)
     var before = keepSelection ? null : currentSelection();
     var run = function () { try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); } };
     if (allowNested) run(); else runAsAction(run);
@@ -226,8 +229,13 @@ function refreshStylePicker(name) {
   } finally { refreshingStyles = false; }
 }
 function previewStyle() { setPreviewColors(GeoStyles.previewColors(pickedStyle())); }
+// The colours last handed to the previews: the same colours again are not painted again (a click's catch-up).
+var shownPreviewColors = null;
 function setPreviewColors(colors) {
-  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setColors(colors); });
+  var key = JSON.stringify(colors), painted = 0;
+  if (key === shownPreviewColors) return;
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) { p.setColors(colors); painted++; } });
+  if (painted) shownPreviewColors = key; // only once a preview has really been painted with them
 }
 // The previews take the picked map's own colours (ocean, land, borders as they are on the canvas);
 // with "New map" picked, or when they can't be read, the Style picker's colours.
@@ -278,6 +286,7 @@ function reloadStyleFiles(quiet) {
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
   onPick: function (i) { if (i < 0 || i >= results.length) return; resultPicker.setValue(i + 1); previewFollowPicked(); },
+  onPress: syncToCanvas,
   // Hide Create map here as soon as the preview fails (it may fail while the panel is being built).
   onFail: function () { if (preview) refreshNewMapFields(); },
   yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM, redraw: PREVIEW_REDRAW
@@ -310,6 +319,27 @@ function previewShowCurrent() {
   if (newMapSelected()) return;
   var cam = GeoScene.readCamera(currentMap().cameraId);
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
+}
+// A click in the panel, or a press on a preview or the panel's background, catches the panel up with the canvas:
+// the composition (quietly), the picked map's camera as the previews' dashed frame, then the styles, pins, routes
+// and callouts drawn on the canvas. It never moves a preview's view or changes its source (the Jump / Fly target,
+// a dragged view), so a press or a button always works on the view the user sees. Never throws; does nothing while
+// an action runs or an imagery job does.
+var syncedAt = 0, SYNC_REPEAT_MS = 300; // when the last catch-up ran; a commit within this long after a preview press skips it
+function syncToCanvas() {
+  try {
+    if (busy || imageryState.timer || imageryState.job) return;
+    syncedAt = Date.now();
+    followActiveComp(false, true);
+    if (!newMapSelected()) {
+      var cam = GeoScene.readCamera(currentMap().cameraId);
+      [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
+    }
+    previewMapColors();
+    refreshPreviews();
+  } catch (e) {
+    console.log("[CavalryGeo] Catching up with the canvas failed: " + (e && e.message ? e.message : e));
+  }
 }
 
 // "New map" is always the last entry, and the one selected when the scene has no maps.
@@ -1191,7 +1221,7 @@ var calloutCoordBtn = GeoStyle.button("Callout at coordinates");
 // No green frame or dim (those mark the Map tab's Jump / Fly target), no double-click zoom.
 function labelPreview(hint, onClick, onPick) {
   return GeoPreviewPanel.create({
-    compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onFail: function () {},
+    compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onPress: syncToCanvas, onFail: function () {},
     yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, redraw: PREVIEW_REDRAW, hint: hint
   });
 }
@@ -2442,6 +2472,7 @@ function CompFollower() {
 }
 
 function buildUi() {
+  GeoStyle.onBackgroundPress(syncToCanvas); // a press on the panel's background catches the panel up with the canvas
   ui.setTitle("Cavalry Geo");
   if (typeof ui.setBackgroundColor === "function") ui.setBackgroundColor(GeoStyle.WINDOW_BACKGROUND);
   var layouts = {}, extra = [];

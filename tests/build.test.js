@@ -15124,3 +15124,161 @@ test("Start here: the Got it note points to Settings, Preferences instead of a T
   assert.equal(text, "Hides the Start here steps. Show tips again (⚙ Settings, Preferences) brings them back.");
   assert.doesNotMatch(text, /Tips button/);
 });
+
+// Panel catches up with the canvas: a click in the panel re-reads the picked map's camera (and its pins,
+// routes and styles) into the previews. The tests move the camera the way a Controls edit does, by
+// making the camera read return a different zoom.
+function recordCurrentCameras(context) {
+  const got = [];
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => { p.setCurrentCamera = (cam) => got.push(cam); });
+  return got;
+}
+function camerasEditedTo(context, zoom) {
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { zoom: zoom });
+}
+
+test("panel catches up with the canvas: a button click after a camera edit gives every preview the new current camera", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.refreshLayersBtn.onClick();
+  assert.equal(got.length, 3, "the Map, Pins and Routes previews each get it");
+  got.forEach((cam) => assert.equal(cam.zoom, 7));
+  assert.equal(context.statusLabel.getText(), "0 map layer(s) available.", "the button's own message, nothing from the sync");
+});
+
+test("panel catches up with the canvas: a press on the panel's background (a box or a page) syncs the same way", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  const box = panelsOf(context, context.sectionPages.pages[0])[0];
+  assert.equal(typeof box.onMousePress, "function", "a panel box takes background presses");
+  box.onMousePress();
+  assert.equal(got.length, 3);
+  got.forEach((cam) => assert.equal(cam.zoom, 7));
+  const page = context.sectionPages.widget._items[0];
+  assert.equal(typeof page.onMousePress, "function", "a page takes background presses");
+});
+
+test("panel catches up with the canvas: a press on a map preview syncs before the preview handles the press", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.preview._draw.onMousePress({ x: 100, y: 100 }, "left");
+  context.preview._draw.onMouseRelease({ x: 100, y: 100 }, "left");
+  assert.equal(got.length, 3, "the press caught up every preview once");
+  got.forEach((cam) => assert.equal(cam.zoom, 7, "the camera given is the edited one"));
+});
+
+test("panel catches up with the canvas: a click during an action does not sync", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.refreshSourceLayers = function () { got.length = 0; context.syncToCanvas(); }; // runs inside the button's action, so the panel is busy
+  context.refreshLayersBtn.onClick();
+  assert.equal(got.length, 0, "the busy panel does not sync");
+});
+
+test("panel catches up with the canvas: a projection change keeps a picked search result as the Jump target", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  searchFinds(context, [PARIS]);
+  mapSearch(context, "Paris");
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { projection: 2 });
+  context.refreshLayersBtn.onClick();
+  context.jumpBtn.onClick();
+  const cam = context.GeoScene.readCamera(context.currentMap().cameraId);
+  assert.ok(Math.abs(cam.lat - PARIS.lat) < 1e-9 && Math.abs(cam.lon - PARIS.lon) < 1e-9, "Jump still goes to the result");
+});
+
+test("panel catches up with the canvas: a dragged target survives a click-sync", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const pv = context.preview;
+  pv._draw.onMousePress({ x: 100, y: 100 }, "left");
+  pv._draw.onMouseMove({ x: 140, y: 120 }, "left");
+  pv._draw.onMouseRelease({ x: 140, y: 120 }, "left");
+  const before = pv.frameCamera();
+  assert.equal(pv.source(), null, "a drag leaves no named target");
+  context.refreshLayersBtn.onClick();
+  assert.deepEqual(pv.frameCamera(), before, "the dragged view stays");
+  assert.equal(pv.source(), null);
+});
+
+test("panel catches up with the canvas: a Pins press after a projection change places the pin where it was clicked", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { projection: 2 });
+  const pv = context.pinsPreview;
+  const before = Object.assign({}, pv._view());
+  const reversed = [];
+  const realReverse = context.GeoNet.reverse;
+  context.GeoNet.reverse = function (lat, lon) { reversed.push([lat, lon]); return realReverse.apply(this, arguments); };
+  pv._draw.onMousePress({ x: 100, y: 100 }, "left");
+  pv._draw.onMouseRelease({ x: 100, y: 100 }, "left");
+  const want = context.GeoPreview.fromPx(before, 100, before.height - 100); // the preview's y axis points up
+  assert.equal(pv._view().lat, before.lat, "the view did not move");
+  assert.ok(reversed.length >= 1, "the click reached the pin");
+  assert.ok(Math.abs(reversed[0][0] - want.lat) < 1e-3 && Math.abs(reversed[0][1] - context.GeoPreview.wrapLon(want.lon)) < 1e-3, "placed at the clicked spot (to the pin's 4 decimals)");
+});
+
+test("panel catches up with the canvas: a press on a Pins preview catches up once, not again on the click", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  let syncs = 0;
+  const real = context.refreshPreviews;
+  context.refreshPreviews = function () { syncs++; return real.apply(this, arguments); };
+  context.pinsPreview._draw.onMousePress({ x: 100, y: 100 }, "left");
+  context.pinsPreview._draw.onMouseRelease({ x: 100, y: 100 }, "left");
+  assert.equal(syncs, 1, "one catch-up for the press and its click");
+});
+
+test("panel catches up with the canvas: a comp switch is followed by the click, quietly", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  otherComp(context, api, "Another comp", "Elsewhere");
+  context.refreshLayersBtn.onClick();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"], "the new comp's maps are shown");
+  assert.doesNotMatch(context.statusLabel.getText(), /Showing maps in/, "no comp message");
+});
+
+test("panel catches up with the canvas: while an imagery job runs a click does not sync", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.imageryState.timer = { stop() {} };
+  context.imageryState.job = {};
+  got.length = 0;
+  context.refreshLayersBtn.onClick();
+  assert.equal(got.length, 0, "the camera stays stale during the job");
+});
+
+test("panel catches up with the canvas: syncToCanvas swallows a readCamera error and leaves the status line alone", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.GeoScene.readCamera = () => { throw new Error("camera gone"); };
+  context.statusLabel.setText("untouched");
+  assert.doesNotThrow(() => context.syncToCanvas());
+  assert.equal(context.statusLabel.getText(), "untouched");
+});
+
+test("panel catches up with the canvas: a projection change moves no preview's view, frame or source", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const shown = [];
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => { p.showCamera = (cam, kind) => shown.push(kind); });
+  const views = [context.preview, context.pinsPreview, context.routesPreview].map((p) => JSON.stringify(p._view()));
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { projection: 2 });
+  context.syncToCanvas();
+  assert.deepEqual(shown, [], "no preview is shown again");
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p, i) => assert.equal(JSON.stringify(p._view()), views[i], "the view is unchanged"));
+});

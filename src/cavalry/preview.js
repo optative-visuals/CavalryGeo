@@ -291,6 +291,8 @@ var GeoPreviewPanel = (function () {
       // would see none. A move with no button held does nothing (no drag, no zoomDrag).
       if (typeof draw.useHoverEvents === "function") draw.useHoverEvents(true);
       draw.onMousePress = guarded(function (pos, button) {
+        // The host catches the panel up with the canvas first (it never throws, so the press goes on as usual).
+        if (typeof opts.onPress === "function") opts.onPress();
         press = null; drag = null; panning = false; zoomDrag = null; // a release that never came must not leave its press behind
         if (button === "middle") { zoomDrag = { x: pos.x, y: sy(pos.y), view: view }; return; }
         if (button && button !== "left") return;
