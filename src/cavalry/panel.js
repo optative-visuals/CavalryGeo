@@ -72,7 +72,8 @@ function runAsAction(fn) {
 function guardWork(fn) {
   return function () {
     if (refuseIfBusy()) return;
-    syncToCanvas(); // a commit that starts work catches the panel up first
+    // A commit that starts work catches the panel up first, unless a preview press just did (its click follows at once).
+    if (Date.now() - syncedAt > SYNC_REPEAT_MS) syncToCanvas();
     runAsAction(guard(fn));
   };
 }
@@ -231,10 +232,10 @@ function previewStyle() { setPreviewColors(GeoStyles.previewColors(pickedStyle()
 // The colours last handed to the previews: the same colours again are not painted again (a click's catch-up).
 var shownPreviewColors = null;
 function setPreviewColors(colors) {
-  var key = JSON.stringify(colors);
+  var key = JSON.stringify(colors), painted = 0;
   if (key === shownPreviewColors) return;
-  shownPreviewColors = key;
-  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setColors(colors); });
+  [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) { p.setColors(colors); painted++; } });
+  if (painted) shownPreviewColors = key; // only once a preview has really been painted with them
 }
 // The previews take the picked map's own colours (ocean, land, borders as they are on the canvas);
 // with "New map" picked, or when they can't be read, the Style picker's colours.
@@ -298,13 +299,10 @@ function previewFollowPicked() {
   preview.showCamera(cam, resultPicker.getValue() > 0 ? "result" : "world");
 }
 // Centres the preview on the picked map's camera and shows it as the dashed frame.
-// The projection the previews last showed their camera in (see syncToCanvas); null with New map.
-var previewProjection = null;
 function previewShowMap() {
   var labelOnes = [pinsPreview, routesPreview].filter(function (p) { return p && p.available(); });
   if (newMapSelected()) {
     previewStyle();
-    previewProjection = null;
     if (preview.available()) preview.setCurrentCamera(null);
     labelOnes.forEach(function (p) { p.setCurrentCamera(null); p.showCamera(worldViewCamera(0), "world"); });
     refreshPreviews();
@@ -314,7 +312,6 @@ function previewShowMap() {
   previewMapColors();
   if (preview.available()) { preview.setCurrentCamera(cam); preview.showCamera(cam, "camera"); }
   labelOnes.forEach(function (p) { p.setCurrentCamera(cam); p.showCamera(cam, "camera"); });
-  previewProjection = cam.projection;
   refreshPreviews();
 }
 // After Jump or Fly: the dashed frame shows where the camera is now; the view stays put.
@@ -324,22 +321,19 @@ function previewShowCurrent() {
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
 }
 // A click in the panel, or a press on a preview or the panel's background, catches the panel up with the canvas:
-// the composition (quietly), the picked map's camera in the previews' dashed frame (re-shown when its projection
-// changed), then the styles, pins, routes and callouts drawn on the canvas. Keeps the views and targets where they are.
-// Never throws; does nothing while an action runs or an imagery job does.
+// the composition (quietly), the picked map's camera as the previews' dashed frame, then the styles, pins, routes
+// and callouts drawn on the canvas. It never moves a preview's view or changes its source (the Jump / Fly target,
+// a dragged view), so a press or a button always works on the view the user sees. Never throws; does nothing while
+// an action runs or an imagery job does.
+var syncedAt = 0, SYNC_REPEAT_MS = 300; // when the last catch-up ran; a commit within this long after a preview press skips it
 function syncToCanvas() {
   try {
     if (busy || imageryState.timer || imageryState.job) return;
+    syncedAt = Date.now();
     followActiveComp(false, true);
     if (!newMapSelected()) {
       var cam = GeoScene.readCamera(currentMap().cameraId);
-      var projectionChanged = cam.projection !== previewProjection;
-      [preview, pinsPreview, routesPreview].forEach(function (p) {
-        if (!p || !p.available()) return;
-        p.setCurrentCamera(cam);
-        if (projectionChanged) p.showCamera(cam, "camera");
-      });
-      if (projectionChanged) previewProjection = cam.projection;
+      [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
     }
     previewMapColors();
     refreshPreviews();
