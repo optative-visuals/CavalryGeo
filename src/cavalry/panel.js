@@ -72,6 +72,7 @@ function runAsAction(fn) {
 function guardWork(fn) {
   return function () {
     if (refuseIfBusy()) return;
+    syncToCanvas(); // a commit that starts work catches the panel up first
     runAsAction(guard(fn));
   };
 }
@@ -81,6 +82,7 @@ function guardWork(fn) {
 function guardAction(fn, keepSelection, allowNested) {
   return function () {
     if (!allowNested && refuseIfBusy()) return;
+    syncToCanvas(); // a click in the panel catches it up with the canvas first (a refused click does nothing)
     var before = keepSelection ? null : currentSelection();
     var run = function () { try { fn(); } catch (e) { say("Error: " + (e && e.message ? e.message : e)); } };
     if (allowNested) run(); else runAsAction(run);
@@ -226,7 +228,12 @@ function refreshStylePicker(name) {
   } finally { refreshingStyles = false; }
 }
 function previewStyle() { setPreviewColors(GeoStyles.previewColors(pickedStyle())); }
+// The colours last handed to the previews: the same colours again are not painted again (a click's catch-up).
+var shownPreviewColors = null;
 function setPreviewColors(colors) {
+  var key = JSON.stringify(colors);
+  if (key === shownPreviewColors) return;
+  shownPreviewColors = key;
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setColors(colors); });
 }
 // The previews take the picked map's own colours (ocean, land, borders as they are on the canvas);
@@ -278,6 +285,7 @@ function reloadStyleFiles(quiet) {
 var preview = GeoPreviewPanel.create({
   compSize: function () { return GeoScene.compSize(); },
   onPick: function (i) { if (i < 0 || i >= results.length) return; resultPicker.setValue(i + 1); previewFollowPicked(); },
+  onPress: syncToCanvas,
   // Hide Create map here as soon as the preview fails (it may fail while the panel is being built).
   onFail: function () { if (preview) refreshNewMapFields(); },
   yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM, redraw: PREVIEW_REDRAW
@@ -290,10 +298,13 @@ function previewFollowPicked() {
   preview.showCamera(cam, resultPicker.getValue() > 0 ? "result" : "world");
 }
 // Centres the preview on the picked map's camera and shows it as the dashed frame.
+// The projection the previews last showed their camera in (see syncToCanvas); null with New map.
+var previewProjection = null;
 function previewShowMap() {
   var labelOnes = [pinsPreview, routesPreview].filter(function (p) { return p && p.available(); });
   if (newMapSelected()) {
     previewStyle();
+    previewProjection = null;
     if (preview.available()) preview.setCurrentCamera(null);
     labelOnes.forEach(function (p) { p.setCurrentCamera(null); p.showCamera(worldViewCamera(0), "world"); });
     refreshPreviews();
@@ -303,6 +314,7 @@ function previewShowMap() {
   previewMapColors();
   if (preview.available()) { preview.setCurrentCamera(cam); preview.showCamera(cam, "camera"); }
   labelOnes.forEach(function (p) { p.setCurrentCamera(cam); p.showCamera(cam, "camera"); });
+  previewProjection = cam.projection;
   refreshPreviews();
 }
 // After Jump or Fly: the dashed frame shows where the camera is now; the view stays put.
@@ -310,6 +322,30 @@ function previewShowCurrent() {
   if (newMapSelected()) return;
   var cam = GeoScene.readCamera(currentMap().cameraId);
   [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
+}
+// A click in the panel, or a press on a preview or the panel's background, catches the panel up with the canvas:
+// the composition (quietly), the picked map's camera in the previews' dashed frame (re-shown when its projection
+// changed), then the styles, pins, routes and callouts drawn on the canvas. Keeps the views and targets where they are.
+// Never throws; does nothing while an action runs or an imagery job does.
+function syncToCanvas() {
+  try {
+    if (busy || imageryState.timer || imageryState.job) return;
+    followActiveComp(false, true);
+    if (!newMapSelected()) {
+      var cam = GeoScene.readCamera(currentMap().cameraId);
+      var projectionChanged = cam.projection !== previewProjection;
+      [preview, pinsPreview, routesPreview].forEach(function (p) {
+        if (!p || !p.available()) return;
+        p.setCurrentCamera(cam);
+        if (projectionChanged) p.showCamera(cam, "camera");
+      });
+      if (projectionChanged) previewProjection = cam.projection;
+    }
+    previewMapColors();
+    refreshPreviews();
+  } catch (e) {
+    console.log("[CavalryGeo] Catching up with the canvas failed: " + (e && e.message ? e.message : e));
+  }
 }
 
 // "New map" is always the last entry, and the one selected when the scene has no maps.
@@ -1191,7 +1227,7 @@ var calloutCoordBtn = GeoStyle.button("Callout at coordinates");
 // No green frame or dim (those mark the Map tab's Jump / Fly target), no double-click zoom.
 function labelPreview(hint, onClick, onPick) {
   return GeoPreviewPanel.create({
-    compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onFail: function () {},
+    compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onPress: syncToCanvas, onFail: function () {},
     yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, redraw: PREVIEW_REDRAW, hint: hint
   });
 }
@@ -2442,6 +2478,7 @@ function CompFollower() {
 }
 
 function buildUi() {
+  GeoStyle.onBackgroundPress(syncToCanvas); // a press on the panel's background catches the panel up with the canvas
   ui.setTitle("Cavalry Geo");
   if (typeof ui.setBackgroundColor === "function") ui.setBackgroundColor(GeoStyle.WINDOW_BACKGROUND);
   var layouts = {}, extra = [];

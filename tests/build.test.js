@@ -15124,3 +15124,96 @@ test("Start here: the Got it note points to Settings, Preferences instead of a T
   assert.equal(text, "Hides the Start here steps. Show tips again (⚙ Settings, Preferences) brings them back.");
   assert.doesNotMatch(text, /Tips button/);
 });
+
+// Panel catches up with the canvas: a click in the panel re-reads the picked map's camera (and its pins,
+// routes and styles) into the previews. The tests move the camera the way a Controls edit does, by
+// making the camera read return a different zoom.
+function recordCurrentCameras(context) {
+  const got = [];
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => { p.setCurrentCamera = (cam) => got.push(cam); });
+  return got;
+}
+function camerasEditedTo(context, zoom) {
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { zoom: zoom });
+}
+
+test("panel catches up with the canvas: a button click after a camera edit gives every preview the new current camera", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.refreshLayersBtn.onClick();
+  assert.equal(got.length, 3, "the Map, Pins and Routes previews each get it");
+  got.forEach((cam) => assert.equal(cam.zoom, 7));
+  assert.equal(context.statusLabel.getText(), "0 map layer(s) available.", "the button's own message, nothing from the sync");
+});
+
+test("panel catches up with the canvas: a press on the panel's background (a box or a page) syncs the same way", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  const box = panelsOf(context, context.sectionPages.pages[0])[0];
+  assert.equal(typeof box.onMousePress, "function", "a panel box takes background presses");
+  box.onMousePress();
+  assert.equal(got.length, 3);
+  got.forEach((cam) => assert.equal(cam.zoom, 7));
+  const page = context.sectionPages.widget._items[0];
+  assert.equal(typeof page.onMousePress, "function", "a page takes background presses");
+});
+
+test("panel catches up with the canvas: a press on a map preview syncs before the preview handles the press", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.preview._draw.onMousePress({ x: 100, y: 100 }, "left");
+  context.preview._draw.onMouseRelease({ x: 100, y: 100 }, "left");
+  assert.ok(got.length >= 1 && got.every((cam) => cam.zoom === 7), "the press synced the camera");
+});
+
+test("panel catches up with the canvas: a comp switch is followed by the click, quietly", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  otherComp(context, api, "Another comp", "Elsewhere");
+  context.refreshLayersBtn.onClick();
+  assert.deepEqual(pickerNames(context), ["Elsewhere", "New map"], "the new comp's maps are shown");
+  assert.doesNotMatch(context.statusLabel.getText(), /Showing maps in/, "no comp message");
+});
+
+test("panel catches up with the canvas: while an imagery job runs a click does not sync", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const got = recordCurrentCameras(context);
+  camerasEditedTo(context, 7);
+  context.imageryState.timer = { stop() {} };
+  context.imageryState.job = {};
+  got.length = 0;
+  context.refreshLayersBtn.onClick();
+  assert.equal(got.length, 0, "the camera stays stale during the job");
+});
+
+test("panel catches up with the canvas: syncToCanvas swallows a readCamera error and leaves the status line alone", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.GeoScene.readCamera = () => { throw new Error("camera gone"); };
+  context.statusLabel.setText("untouched");
+  assert.doesNotThrow(() => context.syncToCanvas());
+  assert.equal(context.statusLabel.getText(), "untouched");
+});
+
+test("panel catches up with the canvas: a changed projection is shown again in the previews", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  const shown = [];
+  [context.preview, context.pinsPreview, context.routesPreview].forEach((p) => { p.showCamera = (cam, kind) => shown.push([cam.projection, kind]); });
+  const real = context.GeoScene.readCamera;
+  context.GeoScene.readCamera = (id) => Object.assign({}, real(id), { projection: 2 });
+  context.syncToCanvas();
+  assert.equal(shown.length, 3, "each preview re-shows the camera");
+  shown.forEach(([proj, kind]) => assert.deepEqual([proj, kind], [2, "camera"]));
+  shown.length = 0;
+  context.syncToCanvas();
+  assert.equal(shown.length, 0, "the same projection is not shown again");
+});

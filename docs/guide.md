@@ -53,7 +53,7 @@ The first time you open the panel, a **Start here** box at the top of this tab g
   bottom left corner, and the heading reads **Preview (drag to move)**. The green frame in the middle is
   exactly where the camera will go, and the dashed outline is where it is now. Search results show as green dots — click one to pick
   that result and centre the preview on it. **Jump here** and **Fly here** take the camera to the
-  green frame. With **New map** picked, **Create map here** makes a map at the frame. The previews also draw the picked map's pins, labels and routes — and, zoomed in, its roads, railways, water, parks and extracts — in its style colours.
+  green frame. With **New map** picked, **Create map here** makes a map at the frame. The previews also draw the picked map's pins, labels and routes — and, zoomed in, its roads, railways, water, parks and extracts — in its style colours. Whenever you click in the panel, the previews catch up with the canvas: the camera, the composition, and the pins and routes.
 - **Flying the camera:** pick a place, set **From:** and **To:** (the first and last frame of the
   flight; they open on the playhead and 100 frames later) and press **Fly here** — the camera zooms
   out, travels and zooms in smoothly, leaving from where the camera is at the From frame (with
