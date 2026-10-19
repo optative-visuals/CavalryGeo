@@ -1543,7 +1543,8 @@ var GeoScene = (function () {
       showMattes();
       setHidden(outer, false);
       if (!night) sendImageryToBack(map); // night lights stay on top of their Day & night group
-      var hidden = !night && firstFullMap ? hideCoveringFills(map) : [];
+      var hidden = [];
+      if (!night && firstFullMap) { try { hidden = hideCoveringFills(map); } catch (e) { /* cosmetic: the imagery is built either way */ } }
       try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
       result = { groupId: outer, tiles: built, levels: builtLevels.length, unreadable: unreadable };
       if (night) result.night = true; else result.hidden = hidden;
