@@ -331,6 +331,7 @@ function syncToCanvas() {
     if (busy || imageryState.timer || imageryState.job) return;
     syncedAt = Date.now();
     followActiveComp(false, true);
+    syncWholeEarth();
     if (!newMapSelected()) {
       var cam = GeoScene.readCamera(currentMap().cameraId);
       [preview, pinsPreview, routesPreview].forEach(function (p) { if (p && p.available()) p.setCurrentCamera(cam); });
@@ -351,6 +352,7 @@ function refreshMaps(selectCameraId) {
   mapPicker.addEntry(NEW_MAP);
   mapPicker.setValue(sel);
   refreshNewMapFields();
+  syncWholeEarth();
   previewShowMap();
 }
 function newMapSelected() {
@@ -911,6 +913,7 @@ refreshLayersBtn.onClick = guardAction(function () { refreshSourceLayers(); say(
 // Picking "New map" is a normal choice, not an error: it just leaves no map to extract from.
 mapPicker.onValueChanged = guard(function () {
   refreshNewMapFields();
+  syncWholeEarth();
   if (!newMapSelected()) refreshSourceLayers();
   else {
     clearSourceLayers();
@@ -1731,6 +1734,9 @@ var imagerySettings = GeoNet.loadSettings();
 // cost dominating (80 ms steps built only ~0.6 tiles/s).
 var DOWNLOAD_GAP_MS = 60, POLL_MS = 250, BUILD_TICK_MS = 20, BUILD_BUDGET_MS = 1000;
 var imageryState = { plan: null, timer: null, job: null, tick: null, batch: null, night: false, map: null };
+// Whole Earth (spin freely): a world base level under the imagery. Its value is the picked map's (GeoScene.wholeEarthFor),
+// synced whenever the picked map changes; toggling it remembers the choice on that map.
+var wholeEarthCheck = GeoStyle.toggle("Whole Earth (spin freely)", false);
 var sourcePicker = new ui.DropDown();
 // Says what the picked source still needs from Settings (a key, a token or a link); blank when nothing is missing.
 var keyHint = new ui.Label("");
@@ -1765,9 +1771,19 @@ function sourceOptions(src) {
     key: src.key === "maptiler" ? maptilerKeyField.getText().trim() : src.key === "mapbox" ? mapboxKeyField.getText().trim() : "",
     style: styleField.getText().trim(),
     template: customUrlField.getText().trim(),
-    customAttribution: customAttrField.getText().trim()
+    customAttribution: customAttrField.getText().trim(),
+    wholeEarth: wholeEarthCheck.getValue()
   };
 }
+// Shows the picked map's Whole Earth choice (its remembered one, else the projection's default). Not for New map.
+function syncWholeEarth() {
+  if (newMapSelected()) return;
+  wholeEarthCheck.setValue(GeoScene.wholeEarthFor(currentMap()));
+}
+wholeEarthCheck.onValueChanged = guard(function () {
+  GeoScene.setWholeEarth(currentMap(), wholeEarthCheck.getValue());
+  resetImageryPlan();
+});
 function refreshKeyHint() {
   var src = currentSource(), miss = GeoSources.missingSetting(src, sourceOptions(src));
   keyHint.setText(miss || "");
@@ -1970,7 +1986,7 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
-      " Credit: " + credit + hid + note + gone;
+      " Credit: " + credit + hid + note + gone + (plan.world ? " Whole Earth included, so the globe can spin freely." : "");
     if (st.wanted) {
       say(text + " Adding night lights…");
       startNightLights(map, text);
@@ -2111,9 +2127,11 @@ buildImageryBtn.onClick = guardAction(function () {
       : plan.uncappedItems > GeoBlocks.MAX_IMAGES ? GeoBlocks.MAX_IMAGES + " images" : GeoBlocks.MAX_IMAGE_TILES + " tiles' worth";
     var summary = n + " " + noun + " needed (" + (plan.mode === "images" ? plan.imageTiles + " tiles' worth, " : "") + plan.cached +
       " already downloaded" + (plan.reused ? ", including " + plan.reused + (plan.reused === 1 ? " saved image that already covers" : " saved images that already cover") + " the view" : "") + ", about " + GeoUtil.formatBytes(GeoBlocks.totalTiles(plan.missing) * 15000) + " to download)" +
-      (warn ? " — this may make Cavalry slower" : "") + ".";
+      (warn ? " — this may make Cavalry slower" : "") + "." + (plan.world ? " Whole Earth included, so the globe can spin freely." : "");
     var capNote = plan.cappedZoom !== undefined ? " Sharpest detail is limited to zoom " + plan.cappedZoom + " to stay under " + limit +
       " — imagery gets softer as the flight zooms in further." : "";
+    if (plan.world && plan.world.detailDropped) capNote = " Detail is dropped to stay under " + limit + " — only the Whole Earth layer (zoom " + plan.world.L +
+      ") shows, so imagery gets much softer as the flight zooms in.";
     if (!dialog) {
       buildImageryBtn.setText(label);
       say(summary + " Press \"" + label + "\"." + capNote);
@@ -2192,6 +2210,7 @@ TAB_BUILDERS.push(function (tabs) {
     ]),
     GeoStyle.panel([
       GeoStyle.heading("Build"),
+      GeoStyle.toggleGrid([wholeEarthCheck], 1),
       row(buildImageryBtn, cancelImageryBtn),
       imageryProgress,
       imageryAttrBtn
@@ -2402,6 +2421,7 @@ var TIP_TARGETS = [
   [stylePicker, "imagery.stylePicker"],
   [customUrlField, "imagery.customLink"],
   [customAttrField, "imagery.customCredit"],
+  [wholeEarthCheck, "imagery.wholeEarth"],
   [buildImageryBtn, "imagery.build"],
   [cancelImageryBtn, "imagery.cancel"],
   [imageryAttrBtn, "imagery.attribution"],

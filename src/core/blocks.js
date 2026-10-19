@@ -79,6 +79,7 @@ var GeoBlocks = (function () {
       if (!best) { left.push(r); continue; }
       var at = -1, dup = false, key = rectKey(best), sh = r.shift || 0, next = [], rep = best;
       if (sh !== (best.shift || 0)) rep = { z: best.z, x0: best.x0, y0: best.y0, x1: best.x1, y1: best.y1, shift: sh };
+      if (r.world) rep.world = true; // a Whole Earth item stays one, so the world level still builds it
       for (var k = 0; k < cur.length; k++) {
         if (cur[k] === r) { at = k; continue; }
         if (rectKey(cur[k]) === key && (cur[k].shift || 0) === sh) dup = true;

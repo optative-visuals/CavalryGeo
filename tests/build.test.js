@@ -15641,3 +15641,171 @@ test("the imagery build message says nothing about hiding when nothing was hidde
   assert.match(text, /Credit: EOxCloudless/);
   assert.ok(!/ Hid /.test(text), text);
 });
+
+// ---- Whole Earth (spin freely): a full-world base level, always on, built with the detail ----
+test("Whole Earth off: the plan is as before (no world items, no plan.world)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = tileSource(context);
+  const plan = context.GeoScene.planImagery(map, src, {});
+  assert.equal(plan.world, undefined);
+  assert.equal(plan.items.some((r) => r.world), false);
+  assert.equal(plan.items.length, 48);
+  assert.deepEqual([plan.lo, plan.hi], [4, 4]);
+  const off = context.GeoScene.planImagery(map, src, { wholeEarth: false });
+  assert.deepEqual(plain(off.items), plain(plan.items));
+  assert.equal(off.world, undefined);
+});
+
+test("Whole Earth on, tiles mode: 64 world tiles at zoom 3, flagged, with the detail kept and within the tile cap", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = tileSource(context);
+  const plan = context.GeoScene.planImagery(map, src, { wholeEarth: true });
+  const world = plan.items.filter((r) => r.world);
+  assert.equal(world.length, 64);
+  assert.ok(world.every((r) => r.z === 3));
+  assert.equal(new Set(world.map((r) => r.x0 + "/" + r.y0)).size, 64);
+  assert.deepEqual(plain(plan.world), { L: 3, count: 64 });
+  assert.equal(plan.items.filter((r) => !r.world).length, 48, "detail still planned");
+  assert.ok(plan.items.length <= context.GeoTiles.MAX_TILES);
+  assert.equal(plan.missing.filter((r) => r.world).length, 64, "world tiles are downloaded too");
+});
+
+test("Whole Earth on, tiles mode: a detail-heavy camera loses its sharpest detail to fit, and keeps the world", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = tileSource(context);
+  const real = context.GeoTiles.bentTileSet;
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) {
+    const hi = Math.min(maxZoom, 10), tiles = [];
+    for (let L = 4; L <= hi; L++) for (let i = 0; i < 60; i++) tiles.push({ z: L, x: i % 8, y: Math.floor(i / 8) });
+    return { tiles, lo: 4, hi, frames: 1 };
+  };
+  let plan;
+  try { plan = context.GeoScene.planImagery(map, src, { wholeEarth: true }); } finally { context.GeoTiles.bentTileSet = real; }
+  assert.equal(plan.hi, 6, "levels 4 to 6 fit with the 64 world tiles");
+  assert.equal(plan.cappedZoom, 6);
+  assert.equal(plan.items.filter((r) => r.world).length, 64);
+  assert.ok(plan.items.some((r) => !r.world && r.z === 6));
+  assert.ok(!plan.items.some((r) => !r.world && r.z > 6));
+  assert.ok(plan.items.length <= context.GeoTiles.MAX_TILES);
+  assert.equal(plan.world.detailDropped, undefined);
+});
+
+test("Whole Earth on: when even the lowest detail level does not fit with the world, the detail goes and the world stays", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = tileSource(context);
+  const real = context.GeoTiles.bentTileSet;
+  const level4 = function () {
+    const tiles = [];
+    for (let i = 0; i < 240; i++) tiles.push({ z: 4, x: i % 16, y: Math.floor(i / 16) });
+    return { tiles, lo: 4, hi: 4, frames: 1 };
+  };
+  context.GeoTiles.bentTileSet = level4;
+  let plan;
+  try { plan = context.GeoScene.planImagery(map, src, { wholeEarth: true }); } finally { context.GeoTiles.bentTileSet = real; }
+  assert.equal(plan.items.length, 64);
+  assert.ok(plan.items.every((r) => r.world));
+  assert.deepEqual(plain(plan.world), { L: 3, count: 64, detailDropped: true });
+  assert.equal(plan.cappedZoom, undefined, "no detail level is left to cap");
+  context.GeoTiles.bentTileSet = level4;
+  try {
+    assert.equal(context.GeoScene.planImagery(map, src, {}).items.length, 240, "without Whole Earth the same detail fits");
+  } finally { context.GeoTiles.bentTileSet = real; }
+});
+
+test("Whole Earth on, images mode (EOX): 16 world images covering zoom 5 (1024 tiles), limits respected", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const map = imageryMap(context, api, 4);
+  const plan = context.GeoScene.planImagery(map, context.GeoSources.byId("eox"), { wholeEarth: true });
+  const world = plan.items.filter((r) => r.world);
+  assert.equal(plan.mode, "images");
+  assert.equal(world.length, 16);
+  assert.equal(context.GeoBlocks.totalTiles(world), 1024);
+  assert.ok(world.every((r) => r.z === 5));
+  assert.deepEqual(plain(plan.world), { L: 5, count: 16 });
+  assert.ok(plan.items.some((r) => !r.world), "detail still planned");
+  assert.ok(plan.items.length <= context.GeoBlocks.MAX_IMAGES);
+  assert.ok(plan.imageTiles <= context.GeoBlocks.MAX_IMAGE_TILES);
+});
+
+test("Whole Earth: the world level is capped by the source max zoom (land gradient 4 gives 3, a max zoom 2 source gives 2)", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  const land = context.GeoScene.planImagery(map, context.GeoSources.byId("maptiler"), { key: "K", style: "tiles/land-gradient", wholeEarth: true });
+  assert.deepEqual(plain(land.world), { L: 3, count: 64 });
+  const two = Object.assign({}, tileSource(context), { maxZoom: 2 });
+  const plan = context.GeoScene.planImagery(map, two, { wholeEarth: true });
+  assert.deepEqual(plain(plan.world), { L: 2, count: 16 });
+  assert.ok(plan.items.filter((r) => r.world).every((r) => r.z === 2));
+});
+
+test("Whole Earth build: a World z W group sits below the detail groups, with position and scale drivers and no opacity driver", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = tileSource(context);
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  const plan = context.GeoScene.planImagery(map, src, { wholeEarth: true });
+  const r = context.GeoScene.buildImagery(map, src, { wholeEarth: true }, plan);
+  const world = imageryChild(api, r.groupId, "World z 3");
+  assert.ok(world, "World z 3 group");
+  assert.equal(api.getChildren(world).length, 64);
+  const conns = api._connections.map((c) => Array.from(c));
+  assert.ok(conns.some((c) => c[2] === world && c[3] === "position"), "position driver");
+  assert.ok(conns.some((c) => c[2] === world && c[3] === "scale"), "scale driver");
+  assert.ok(!conns.some((c) => c[2] === world && c[3] === "opacity"), "no opacity driver: always on");
+  const detail = levelGroup(api, r.groupId, 4);
+  const siblings = api.getChildren(api.getParent(world));
+  assert.ok(siblings.indexOf(world) > siblings.indexOf(detail), "the world group is below the detail group");
+  const driver = imageryChild(api, r.groupId, "Imagery driver: z 4 opacity");
+  assert.ok(String(api.get(driver, "expression")).includes("GeoTiles.levelOpacity(_i2, 4, 4, 4, _i4)"), "detail fade range ignores the world level");
+  assert.equal(r.levels, 1, "the world level is not counted as a detail level");
+});
+
+test("Whole Earth night lights: planned from the map's value (a globe is on by default), 16 world images at zoom 5", () => {
+  const { context, api, map } = bentFixture({ lon: 0, zoom: 4, projection: 2 });
+  fakeCurl(api); context.GeoFetch._reset();
+  const on = context.GeoScene.planNightLights(map);
+  assert.deepEqual(plain(on.world), { L: 5, count: 16 });
+  assert.equal(on.items.filter((r) => r.world).length, 16);
+  assert.equal(on.mode, "images");
+  context.GeoScene.setWholeEarth(map, false);
+  assert.equal(context.GeoScene.planNightLights(map).world, undefined, "a remembered off choice wins");
+});
+
+test("wholeEarthFor: a globe or Equal Earth map is ticked by default, a flat one is not; a remembered choice wins", () => {
+  const { context, api } = buildSandbox();
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0 };
+  const globe = context.GeoScene.createMap("Globe", Object.assign({ projection: 2 }, cam));
+  const eq = context.GeoScene.createMap("Equal", Object.assign({ projection: 1 }, cam));
+  const flat = context.GeoScene.createMap("Flat", Object.assign({ projection: 0 }, cam));
+  assert.equal(context.GeoScene.wholeEarthFor(globe), true);
+  assert.equal(context.GeoScene.wholeEarthFor(eq), true);
+  assert.equal(context.GeoScene.wholeEarthFor(flat), false);
+  context.GeoScene.setWholeEarth(flat, true);
+  assert.equal(context.GeoScene.wholeEarthFor(flat), true);
+  assert.equal(api.getUserDataKey(flat.groupId, "geoWholeEarth"), true);
+  context.GeoScene.setWholeEarth(globe, false);
+  assert.equal(context.GeoScene.wholeEarthFor(globe), false);
+});
+
+test("Whole Earth tickbox: ticked for a globe map, unticked for flat; toggling remembers the choice, resets the plan and reaches planning", () => {
+  const { context, api } = buildSandbox();
+  const cam = { lat: 0, lon: 0, zoom: 2, rotation: 0 };
+  const globe = context.GeoScene.createMap("Globe", Object.assign({ projection: 2 }, cam));
+  const flat = context.GeoScene.createMap("Flat", Object.assign({ projection: 0 }, cam));
+  context.refreshMaps(globe.cameraId);
+  assert.equal(context.wholeEarthCheck.getValue(), true);
+  context.refreshMaps(flat.cameraId);
+  assert.equal(context.wholeEarthCheck.getValue(), false);
+  const src = context.currentSource();
+  const sigBefore = context.imageryPlanSignature(flat, src, context.sourceOptions(src));
+  context.imageryState.plan = { sig: "stale" };
+  context.wholeEarthCheck.widget.onClick();
+  assert.equal(context.wholeEarthCheck.getValue(), true);
+  assert.equal(api.getUserDataKey(flat.groupId, "geoWholeEarth"), true);
+  assert.equal(context.imageryState.plan, null, "toggling resets the plan");
+  assert.equal(context.sourceOptions(src).wholeEarth, true);
+  assert.notEqual(context.imageryPlanSignature(flat, src, context.sourceOptions(src)), sigBefore, "the signature changes");
+  context.refreshMaps(globe.cameraId);
+  context.refreshMaps(flat.cameraId);
+  assert.equal(context.wholeEarthCheck.getValue(), true, "the remembered choice wins on the next sync");
+});

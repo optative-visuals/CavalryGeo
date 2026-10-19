@@ -980,29 +980,47 @@ var GeoScene = (function () {
       return GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf);
     }
     var set = tilesUpTo(GeoSources.maxZoom(src, opts));
+    // Whole Earth: every tile of one world level, planned with the detail and counted against the same limits.
+    var worldL = opts.wholeEarth === true ? worldZoom(src, opts, images) : null, worldTiles = worldL === null ? [] : worldTileList(worldL);
+    function itemsOf(tiles) {
+      return images ? GeoBlocks.blocksForWrappedTiles(tiles) : tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
+    }
+    var worldItems = itemsOf(worldTiles);
+    worldItems.forEach(function (r) { r.world = true; });
     function itemsFor(ts) {
-      return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
+      var detail = itemsOf(ts.tiles);
+      return worldItems.length ? detail.concat(worldItems) : detail;
     }
     // An image covers the bounding box of the tiles it needs, so the image limit counts the
     // tiles' worth of pixels really downloaded (GeoBlocks.totalTiles), not the tiles needed.
-    function over(ts, items) {
-      return images ? items.length > GeoBlocks.MAX_IMAGES || GeoBlocks.totalTiles(items) > GeoBlocks.MAX_IMAGE_TILES : ts.tiles.length > GeoTiles.MAX_TILES;
+    // In tiles mode each item is one tile, so the items count is the tiles count.
+    function over(items) {
+      return images ? items.length > GeoBlocks.MAX_IMAGES || GeoBlocks.totalTiles(items) > GeoBlocks.MAX_IMAGE_TILES : items.length > GeoTiles.MAX_TILES;
     }
     var items = itemsFor(set), uncappedTiles = set.tiles.length, uncappedItems = items.length;
     // Too much: drop the sharpest level until it fits. The top built level never fades
     // out, so deeper zooms just show it magnified (softer, but complete).
-    while (over(set, items) && set.hi > set.lo) {
+    while (over(items) && set.hi > set.lo) {
       set = tilesUpTo(set.hi - 1);
       items = itemsFor(set);
     }
-    if (over(set, items)) {
+    // Still too much with the world: the detail goes entirely and the world stays (it is never dropped).
+    var detailDropped = false;
+    if (over(items) && worldItems.length) {
+      set = { tiles: [], lo: 0, hi: -1, frames: 0 };
+      items = itemsFor(set);
+      detailDropped = true;
+    }
+    if (over(items)) {
       var end = " — end the flight at a lower zoom or use a smaller composition.";
-      if (!images) throw new Error("Too many tiles (" + set.tiles.length + ")" + end);
+      if (!images) throw new Error("Too many tiles (" + items.length + ")" + end);
       throw new Error(items.length > GeoBlocks.MAX_IMAGES ? "Too many images (" + items.length + ")" + end
         : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(items) + ")" + end);
     }
-    var plan = { mode: images ? "images" : "tiles", items: items, tiles: set.tiles, lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts), bent: true };
+    var plan = { mode: images ? "images" : "tiles", items: items, tiles: worldL === null ? set.tiles : set.tiles.concat(worldTiles), lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts), bent: true };
     if (images) plan.imageTiles = GeoBlocks.totalTiles(items);
+    if (worldL !== null) plan.world = { L: worldL, count: worldItems.length };
+    if (detailDropped) plan.world.detailDropped = true;
     var left = {};
     GeoFetch.leftovers().forEach(function (p) { left[String(p).replace(/\\/g, "/")] = true; });
     plan.missing = items.filter(function (r) {
@@ -1028,8 +1046,32 @@ var GeoScene = (function () {
       }
     }
     bentMissing(plan);
-    if (set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
+    if (!detailDropped && set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
+  }
+
+  // Whole Earth: the world level is 3 for tiles and 5 for images (16 images cover its 1024 tiles), never above
+  // the source's maximum zoom nor below its minimum. worldTileList: every tile of level L, north row first.
+  function worldZoom(src, opts, images) {
+    return Math.max(src.minZoom || 0, Math.min(images ? 5 : 3, GeoSources.maxZoom(src, opts)));
+  }
+  function worldTileList(L) {
+    var n = Math.pow(2, L), out = [];
+    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) out.push({ z: L, x: x, y: y });
+    return out;
+  }
+
+  // Whole Earth (spin freely): the map's choice, kept on the map group. Without one, a globe (2) or Equal Earth (1)
+  // map has it on and a flat map (0) does not. The Imagery tab's tickbox and night lights both read it from here.
+  var WHOLE_EARTH_KEY = "geoWholeEarth";
+  function wholeEarthFor(map) {
+    var remembered = userData(map.groupId, WHOLE_EARTH_KEY);
+    if (remembered === true || remembered === false) return remembered;
+    var projection = readCamera(map.cameraId).projection;
+    return projection === 1 || projection === 2;
+  }
+  function setWholeEarth(map, on) {
+    if (typeof api.setUserData === "function") api.setUserData(map.groupId, WHOLE_EARTH_KEY, !!on);
   }
 
   // The day imagery of this map (night lights are listed by findNightLights, never here).
@@ -1396,10 +1438,24 @@ var GeoScene = (function () {
     // be half written (curl never reported it), so it is skipped.
     var queue = [], inFlight = {};
     GeoFetch.leftovers().forEach(function (p) { inFlight[String(p).replace(/\\/g, "/")] = true; });
+    // Whole Earth first, so its group is the lowest in the View; it has its own origin and no fade.
+    if (plan.world) {
+      var wfiles = [];
+      plan.items.forEach(function (r) {
+        if (!r.world) return;
+        var wpath = GeoNet.cachedTile(itemBase(plan, r));
+        if (wpath && !inFlight[wpath.replace(/\\/g, "/")]) wfiles.push({ L: plan.world.L, rect: r, path: wpath, world: true });
+      });
+      if (wfiles.length) {
+        var worigin = GeoBlocks.levelOrigin(wfiles.map(function (f) { return placed(f.rect); }));
+        wfiles.forEach(function (f) { f.origin = worigin; queue.push(f); });
+      }
+    }
+    var worldBuilt = null;
     for (var Lx = plan.lo; Lx <= plan.hi; Lx++) {
       var files = [];
       plan.items.forEach(function (r) {
-        if (r.z !== Lx) return;
+        if (r.z !== Lx || r.world) return;
         var path = GeoNet.cachedTile(itemBase(plan, r));
         if (path && !inFlight[path.replace(/\\/g, "/")]) files.push({ L: Lx, rect: r, path: path });
       });
@@ -1498,16 +1554,17 @@ var GeoScene = (function () {
       var res = null;
       try { res = api.get(id, "resolution"); } catch (e) { res = null; }
       if (res && res.x === 0) { api.deleteLayer(id); unreadable++; return; }
-      if (!level || level.L !== f.L) {
+      if (!level || level.L !== f.L || !!level.world !== !!f.world) {
         // The level group is made with its first readable tile, so a level whose tiles
         // are all unreadable never gets a group (or a place in the fade range).
-        var lg = api.create("group", "z " + f.L);
+        var lg = api.create("group", (f.world ? "World z " : "z ") + f.L);
         api.parent(lg, sourced ? view : outer); // created low to high, so higher levels land on top
         // api.parent keeps the world transform and rewrites the local one, so reset
         // the level group to identity after parenting, before its drivers take over.
         api.set(lg, identityTransform());
-        level = { L: f.L, group: lg, x0: f.origin.x0, y0: f.origin.y0 };
-        builtLevels.push(level);
+        level = { L: f.L, group: lg, x0: f.origin.x0, y0: f.origin.y0, world: !!f.world };
+        // The world level is not a detail level: it has no fade, so it stays out of the fade range.
+        if (f.world) worldBuilt = level; else builtLevels.push(level);
       }
       // Parent first (it keeps the world transform), then set the local transform.
       api.parent(id, level.group);
@@ -1539,6 +1596,15 @@ var GeoScene = (function () {
           else imageryDriver(map, outer, name, expr, b.group, attr);
         });
       });
+      // The world level: position and scale only, so it is always on (no opacity driver), at its own zoom.
+      if (worldBuilt) {
+        var wlv = { L: worldBuilt.L, x0: worldBuilt.x0, y0: worldBuilt.y0, lo: builtLo, hi: builtHi };
+        ["position", "scale"].forEach(function (attr) {
+          var wname = "Imagery driver: World z " + wlv.L + " " + attr, wexpr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, wlv);
+          if (sourced) withSourceComp(function () { imageryDriver(map, view, wname, wexpr, worldBuilt.group, attr, 3); });
+          else imageryDriver(map, outer, wname, wexpr, worldBuilt.group, attr);
+        });
+      }
       if (bent) for (var k = 1; k < VIEW_DRIVERS.length; k++) viewDriver(k);
       showMattes();
       setHidden(outer, false);
@@ -1656,7 +1722,7 @@ var GeoScene = (function () {
   // stops at the layer's maximum zoom (8); zoomCapped says the camera went past it.
   function planNightLights(map) {
     var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
-    var plan = planImagery(map, GeoSources.night(), {});
+    var plan = planImagery(map, GeoSources.night(), { wholeEarth: wholeEarthFor(map) });
     plan.night = true;
     if (zoomed) plan.zoomCapped = true;
     return plan;
@@ -3569,7 +3635,7 @@ var GeoScene = (function () {
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
     compFrameRange: compFrameRange, sampleCamera: sampleCamera, planImagery: planImagery, itemBase: itemBase, itemUrl: itemUrl, buildImagery: buildImagery, beginImageryBuild: beginImageryBuild,
-    REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable,
+    REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable, wholeEarthFor: wholeEarthFor, setWholeEarth: setWholeEarth,
     findImagery: findImagery, findNightLights: findNightLights, findAllImagery: findAllImagery, nightLightsStatus: nightLightsStatus, planNightLights: planNightLights, removeNightLights: removeNightLights, prepareNightLights: prepareNightLights, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
     HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
