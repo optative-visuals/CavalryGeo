@@ -980,7 +980,7 @@ var GeoScene = (function () {
     function tilesUpTo(maxZoom) {
       return GeoTiles.bentTileSet(samples, s.width, s.height, src.minZoom, maxZoom, regionOf);
     }
-    var set = tilesUpTo(src.maxZoom);
+    var set = tilesUpTo(GeoSources.maxZoom(src, opts));
     function itemsFor(ts) {
       return images ? GeoBlocks.blocksForWrappedTiles(ts.tiles) : ts.tiles.map(function (t) { return GeoBlocks.wrapRect(GeoBlocks.tileRect(t)); });
     }
@@ -1324,7 +1324,7 @@ var GeoScene = (function () {
     var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
-    var assetByPath = existingAssets(), base = (plan.mode === "tiles" && src.imagePx === 512) ? 0.5 : 1, built = 0, unreadable = 0;
+    var assetByPath = existingAssets(), base = (plan.mode === "tiles" && GeoSources.imagePx(src, opts) === 512) ? 0.5 : 1, built = 0, unreadable = 0;
     // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
     // (the older flat form, which planImagery no longer makes).
     var bent = !!plan.bent, sourced = bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;

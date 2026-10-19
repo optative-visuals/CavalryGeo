@@ -244,7 +244,7 @@ var GeoNet = (function () {
   // The folders (with a trailing slash) holding the files of the imagery with this cache key.
   function cachePrefixes(cacheKey) { return [assetsDir() + "/cache/tiles/" + cacheKey + "/", imagesDir() + "/" + cacheKey + "/"]; }
   function cachedTile(base) {
-    var exts = ["jpg", "png"];
+    var exts = ["jpg", "png", "webp"];
     for (var i = 0; i < exts.length; i++) if (api.filePathExists(base + "." + exts[i])) return base + "." + exts[i];
     return null;
   }
@@ -260,12 +260,12 @@ var GeoNet = (function () {
     try { list = api.listDirectory(dir) || []; } catch (e) { return out; }
     for (var i = 0; i < list.length; i++) {
       var p = String(list[i]).replace(/\\/g, "/"), name = p.slice(p.lastIndexOf("/") + 1);
-      var m = /^(\d+)_(\d+)_(\d+)_(\d+)\.(jpg|png)$/.exec(name);
+      var m = /^(\d+)_(\d+)_(\d+)_(\d+)\.(jpg|png|webp)$/.exec(name);
       if (m) out.push({ rect: { z: z, x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4] }, path: p });
     }
     return out;
   }
-  // Downloads one tile next to `base`, choosing .jpg/.png from the Content-Type (or the
+  // Downloads one tile next to `base`, choosing .jpg/.png/.webp from the Content-Type (or the
   // URL when there is none). Network failures (-1) are retried; HTTP errors are returned.
   function downloadTile(url, base) {
     var loc = GeoSources.splitUrl(url);

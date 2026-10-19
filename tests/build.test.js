@@ -2235,6 +2235,45 @@ test("buildImagery uses only the levels that actually have files for the opacity
   assert.equal(T.levelOpacity(5.2, 4, 4, 4, 0), 100, "z 4 must stay opaque past its old fade-out point since it's now the highest built level");
 });
 
+test("planImagery caps a MapTiler tileset at its own max zoom; a map keeps zoom 20", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+  const asked = [], real = context.GeoTiles.bentTileSet;
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) { asked.push(maxZoom); return real.apply(this, arguments); };
+  context.GeoScene.planImagery(map, src, { key: "K", style: "tiles/hillshade" });
+  assert.equal(asked[0], 12);
+  asked.length = 0;
+  context.GeoScene.planImagery(map, src, { key: "K", style: "satellite" });
+  assert.equal(asked[0], 20);
+});
+
+test("a WebP tileset is placed at full scale (260/256), while a 512-px map stays at half", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+  let n = 0;
+  context.GeoNet.cachedTile = (base) => (n++ % 2 ? base + ".webp" : null);
+  const opts = { key: "K", style: "tiles/hillshade" };
+  const plan = context.GeoScene.planImagery(map, src, opts);
+  const r = context.GeoScene.buildImagery(map, src, opts, plan);
+  const tile = api.getChildren(levelGroup(api, r.groupId, 4))[0];
+  assert.equal(api.get(tile, "scale.x"), 260 / 256);
+});
+
+test("GeoFetch.poll counts a WebP tile as whole", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([{ url: "https://api.maptiler.com/tiles/hillshade/1/2/3.webp?key=K", path: "C:/x/1.webp" }]);
+  api._files[batch.status] = "200 0 image/webp C:/x/1.webp\n";
+  api._files["C:/x/1.webp"] = "<tile>";
+  const r = context.GeoFetch.poll(batch);
+  assert.deepEqual(plain(r.results.map((x) => [x.path, x.ok])), [["C:/x/1.webp", true]]);
+});
+
+test("the unsupported-type message names PNG, JPG or WebP", () => {
+  assert.ok(buildPanel().includes("choose a PNG, JPG or WebP style or link."));
+  assert.equal(buildPanel().includes("PNG or JPG style"), false);
+});
+
 test("512-px sources are placed at half scale; tiles without files are skipped", () => {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4);
@@ -13171,6 +13210,17 @@ test("Add layers: the large-area and heavy-layers questions go through the quest
   delete ui.Modal;
   context.addLayersBtn.onClick();
   assert.match(context.statusLabel.getText(), /^Added \d+ layer\(s\)/);
+});
+
+test("Imagery picker: tilesets follow the maps; picking one fills the box with tiles/<id>", () => {
+  const { context } = buildSandbox();
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  assert.equal(sp._entries.length, 20);
+  assert.equal(sp._entries[15], "Tileset \u00b7 Hillshade");
+  sp.setValue(15); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "tiles/hillshade");
 });
 
 test("Imagery picker: MapTiler maps show by name, and a pick fills the box with the map's id", () => {

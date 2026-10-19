@@ -83,7 +83,7 @@ var GeoFetch = (function () {
     }
     return r;
   }
-  // A download is whole only when the server sent a JPEG or PNG (any type the one-at-a-time
+  // A download is whole only when the server sent a JPEG, PNG or WebP (any type the one-at-a-time
   // path accepts, image/jpg included) with 200, curl finished the transfer (exit 0) and the
   // file is there. Anything else is deleted and fetched again.
   function isOk(r) { return r.status === 200 && r.exit === 0 && GeoSources.extForContentType(r.type) !== null && api.filePathExists(r.path); }

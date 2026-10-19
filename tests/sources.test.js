@@ -68,7 +68,9 @@ test("cache keys, labels and meta never contain keys or links", () => {
 test("image types from Content-Type or URL", () => {
   assert.equal(S.extForContentType("image/jpeg"), "jpg");
   assert.equal(S.extForContentType("image/png; charset=binary"), "png");
-  assert.equal(S.extForContentType("image/webp"), null);
+  assert.equal(S.extForContentType("image/webp"), "webp");
+  assert.equal(S.extForContentType("image/webp; charset=binary"), "webp");
+  assert.equal(S.extForUrl("https://api.maptiler.com/tiles/hillshade/1/2/3.webp?key=K"), "webp");
   assert.equal(S.extForUrl("https://a/1/2/3.jpeg?x=1"), "jpg");
   assert.equal(S.extForUrl("https://a/1/2/3.png"), "png");
   assert.equal(S.extForUrl("https://a/1/2/3@2x?k=1"), null);
@@ -76,7 +78,7 @@ test("image types from Content-Type or URL", () => {
 });
 
 test("MapTiler picker: standard maps by name, in order, each with its id", () => {
-  const e = S.suggestions(src("maptiler"));
+  const e = S.suggestions(src("maptiler")).slice(0, 15);
   assert.deepEqual(e.map((x) => x.name), ["Satellite", "Satellite Hybrid", "Streets", "Outdoor", "Topo", "Base", "Dataviz", "Landscape", "Winter",
     "Ocean", "Backdrop", "Aquarelle", "Toner", "OpenStreetMap", "JP GSI Standard"]);
   assert.deepEqual(e.map((x) => x.id), ["satellite", "hybrid", "streets-v4", "outdoor-v4", "topo-v4", "base-v4", "dataviz-v4", "landscape-v4", "winter-v4",
@@ -124,12 +126,60 @@ test("nasa-night: hidden from the picker, Black Marble 2016 as JPEG, zoom 8", ()
   assert.ok(!/time=/.test(S.imageUrl(S.byId("nasa"), { z: 3, x0: 0, y0: 0, x1: 1, y1: 1 })));
 });
 
+test("MapTiler tilesets follow the maps in the picker, named with the Tileset prefix", () => {
+  const e = S.suggestions(src("maptiler"));
+  assert.equal(e.length, 20);
+  assert.deepEqual(e.slice(15), [
+    { name: "Tileset \u00b7 Hillshade", id: "tiles/hillshade" },
+    { name: "Tileset \u00b7 Hand-drawn hillshade", id: "tiles/hand-drawn-hillshade" },
+    { name: "Tileset \u00b7 Land gradient", id: "tiles/land-gradient" },
+    { name: "Tileset \u00b7 Land gradient dark", id: "tiles/land-gradient-dark" },
+    { name: "Tileset \u00b7 Satellite at night", id: "tiles/satellite-night" }]);
+});
+
+test("tileUrl for a tileset: tiles/<id>/<z>/<x>/<y>.webp with the key, no @2x", () => {
+  assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "tiles/hillshade" }, 3, 4, 2), "https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K1");
+  assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "tiles/hand-drawn-hillshade" }, 3, 4, 2), "https://api.maptiler.com/tiles/hand-drawn-hillshade/3/4/2.webp?key=K1");
+  assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "tiles/satellite-night" }, 0, 0, 0), "https://api.maptiler.com/tiles/satellite-night/0/0/0.webp?key=K1");
+  assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "tiles/unknown-set" }, 1, 1, 1), "https://api.maptiler.com/tiles/unknown-set/1/1/1.webp?key=K1");
+  assert.throws(() => S.tileUrl(src("maptiler"), { style: "tiles/hillshade" }, 0, 0, 0), /Needs a MapTiler key/);
+});
+
+test("tilesets: max zoom from the table, the rest of MapTiler at 20; tiles are 256 px", () => {
+  const mt = src("maptiler");
+  assert.equal(S.maxZoom(mt, { style: "tiles/hillshade" }), 12);
+  assert.equal(S.maxZoom(mt, { style: "tiles/hand-drawn-hillshade" }), 9);
+  assert.equal(S.maxZoom(mt, { style: "tiles/land-gradient" }), 4);
+  assert.equal(S.maxZoom(mt, { style: "tiles/land-gradient-dark" }), 4);
+  assert.equal(S.maxZoom(mt, { style: "tiles/satellite-night" }), 6);
+  assert.equal(S.maxZoom(mt, { style: "tiles/unknown-set" }), 20);
+  assert.equal(S.maxZoom(mt, { style: "satellite" }), 20);
+  assert.equal(S.maxZoom(src("eox"), {}), 15);
+  assert.equal(S.maxZoom(src("nasa"), {}), 8);
+  assert.equal(S.imagePx(mt, { style: "tiles/hillshade" }), 256);
+  assert.equal(S.imagePx(mt, { style: "satellite" }), 512);
+  assert.equal(S.imagePx(mt, { style: "streets-v4" }), 512);
+  assert.equal(S.imagePx(src("eox"), {}), 256);
+  assert.equal(S.imagePx(src("mapbox"), { style: "mapbox/satellite-v9" }), 512);
+  assert.equal(S.isTileset(mt, { style: "tiles/hillshade" }), true);
+  assert.equal(S.isTileset(mt, { style: "hybrid" }), false);
+  assert.equal(S.isTileset(src("mapbox"), { style: "tiles/hillshade" }), false);
+});
+
+test("tileset cache keys are filesystem-safe; labels use the friendly name when known", () => {
+  assert.equal(S.cacheKey(src("maptiler"), { key: "K", style: "tiles/hillshade" }), "maptiler-tiles_hillshade");
+  assert.match(S.cacheKey(src("maptiler"), { key: "K", style: "tiles/land-gradient-dark" }), /^[A-Za-z0-9._-]+$/);
+  assert.equal(S.label(src("maptiler"), { style: "tiles/hillshade" }), "MapTiler Hillshade");
+  assert.equal(S.label(src("maptiler"), { style: "tiles/satellite-night" }), "MapTiler Satellite at night");
+  assert.equal(S.label(src("maptiler"), { style: "tiles/unknown-set" }), "MapTiler tiles/unknown-set");
+});
+
 test("isSatellite: EOX, NASA, MapTiler satellite/hybrid, Mapbox *satellite*; never custom or street styles", () => {
   const yes = [{ source: "eox" }, { source: "nasa" }, { source: "maptiler", style: "satellite" }, { source: "maptiler", style: "hybrid" },
     { source: "maptiler", style: "satellite-v4" }, { source: "maptiler", style: "hybrid-v4" },
     { source: "mapbox", style: "mapbox/satellite-v9" }, { source: "mapbox", style: "mapbox/satellite-streets-v12" }];
   const no = [{ source: "custom" }, { source: "maptiler", style: "streets-v2" }, { source: "mapbox", style: "mapbox/streets-v12" },
-    { source: "nasa-night" }, null, undefined, {}];
+    { source: "nasa-night" }, null, undefined, {}, { source: "maptiler", style: "tiles/satellite-night" }, { source: "maptiler", style: "tiles/hillshade" }];
   yes.forEach((m) => assert.equal(S.isSatellite(m), true, JSON.stringify(m)));
   no.forEach((m) => assert.equal(S.isSatellite(m), false, JSON.stringify(m)));
 });

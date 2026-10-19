@@ -2025,7 +2025,7 @@ function startBlockingDownload(map, src, opts, plan, jobs) {
     if (r.unsupported) {
       stopImageryTimer(); resetImageryPlan();
       say(plan.night ? failLine(plan, "Cavalry can't load this image type (" + r.unsupported + ").")
-        : "Cavalry can't load this image type (" + r.unsupported + ") — choose a PNG or JPG style or link.");
+        : "Cavalry can't load this image type (" + r.unsupported + ") — choose a PNG, JPG or WebP style or link.");
       return;
     }
     if (r.status === 404 || r.status === 204) { GeoNet.markEmptyTile(j.base); missing++; }

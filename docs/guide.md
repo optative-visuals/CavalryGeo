@@ -188,6 +188,7 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
   source dropdown, a line says what the chosen source still needs, for example "Needs a MapTiler key: set it in
   ⚙ Settings." A custom link that doesn't start with https:// or lacks `{z}`, `{x}` or `{y}` gets its own line.
   Keys stay on your computer (`CavalryGeo/settings.json` in Cavalry's app-data folder), never in the scene.
+- **MapTiler maps and tilesets:** the Map ID / style picker lists MapTiler's standard maps by name (Satellite, Outdoor, Toner and the rest), then raster tilesets named "Tileset · …" (hillshade, land gradient, night). Any Map ID can still be typed, and a tileset stops at its own maximum zoom: deeper zooms show that level magnified.
 - **Assets window:** each map's imagery images (and its
   "Imagery source" composition) are filed in one group in the Assets window,
   **Cavalry Geo imagery · <map name>**, so they don't clutter it. Refresh controls gathers a
