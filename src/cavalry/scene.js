@@ -918,8 +918,7 @@ var GeoScene = (function () {
       var layers = findMapLayers(map).filter(function (l) { return drawOrder.indexOf(l.meta.category) >= 0; });
       layers.sort(function (a, b) { return drawOrder.indexOf(b.meta.category) - drawOrder.indexOf(a.meta.category); });
       layers.forEach(function (l) { sendToBack(l.id); });
-      findImagery(map).forEach(function (i) { sendToBack(i.groupId); });
-      sendOceanToBack(map);
+      stackImagery(map);
     } catch (e) { /* best-effort: leave layers where they landed */ }
     try { api.select(previous); } catch (e) { /* selection restore is cosmetic */ }
   }
@@ -1159,12 +1158,66 @@ var GeoScene = (function () {
     return d;
   }
 
+  // A tileset (a MapTiler "tiles/..." style, drawn over the fills) is not full map imagery.
+  function isTilesetImagery(i) {
+    var sm = i && i.meta && i.meta.sourceMeta;
+    if (!sm) return false;
+    try { return GeoSources.isTileset(GeoSources.byId(sm.source), { style: sm.style }); } catch (e) { return false; }
+  }
+
+  // Full map imagery goes under every base layer; a tileset sits directly above the topmost countries layer
+  // (or above the Ocean when there is none); the Ocean stays the bottom. Callers guard it.
+  function stackImagery(map) {
+    var imagery = findImagery(map);
+    imagery.filter(function (i) { return !isTilesetImagery(i); }).forEach(function (i) { sendToBack(i.groupId); });
+    sendOceanToBack(map);
+    var tilesets = imagery.filter(isTilesetImagery);
+    if (!tilesets.length) return;
+    var kids = api.getChildren(map.groupId), ocean = findOcean(map);
+    var countries = findMapLayers(map).filter(function (l) { return l.meta.category === "countries"; }).map(function (l) { return l.id; })
+      .filter(function (id) { return kids.indexOf(id) >= 0; }).sort(function (a, b) { return kids.indexOf(a) - kids.indexOf(b); })[0];
+    var anchor = countries || ocean;
+    tilesets.forEach(function (i) {
+      if (!anchor) { sendToBack(i.groupId); return; }
+      var at = function (x) { return api.getChildren(map.groupId).indexOf(x); };
+      if (at(i.groupId) > at(anchor)) raiseToTop(i.groupId); // placeAbove only steps a layer down
+      placeAbove(i.groupId, anchor);
+    });
+  }
+
   function sendImageryToBack(map) {
     if (typeof api.moveToBack !== "function" || typeof api.select !== "function") return;
     var previous = [];
     try { previous = api.getSelection(); } catch (e) { /* nothing selected */ }
-    try { findImagery(map).forEach(function (i) { sendToBack(i.groupId); }); sendOceanToBack(map); } catch (e) { /* best-effort */ }
+    try { stackImagery(map); } catch (e) { /* best-effort */ }
     try { api.select(previous); } catch (e) { /* cosmetic */ }
+  }
+
+  // The covering fills a first full map imagery build hides so the imagery shows: the Ocean, the lakes, water,
+  // parks and buildings layers (hidden, never deleted), and the countries' land fill (its borders stay). Returns
+  // the names hidden, the Ocean first and each once. Only what is visible now is hidden and named. Cosmetic: a layer
+  // that fails is skipped.
+  var COVERING_CATEGORIES = ["lakes", "water", "parks", "buildings"];
+  function hideCoveringFills(map) {
+    var names = [];
+    var note = function (name) { if (names.indexOf(name) < 0) names.push(name); };
+    var shownNow = function (id) { return api.hasAttribute(id, "hidden") && !api.get(id, "hidden"); };
+    try {
+      var ocean = findOcean(map);
+      if (ocean && shownNow(ocean)) { setHidden(ocean, true); note(OCEAN_NAME); }
+    } catch (e) { /* the Ocean is cosmetic */ }
+    findMapLayers(map).forEach(function (l) {
+      try {
+        if (COVERING_CATEGORIES.indexOf(l.meta.category) >= 0) {
+          if (!shownNow(l.id)) return;
+          setHidden(l.id, true); note(l.name);
+        } else if (l.meta.category === "countries") {
+          if (typeof api.hasFill === "function" && !api.hasFill(l.id)) return;
+          api.setFill(l.id, false); note(l.name + " fill");
+        }
+      } catch (e) { /* cosmetic: this layer is skipped */ }
+    });
+    return names;
   }
 
   function identityTransform() { return { "position.x": 0, "position.y": 0, "rotation.z": 0, "scale.x": 1, "scale.y": 1 }; }
@@ -1323,6 +1376,8 @@ var GeoScene = (function () {
     // night layers). Checked before anything is made, so a refused build leaves nothing behind.
     var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
+    // A first full map imagery build (no full map imagery on the map yet) hides the covering fills (hideCoveringFills).
+    var firstFullMap = !night && !GeoSources.isTileset(src, opts) && findImagery(map).filter(function (i) { return !isTilesetImagery(i); }).length === 0;
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && GeoSources.imagePx(src, opts) === 512) ? 0.5 : 1, pad = GeoSources.seeThrough(src, opts) ? 0 : 4, built = 0, unreadable = 0;
     // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
@@ -1488,9 +1543,11 @@ var GeoScene = (function () {
       showMattes();
       setHidden(outer, false);
       if (!night) sendImageryToBack(map); // night lights stay on top of their Day & night group
+      var hidden = [];
+      if (!night && firstFullMap) { try { hidden = hideCoveringFills(map); } catch (e) { /* cosmetic: the imagery is built either way */ } }
       try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
       result = { groupId: outer, tiles: built, levels: builtLevels.length, unreadable: unreadable };
-      if (night) result.night = true;
+      if (night) result.night = true; else result.hidden = hidden;
       // Only now, with the new imagery complete, is the old imagery for this cache key
       // queued for deletion (never the group just built, in case an id was reused).
       // It is hidden first so a half-deleted copy never shows.

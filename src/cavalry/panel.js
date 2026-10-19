@@ -1964,11 +1964,13 @@ function startImageryBuild(map, src, opts, plan, missing, failed) {
     // An older overlay without the plugin keeps its night lights, which stay visible, so they stay credited.
     var nightShown = st.wanted || (st.oldOverlay && st.night.length > 0);
     var credit = [GeoSources.attribution(src, opts), nightShown ? GeoSources.night().attribution : ""].filter(Boolean).join(" · ");
+    // What a first full map build hid, so the imagery shows: "Ocean, Countries fill and Lakes".
+    var hidNames = b.hidden || [], hid = hidNames.length ? " Hid " + (hidNames.length > 1 ? hidNames.slice(0, -1).join(", ") + " and " + hidNames[hidNames.length - 1] : hidNames[0]) + " so the imagery shows; turn them back on in the Layers window." : "";
     var text = "Imagery built: " + b.tiles + " " + itemNoun(plan) + " in " + b.levels + " level(s) (" + missing + " missing, " + failed + " failed)." +
       (failed ? " Press Build again to retry." : "") +
       (b.unreadable > 0 ? (plan.mode === "images" ? " " + b.unreadable + " image(s) couldn't be read by Cavalry and were skipped."
         : " " + b.unreadable + " tiles couldn't be read by Cavalry (palette PNGs) — choose a JPG style or link.") : "") +
-      " Credit: " + credit + note + gone;
+      " Credit: " + credit + hid + note + gone;
     if (st.wanted) {
       say(text + " Adding night lights…");
       startNightLights(map, text);
