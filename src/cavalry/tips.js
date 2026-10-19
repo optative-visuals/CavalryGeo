@@ -73,7 +73,7 @@ var GeoTips = (function () {
     "imagery.maptilerKey": "Your free MapTiler key. It stays on this computer, never in the scene.",
     "imagery.mapboxKey": "Your free Mapbox access token. It stays on this computer, never in the scene.",
     "imagery.styleField": "A MapTiler map ID or Mapbox style. Leave it blank for the default.",
-    "imagery.stylePicker": "MapTiler's standard maps and raster tilesets (hillshade, land gradient, night), or Mapbox styles. Picking one fills in the box beside it; any Map ID can still be typed.",
+    "imagery.stylePicker": "The chosen provider's maps: MapTiler's standard maps and raster tilesets (hillshade, land gradient, night), or Mapbox styles. Picking one fills in the Map ID box in \u2699 Settings; a custom Map ID is typed there.",
     "imagery.customLink": "A tile address containing {z}, {x} and {y}.",
     "imagery.customCredit": "The credit shown for your custom tiles.",
     "imagery.build": "Works out the pictures your camera animation needs, asks before downloading, then builds the imagery under the map.",

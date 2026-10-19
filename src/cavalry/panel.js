@@ -1740,6 +1740,7 @@ var maptilerKeyField = new ui.LineEdit(); maptilerKeyField.setPlaceholder("MapTi
 var mapboxKeyField = new ui.LineEdit(); mapboxKeyField.setPlaceholder("Mapbox access token (free at mapbox.com)");
 var styleField = new ui.LineEdit(); styleField.setPlaceholder("MapTiler Map ID or Mapbox style (blank = default)");
 var stylePicker = new ui.DropDown();
+var imageryMapLabel = GeoStyle.fieldLabel("Map");
 var customUrlField = new ui.LineEdit(); customUrlField.setPlaceholder("Custom tile link with {z}, {x} and {y}");
 var customAttrField = new ui.LineEdit(); customAttrField.setPlaceholder("Credit for the custom tiles");
 var buildImageryBtn = GeoStyle.primaryButton("Build imagery");
@@ -1788,17 +1789,44 @@ function imageryPlanSignature(map, src, opts) {
   }
   return JSON.stringify([map.cameraId, src.id, opts, camera, GeoScene.compFrameRange(), GeoScene.compSize()]);
 }
-// Refilling the style list may make Cavalry report a pick; that must not overwrite the Map ID / style box.
+// Refilling the style list, or selecting the entry that matches the box, may make Cavalry report a pick;
+// that must not overwrite the Map ID / style box or reset the plan.
 var refreshingSource = false;
+// The entries the picker shows, in order: the source's maps, plus a "Custom: <id>" entry for a typed id.
+var stylePickerEntries = [];
+function sameStyleId(a, b) { return String(a).trim().toLowerCase() === String(b).trim().toLowerCase(); }
+// The source's own entry for this id (ids match without case), or null.
+function listedStyle(src, id) {
+  var list = GeoSources.suggestions(src);
+  for (var i = 0; i < list.length; i++) if (sameStyleId(list[i].id, id)) return list[i];
+  return null;
+}
+// True when another provider lists this id, e.g. a MapTiler map id while Mapbox is picked.
+function listedElsewhere(src, id) {
+  return GeoSources.list().some(function (s) { return s.id !== src.id && listedStyle(s, id) !== null; });
+}
+// Refills the picker for the source, then selects the entry the Map ID box holds (blank: the source's default).
+// A typed id that no list has is shown as a "Custom: <id>" entry. Sources without a list hide the Map row.
+function syncStylePicker() {
+  var src = currentSource(), text = styleField.getText().trim(), entries = GeoSources.suggestions(src);
+  var hasList = entries.length > 0;
+  [imageryMapLabel, stylePicker].forEach(function (w) { if (typeof w.setHidden === "function") w.setHidden(!hasList); });
+  if (hasList && text && !listedStyle(src, text)) entries.push({ name: "Custom: " + text.replace(/</g, ""), id: text, custom: true });
+  refreshingSource = true;
+  try {
+    stylePickerEntries = entries;
+    stylePicker.clear();
+    entries.forEach(function (s) { stylePicker.addEntry(s.name); });
+    var want = text || String(src.defaultStyle || ""), at = -1;
+    for (var i = 0; want && i < entries.length; i++) if (sameStyleId(entries[i].id, want)) { at = i; break; }
+    if (at >= 0) stylePicker.setValue(at);
+  } finally { refreshingSource = false; }
+}
 function refreshSourceUi() {
   var src = currentSource();
   licenceLabel.setText(src.licence);
   refreshKeyHint();
-  refreshingSource = true;
-  try {
-    stylePicker.clear();
-    GeoSources.suggestions(src).forEach(function (s) { stylePicker.addEntry(s.name); });
-  } finally { refreshingSource = false; }
+  syncStylePicker();
   resetImageryPlan();
 }
 function saveImagerySettings() {
@@ -1839,15 +1867,24 @@ function runImageryTimer(intervalMs, tick) {
   imageryState.timer.start();
 }
 // The keys, token, style, link and credit boxes are saved when you leave them, not only by Build imagery.
-[maptilerKeyField, mapboxKeyField, styleField, customUrlField, customAttrField].forEach(function (f) {
+[maptilerKeyField, mapboxKeyField, customUrlField, customAttrField].forEach(function (f) {
   f.onValueCommitted = guard(function () { saveImagerySettings(); refreshKeyHint(); });
 });
+// The Map ID box also re-syncs the picker, so the picker shows the id just typed.
+styleField.onValueCommitted = guard(function () { saveImagerySettings(); refreshKeyHint(); syncStylePicker(); });
 refreshSourceUi();
-sourcePicker.onValueChanged = guard(function () { refreshSourceUi(); });
+sourcePicker.onValueChanged = guard(function () {
+  // Another provider's map id means nothing here: the box is cleared (blank = this provider's default).
+  var src = currentSource(), text = styleField.getText().trim();
+  if (text && !listedStyle(src, text) && listedElsewhere(src, text)) { styleField.setText(""); saveImagerySettings(); }
+  refreshSourceUi();
+});
 stylePicker.onValueChanged = guard(function () {
-  if (refreshingSource) return; // refilling the list is not the user picking a style
-  var entry = GeoSources.suggestions(currentSource())[stylePicker.getValue()];
-  if (entry) styleField.setText(entry.id);
+  if (refreshingSource) return; // filling or selecting the list in code is not the user picking a style
+  var entry = stylePickerEntries[stylePicker.getValue()];
+  if (!entry || entry.custom) return; // the Custom entry is the box's own id: picking it changes nothing
+  styleField.setText(entry.id);
+  saveImagerySettings();
   resetImageryPlan();
 });
 
@@ -2147,6 +2184,7 @@ TAB_BUILDERS.push(function (tabs) {
     GeoStyle.panel([
       GeoStyle.heading("Source"),
       sourcePicker,
+      row(imageryMapLabel, stylePicker),
       keyHint,
       licenceLabel
     ]),
@@ -2239,7 +2277,7 @@ var settingsColumn = column([
     GeoStyle.heading("Keys and links"),
     row(GeoStyle.fieldLabel("MapTiler key"), maptilerKeyField),
     row(GeoStyle.fieldLabel("Mapbox token"), mapboxKeyField),
-    row(GeoStyle.fieldLabel("Map ID / style"), styleField, stylePicker),
+    row(GeoStyle.fieldLabel("Map ID / style"), styleField),
     row(GeoStyle.fieldLabel("Custom link"), customUrlField),
     row(GeoStyle.fieldLabel("Custom credit"), customAttrField)
   ]),

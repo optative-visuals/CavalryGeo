@@ -4673,6 +4673,7 @@ test("labelled rows use fieldLabel (fixed width 92): Map, Layers, Imagery, Label
   assert.ok(holds(rowLabel(over, "UTC time (0-24)"), context.dayNightTimeField));
   const img = context.settingsColumn;
   [["MapTiler key", "maptilerKeyField"], ["Mapbox token", "mapboxKeyField"], ["Map ID / style", "styleField"], ["Custom link", "customUrlField"], ["Custom credit", "customAttrField"]].forEach((x) => assert.ok(holds(rowLabel(img, x[0]), context[x[1]]), x[0]));
+  assert.ok(!holds(img, context.stylePicker), "the Map picker is not in Settings");
   const routes = context.labelPages.pages[1];
   [["Shape", "routeShapePicker"], ["Arc height %", "arcField"], ["Traveller", "travellerPicker"]].forEach((x) => assert.ok(holds(rowLabel(routes, x[0]), context[x[1]]), x[0]));
   const data = context.sectionPages.pages[4];
@@ -13258,6 +13259,113 @@ test("Imagery pickers: a throwing source change is caught, and refilling the sty
   assert.doesNotThrow(() => { context.GeoSources.list = () => { throw new Error("bad"); }; sp.onValueChanged(); });
 });
 
+test("Imagery tab: the Map label and picker sit right under the source, and Settings holds only the box", () => {
+  const { context, ui } = buildSandbox();
+  const source = panelsOf(context, context.sectionPages.pages[2])[0];
+  assert.deepEqual(panelHeadings(context, source), ["Source"]);
+  const items = panelContents(source);
+  const i = items.indexOf(context.sourcePicker);
+  assert.ok(i >= 0 && items[i + 1] instanceof ui.HLayout, "the Map row comes right under the source");
+  assert.deepEqual(items[i + 1]._items, [context.imageryMapLabel, context.stylePicker]);
+  assert.equal(context.imageryMapLabel.getText(), "Map");
+  assert.ok(holds(context.settingsColumn, context.styleField));
+  assert.ok(!holds(context.settingsColumn, context.stylePicker), "the picker is not in Settings");
+});
+
+test("Imagery picker follows the provider: MapTiler and Mapbox lists, hidden for EOX, back again", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const pick = (id) => { context.sourcePicker.setValue(ids.indexOf(id)); context.sourcePicker.onValueChanged(); };
+  pick("maptiler");
+  assert.equal(context.stylePicker._entries.length, 20);
+  assert.ok(!context.stylePicker.isHidden() && !context.imageryMapLabel.isHidden());
+  pick("mapbox");
+  assert.deepEqual(plain(context.stylePicker._entries), ["mapbox/satellite-v9", "mapbox/satellite-streets-v12", "mapbox/streets-v12", "mapbox/outdoors-v12", "mapbox/light-v11", "mapbox/dark-v11"]);
+  assert.ok(!context.stylePicker.isHidden());
+  pick("eox");
+  assert.ok(context.stylePicker.isHidden() && context.imageryMapLabel.isHidden(), "EOX has no maps to pick");
+  pick("maptiler");
+  assert.ok(!context.stylePicker.isHidden() && !context.imageryMapLabel.isHidden());
+});
+
+test("Imagery picker shows what the Map ID box holds: a listed id, the default, a tileset, or a custom id", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  const sp = context.stylePicker, shown = () => sp._entries[sp.getValue()];
+  const commit = (text) => { context.styleField.setText(text); context.styleField.onValueCommitted(); };
+  commit("outdoor-v4");
+  assert.equal(shown(), "Outdoor");
+  commit("");
+  assert.equal(shown(), "Satellite", "a blank box shows the provider's default");
+  commit("tiles/hillshade");
+  assert.equal(shown(), "Tileset \u00b7 Hillshade");
+  commit("mine");
+  assert.equal(sp._entries.length, 21);
+  assert.equal(sp._entries[20], "Custom: mine");
+  assert.equal(shown(), "Custom: mine");
+  assert.equal(context.styleField.getText(), "mine", "showing a custom id does not change the box");
+});
+
+test("Imagery picker: committing a new id in the Settings box re-syncs the picker", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  context.styleField.setText("streets-v4");
+  context.styleField.onValueCommitted();
+  assert.equal(context.stylePicker._entries[context.stylePicker.getValue()], "Streets");
+  assert.equal(context.stylePicker._entries.length, 20, "no custom entry for a listed id");
+});
+
+test("Imagery picker: switching provider clears another provider's id, but keeps a custom id", () => {
+  const { context, api } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const pick = (id) => { context.sourcePicker.setValue(ids.indexOf(id)); context.sourcePicker.onValueChanged(); };
+  const sp = context.stylePicker;
+  pick("maptiler");
+  context.styleField.setText("outdoor-v4");
+  context.styleField.onValueCommitted();
+  pick("mapbox");
+  assert.equal(context.styleField.getText(), "", "a MapTiler id is cleared for Mapbox");
+  assert.equal(settingsOf(api).style, "", "the cleared box is saved");
+  assert.equal(sp._entries[sp.getValue()], "mapbox/satellite-v9", "blank shows Mapbox's default");
+  pick("maptiler");
+  context.styleField.setText("mine");
+  context.styleField.onValueCommitted();
+  pick("mapbox");
+  assert.equal(context.styleField.getText(), "mine", "a custom id survives the switch");
+  assert.equal(sp._entries[sp.getValue()], "Custom: mine");
+});
+
+test("Imagery picker: a pick fills and saves the box and resets the plan; a custom entry is a no-op; a sync never writes the box", () => {
+  const { context, api } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const sp = context.stylePicker;
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  context.imageryState.plan = { stale: true };
+  sp.setValue(3); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  assert.equal(settingsOf(api).style, "outdoor-v4", "the pick is saved");
+  assert.equal(context.imageryState.plan, null, "the pick resets the plan");
+  context.styleField.setText("mine");
+  context.styleField.onValueCommitted();
+  context.imageryState.plan = { stale: true };
+  sp.setValue(20); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "mine", "picking the custom entry leaves the box unchanged");
+  assert.deepEqual(context.imageryState.plan, { stale: true });
+  // A Cavalry that reports a pick whenever the picker is set in code must not touch the box or the plan.
+  const setValue = sp.setValue;
+  sp.setValue = function (v) { setValue.call(sp, v); sp.onValueChanged(); };
+  context.styleField.setText("outdoor-v4");
+  context.styleField.onValueCommitted();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  assert.deepEqual(context.imageryState.plan, { stale: true }, "syncing the selection keeps the plan");
+  sp.setValue = setValue;
+});
+
 // ---- The panel follows the active composition -------------------------------------------
 const CAM0 = { lat: 0, lon: 0, zoom: 2, rotation: 0, projection: 0 };
 function follower(ui) { assert.equal(ui._callbackObjects.length, 1, "one callback object is registered"); return ui._callbackObjects[0]; }
@@ -14904,7 +15012,7 @@ test("The cog button is 22 wide and 24 tall; it shows the cog icon when the file
 
 test("Keys and cache buttons moved: Settings holds them; Imagery, Layers and Map don't", () => {
   const { context } = buildSandbox();
-  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "stylePicker", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
+  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
   moved.forEach((n) => assert.ok(holds(context.settingsColumn, context[n]), n + " is in Settings"));
   const elsewhere = [context.sectionPages.pages[0], context.sectionPages.pages[2], context.layersPages.widget];
   moved.forEach((n) => elsewhere.forEach((page) => assert.ok(!holds(page, context[n]), n + " left its old page")));
