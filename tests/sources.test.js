@@ -166,6 +166,25 @@ test("tilesets: max zoom from the table, the rest of MapTiler at 20; tiles are 2
   assert.equal(S.isTileset(src("mapbox"), { style: "tiles/hillshade" }), false);
 });
 
+test("a tileset with no name after tiles/ throws a clear message instead of asking for a 404", () => {
+  const mt = src("maptiler");
+  const hint = /^Error: Type a tileset name after tiles\/, e\.g\. tiles\/hillshade\.$/;
+  assert.throws(() => S.tileUrl(mt, { key: "K1", style: "tiles/" }, 0, 0, 0), hint);
+  assert.throws(() => S.tileUrl(mt, { key: "K1", style: "tiles/ " }, 0, 0, 0), hint);
+  assert.throws(() => S.tileUrl(mt, { key: "K1", style: "  Tiles/  " }, 0, 0, 0), hint);
+  assert.equal(/</.test("Type a tileset name after tiles/, e.g. tiles/hillshade."), false);
+});
+
+test("the tiles/ prefix is case-insensitive and trimmed: Tiles/hillshade is the hillshade tileset", () => {
+  const mt = src("maptiler");
+  assert.equal(S.tileUrl(mt, { key: "K1", style: "Tiles/hillshade" }, 3, 4, 2), "https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K1");
+  assert.equal(S.tileUrl(mt, { key: "K1", style: "  TILES/hillshade  " }, 3, 4, 2), "https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K1");
+  assert.equal(S.maxZoom(mt, { style: "Tiles/hillshade" }), 12);
+  assert.equal(S.imagePx(mt, { style: "Tiles/hillshade" }), 256);
+  assert.equal(S.isTileset(mt, { style: "Tiles/hillshade" }), true);
+  assert.equal(S.label(mt, { style: "Tiles/hillshade" }), "MapTiler Hillshade");
+});
+
 test("tileset cache keys are filesystem-safe; labels use the friendly name when known", () => {
   assert.equal(S.cacheKey(src("maptiler"), { key: "K", style: "tiles/hillshade" }), "maptiler-tiles_hillshade");
   assert.match(S.cacheKey(src("maptiler"), { key: "K", style: "tiles/land-gradient-dark" }), /^[A-Za-z0-9._-]+$/);

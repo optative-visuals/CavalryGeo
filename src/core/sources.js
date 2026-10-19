@@ -70,8 +70,8 @@ var GeoSources = (function () {
   // A MapTiler style "tiles/<id>" is a raster tileset, not a map: its id, or null for anything else.
   function tilesetId(src, opts) {
     if (!src || src.id !== "maptiler") return null;
-    var st = style(src, opts);
-    return st.indexOf(TILESET_PREFIX) === 0 ? st.slice(TILESET_PREFIX.length) : null;
+    var m = /^tiles\/(.*)$/i.exec(style(src, opts));
+    return m ? m[1].trim() : null;
   }
   function knownTileset(id) { return id !== null && MAPTILER_TILESETS.hasOwnProperty(id) ? MAPTILER_TILESETS[id] : null; }
   function isTileset(src, opts) { return tilesetId(src, opts) !== null; }
@@ -116,6 +116,7 @@ var GeoSources = (function () {
       if (!opts.key) throw new Error(missingSetting(src, opts));
       var tileset = tilesetId(src, opts);
       if (tileset !== null) {
+        if (!tileset) throw new Error("Type a tileset name after tiles/, e.g. tiles/hillshade.");
         var known = knownTileset(tileset);
         return "https://api.maptiler.com/tiles/" + encodeURIComponent(tileset) + "/" + z + "/" + x + "/" + y + "." + (known ? known.format : "webp") +
           "?key=" + encodeURIComponent(opts.key);
