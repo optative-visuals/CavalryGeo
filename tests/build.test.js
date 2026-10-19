@@ -2507,7 +2507,7 @@ test("beginImageryBuild adds one tile per zero-budget step and keeps the new gro
   assert.equal(last.done, true);
   assert.equal(last.built, 48);
   assert.equal(last.total, 48);
-  assert.deepEqual(plain(last.result), { groupId: outer, tiles: 48, levels: 1, unreadable: 0 });
+  assert.deepEqual(plain(last.result), { groupId: outer, tiles: 48, levels: 1, unreadable: 0, hidden: [] });
   assert.equal(api.get(outer, "hidden"), false, "shown once the build is complete");
   assert.equal(api.getChildren(levelGroup(api, outer, 4)).length, 48);
   const kids = api.getChildren(map.groupId);
@@ -15468,4 +15468,176 @@ test("panel catches up with the canvas: a projection change moves no preview's v
   context.syncToCanvas();
   assert.deepEqual(shown, [], "no preview is shown again");
   [context.preview, context.pinsPreview, context.routesPreview].forEach((p, i) => assert.equal(JSON.stringify(p._view()), views[i], "the view is unchanged"));
+});
+
+// ---- Covering fills and tilesets above the fills (hide-fills) -----------------------------
+// The fake's layers have no "hidden" attribute until one is set (Cavalry's always have one), so a fixture shows the layers it makes.
+function showLayers(api, ids) { ids.forEach((id) => api.set(id, { hidden: false })); return ids; }
+// A map with the covering fills, the layers that must stay visible and a data layer with a fill, all shown.
+function fillsMap() {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene, E = { v: 1, kind: "polygon", f: [] };
+  const map = G.createMap("World", { lat: 0, lon: 0, zoom: 4, rotation: 0, projection: 0 });
+  const L = { ocean: oceanOf(api, map) };
+  const add = (key, name, category, style) => { L[key] = G.createMapLayer(map, name, E, { camera: map.cameraId, category: category }, style || {}, {}); };
+  add("countries", "Countries", "countries", { fill: "#112233", stroke: "#445566", width: 1 });
+  add("states", "States", "states", { stroke: "#334455", width: 1 });
+  add("lakes", "Lakes", "lakes", { fill: "#2244aa" });
+  add("water", "Water", "water", { fill: "#2244aa" });
+  add("parks", "Parks", "parks", { fill: "#22aa44" });
+  add("buildings", "Buildings", "buildings", { fill: "#888888" });
+  add("coastlines", "Coastlines", "coastlines", { stroke: "#000000", width: 1 });
+  add("roads", "Roads", "roads", { stroke: "#ffffff", width: 1 });
+  add("cities", "Cities", "cities", {});
+  add("data", "Data", "data", { fill: "#ff0000" });
+  L.pin = G.addPin(map, "Pin", 0, 0);
+  showLayers(api, Object.keys(L).map((k) => L[k]));
+  context.GeoNet.cachedTile = (base) => base + ".jpg";
+  return { context, api, map, L, G };
+}
+const FULL_HIDDEN = ["Ocean", "Countries fill", "Lakes", "Water", "Parks", "Buildings"];
+// EOX is a full-map source; the MapTiler hillshade is a tileset (drawn over the fills, not hiding them).
+function buildFull(context, G, map) { const src = tileSource(context); return G.buildImagery(map, src, {}, G.planImagery(map, src, {})); }
+function buildTileset(context, G, map) {
+  const src = context.GeoSources.byId("maptiler"), opts = { key: "K", style: "tiles/hillshade" };
+  context.GeoNet.cachedTile = (base) => base + ".webp";
+  return G.buildImagery(map, src, opts, G.planImagery(map, src, opts));
+}
+
+test("the first full-map imagery build hides the Ocean and the filled layers, turns off the countries fill, and lists what it hid", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const r = buildFull(context, G, map);
+  assert.deepEqual(plain(r.hidden), FULL_HIDDEN);
+  ["ocean", "lakes", "water", "parks", "buildings"].forEach((k) => assert.equal(api.get(L[k], "hidden"), true, k + " is hidden"));
+  assert.equal(api.hasFill(L.countries), false, "the countries land fill is off");
+  assert.equal(api.hasStroke(L.countries), true, "the countries borders stay");
+  assert.equal(api.get(L.countries, "hidden"), false, "the countries layer is not hidden");
+  ["countries", "states", "coastlines", "roads", "cities", "pin", "data"].forEach((k) => assert.equal(api.get(L[k], "hidden"), false, k + " stays visible"));
+  assert.equal(api.hasFill(L.data), true, "a data layer keeps its fill");
+});
+
+test("a second full-map build hides nothing, so a layer the user re-showed stays visible", () => {
+  const { context, api, map, L, G } = fillsMap();
+  buildFull(context, G, map);
+  api.set(L.lakes, { hidden: false });
+  const r = buildFull(context, G, map);
+  assert.deepEqual(plain(r.hidden), []);
+  assert.equal(api.get(L.lakes, "hidden"), false, "the re-shown lakes stay visible");
+  assert.equal(api.hasFill(L.countries), false, "the countries fill stays as the first build left it");
+});
+
+test("a tileset build hides nothing, and the first full-map build after it still hides", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const t = buildTileset(context, G, map);
+  assert.deepEqual(plain(t.hidden), []);
+  assert.equal(api.get(L.lakes, "hidden"), false);
+  assert.equal(api.hasFill(L.countries), true, "the countries fill is untouched by a tileset");
+  const e = buildFull(context, G, map);
+  assert.deepEqual(plain(e.hidden), FULL_HIDDEN, "tileset imagery does not count as full map imagery");
+});
+
+test("night lights never hide anything", () => {
+  const { context, api, map, L, G } = fillsMap();
+  G.addDayNight(map, { dayOfYear: 80, utcTime: 12 });
+  const n = G.buildImagery(map, context.GeoSources.night(), {}, G.planNightLights(map));
+  assert.equal(n.night, true);
+  assert.equal(n.hidden, undefined, "night results carry no hidden list");
+  assert.equal(api.get(L.lakes, "hidden"), false);
+  assert.equal(api.hasFill(L.countries), true);
+});
+
+test("a tileset sits directly above the countries and under the states and lakes; full imagery stays under the countries; the Ocean stays last", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const t = buildTileset(context, G, map);
+  let kids = api.getChildren(map.groupId), pos = (id) => kids.indexOf(id);
+  assert.equal(pos(t.groupId), pos(L.countries) - 1, "directly above the countries");
+  assert.ok(pos(L.states) < pos(t.groupId) && pos(L.lakes) < pos(t.groupId), "under the states and lakes");
+  const e = buildFull(context, G, map);
+  kids = api.getChildren(map.groupId); pos = (id) => kids.indexOf(id);
+  assert.equal(pos(e.groupId), kids.length - 2, "full imagery just above the Ocean");
+  assert.ok(pos(L.countries) < pos(e.groupId), "full imagery under the countries");
+  assert.equal(pos(t.groupId), pos(L.countries) - 1, "the tileset is still directly above the countries");
+  assert.equal(pos(L.ocean), kids.length - 1, "the Ocean stays at the bottom");
+});
+
+test("full imagery built first and a tileset after it: the tileset still sits above the countries", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const e = buildFull(context, G, map);
+  const t = buildTileset(context, G, map);
+  const kids = api.getChildren(map.groupId), pos = (id) => kids.indexOf(id);
+  assert.equal(pos(t.groupId), pos(L.countries) - 1, "directly above the countries");
+  assert.ok(pos(L.countries) < pos(e.groupId) && pos(e.groupId) < pos(L.ocean), "full imagery between the countries and the Ocean");
+});
+
+test("without a countries layer a tileset sits directly above the Ocean", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4);
+  context.GeoNet.cachedTile = (base) => base + ".webp";
+  const src = context.GeoSources.byId("maptiler"), opts = { key: "K", style: "tiles/hillshade" };
+  const t = context.GeoScene.buildImagery(map, src, opts, context.GeoScene.planImagery(map, src, opts));
+  const kids = api.getChildren(map.groupId);
+  assert.equal(kids[kids.length - 2], t.groupId, "directly above the Ocean");
+  assert.equal(kids[kids.length - 1], oceanOf(api, map), "the Ocean stays last");
+});
+
+test("restacking the base layers keeps the tileset above the countries and the Ocean last", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const t = buildTileset(context, G, map);
+  G.createMapLayer(map, "Rivers", { v: 1, kind: "line", f: [] }, { camera: map.cameraId, category: "rivers" }, {}, {});
+  G.restackBaseLayers(map, context.DRAW_ORDER);
+  const kids = api.getChildren(map.groupId), pos = (id) => kids.indexOf(id);
+  assert.equal(pos(t.groupId), pos(L.countries) - 1, "still directly above the countries after a restack");
+  assert.equal(pos(L.ocean), kids.length - 1, "the Ocean stays last");
+});
+
+test("day & night still lands above a tileset that sits between the base layers", () => {
+  const { context, api, map, L, G } = fillsMap();
+  const t = buildTileset(context, G, map);
+  const g = G.addDayNight(map, { dayOfYear: 80, utcTime: 12 }).groupId;
+  const kids = api.getChildren(map.groupId), pos = (id) => kids.indexOf(id);
+  assert.ok(pos(g) < pos(t.groupId), "above the tileset");
+  assert.ok(pos(t.groupId) < pos(L.countries) && pos(g) < pos(L.ocean), "the tileset still sits above the countries, and everything sits above the Ocean");
+});
+
+test("applyMapStyle after the hide leaves the countries fill off", () => {
+  const { context, api, map, L, G } = fillsMap();
+  buildFull(context, G, map);
+  G.applyMapStyle(map, context.GeoStyles.builtIn("Light"));
+  assert.equal(api.hasFill(L.countries), false, "a style only sets colours");
+  assert.equal(api.get(L.lakes, "hidden"), true, "the hidden layers stay hidden");
+});
+
+// The build's message says what it hid, after the credit and before any note (hide-fills).
+function runEoxBuild(context, api) {
+  const curl = fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0); // EOX
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  assert.equal(curl.calls.length, 1, "one background curl for the whole stage");
+  runTimersOnce(api);
+  curl.deliver();
+  runTimers(api);
+  return context.statusLabel.getText();
+}
+test("the imagery build message lists what it hid, so the imagery shows", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const G = context.GeoScene, map = G.findMaps()[0], E = { v: 1, kind: "polygon", f: [] };
+  const countries = G.createMapLayer(map, "Countries", E, { camera: map.cameraId, category: "countries" }, { fill: "#112233", stroke: "#445566", width: 1 }, {});
+  const lakes = G.createMapLayer(map, "Lakes", E, { camera: map.cameraId, category: "lakes" }, { fill: "#2244aa" }, {});
+  showLayers(api, [countries, lakes, oceanOf(api, map)]);
+  const text = runEoxBuild(context, api);
+  assert.match(text, /^Imagery built: /);
+  assert.ok(text.indexOf(" Hid Ocean, Countries fill and Lakes so the imagery shows; turn them back on in the Layers window.") > 0, text);
+  assert.ok(text.indexOf("Credit: EOxCloudless") < text.indexOf(" Hid "), "the credit comes before the list");
+  assert.ok(!/[<>]/.test(text), "no angle brackets in the message");
+});
+test("the imagery build message says nothing about hiding when nothing was hidden", () => {
+  const { context, api } = buildSandbox();
+  createWorldMap(context);
+  const map = context.GeoScene.findMaps()[0];
+  api.set(oceanOf(api, map), { hidden: true });
+  const text = runEoxBuild(context, api);
+  assert.match(text, /Credit: EOxCloudless/);
+  assert.ok(!/ Hid /.test(text), text);
 });
