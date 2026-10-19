@@ -77,8 +77,9 @@ var GeoSources = (function () {
   }
   function knownTileset(id) { return id !== null && MAPTILER_TILESETS.hasOwnProperty(id) ? MAPTILER_TILESETS[id] : null; }
   function isTileset(src, opts) { return tilesetId(src, opts) !== null; }
-  // Tilesets are 256 px tiles (no @2x); everything else keeps the source's own size.
-  function imagePx(src, opts) { return isTileset(src, opts) ? 256 : src.imagePx; }
+  // The size a source's tiles are expected to be. Tilesets come at 512 px like MapTiler's maps (probed 2026-10-19);
+  // the build scales each tile by its real pixel size when Cavalry reports it, and uses this only when it doesn't.
+  function imagePx(src) { return src.imagePx; }
   // A known tileset stops at its own zoom; a map, or an unknown tileset, at the source's.
   function maxZoom(src, opts) {
     var t = knownTileset(tilesetId(src, opts));

@@ -156,7 +156,7 @@ test("tilesets: max zoom from the table, the rest of MapTiler at 20; tiles are 2
   assert.equal(S.maxZoom(mt, { style: "satellite" }), 20);
   assert.equal(S.maxZoom(src("eox"), {}), 15);
   assert.equal(S.maxZoom(src("nasa"), {}), 8);
-  assert.equal(S.imagePx(mt, { style: "tiles/hillshade" }), 256);
+  assert.equal(S.imagePx(mt, { style: "tiles/hillshade" }), 512);
   assert.equal(S.imagePx(mt, { style: "satellite" }), 512);
   assert.equal(S.imagePx(mt, { style: "streets-v4" }), 512);
   assert.equal(S.imagePx(src("eox"), {}), 256);
@@ -180,7 +180,7 @@ test("the tiles/ prefix is case-insensitive and trimmed: Tiles/hillshade is the 
   assert.equal(S.tileUrl(mt, { key: "K1", style: "Tiles/hillshade" }, 3, 4, 2), "https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K1");
   assert.equal(S.tileUrl(mt, { key: "K1", style: "  TILES/hillshade  " }, 3, 4, 2), "https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K1");
   assert.equal(S.maxZoom(mt, { style: "Tiles/hillshade" }), 12);
-  assert.equal(S.imagePx(mt, { style: "Tiles/hillshade" }), 256);
+  assert.equal(S.imagePx(mt, { style: "Tiles/hillshade" }), 512);
   assert.equal(S.isTileset(mt, { style: "Tiles/hillshade" }), true);
   assert.equal(S.label(mt, { style: "Tiles/hillshade" }), "MapTiler Hillshade");
 });

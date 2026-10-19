@@ -2247,7 +2247,7 @@ test("planImagery caps a MapTiler tileset at its own max zoom; a map keeps zoom 
   assert.equal(asked[0], 20);
 });
 
-test("a WebP tileset is placed at full scale (260/256), while a 512-px map stays at half", () => {
+test("a WebP tileset (512 px, like the maps) is placed at half scale when Cavalry reports no resolution", () => {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
   let n = 0;
@@ -2256,7 +2256,23 @@ test("a WebP tileset is placed at full scale (260/256), while a 512-px map stays
   const plan = context.GeoScene.planImagery(map, src, opts);
   const r = context.GeoScene.buildImagery(map, src, opts, plan);
   const tile = api.getChildren(levelGroup(api, r.groupId, 4))[0];
-  assert.equal(api.get(tile, "scale.x"), 260 / 256);
+  assert.equal(api.get(tile, "scale.x"), 260 / 512);
+});
+
+test("a tile is scaled from its real pixel size when Cavalry reports it, whatever the source expects", () => {
+  [[512, 260 / 512], [256, 260 / 256]].forEach(([size, want]) => {
+    const { context, api } = buildSandbox();
+    const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+    let n = 0;
+    context.GeoNet.cachedTile = (base) => (n++ % 2 ? base + ".webp" : null);
+    const add = api.addAssetToComp;
+    api.addAssetToComp = function () { const ids = add.apply(this, arguments), id = Array.isArray(ids) ? ids[0] : ids; api.set(id, { resolution: { x: size, y: size } }); return ids; };
+    const opts = { key: "K", style: "tiles/hillshade" };
+    const r = context.GeoScene.buildImagery(map, src, opts, context.GeoScene.planImagery(map, src, opts));
+    const tile = api.getChildren(levelGroup(api, r.groupId, 4))[0];
+    assert.equal(api.get(tile, "scale.x"), want, size + " px");
+    assert.equal(api.get(tile, "scale.y"), want, size + " px");
+  });
 });
 
 test("GeoFetch.poll counts a WebP tile as whole", () => {
