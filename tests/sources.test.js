@@ -157,6 +157,11 @@ test("tilesets: max zoom from the table, the rest of MapTiler at 20; tiles are 2
   assert.equal(S.maxZoom(src("eox"), {}), 15);
   assert.equal(S.maxZoom(src("nasa"), {}), 8);
   assert.equal(S.imagePx(mt, { style: "tiles/hillshade" }), 512);
+  assert.equal(S.seeThrough(mt, { style: "tiles/hillshade" }), true);
+  assert.equal(S.seeThrough(mt, { style: "tiles/hand-drawn-hillshade" }), true);
+  assert.equal(S.seeThrough(mt, { style: "tiles/land-gradient" }), false);
+  assert.equal(S.seeThrough(mt, { style: "satellite" }), false);
+  assert.equal(S.seeThrough(src("eox"), {}), false);
   assert.equal(S.imagePx(mt, { style: "satellite" }), 512);
   assert.equal(S.imagePx(mt, { style: "streets-v4" }), 512);
   assert.equal(S.imagePx(src("eox"), {}), 256);

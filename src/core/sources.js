@@ -13,8 +13,9 @@ var GeoSources = (function () {
   // MapTiler raster tilesets, picked as "tiles/<id>": the format of the files, the highest zoom they
   // go to (deeper zooms show that level magnified) and the friendly name.
   var MAPTILER_TILESETS = {
-    "hillshade": { name: "Hillshade", format: "webp", maxZoom: 12 },
-    "hand-drawn-hillshade": { name: "Hand-drawn hillshade", format: "webp", maxZoom: 9 },
+    // seeThrough: the tiles are semi-transparent (probed 2026-10-19), so overlapping tile edges would show.
+    "hillshade": { name: "Hillshade", format: "webp", maxZoom: 12, seeThrough: true },
+    "hand-drawn-hillshade": { name: "Hand-drawn hillshade", format: "webp", maxZoom: 9, seeThrough: true },
     "land-gradient": { name: "Land gradient", format: "webp", maxZoom: 4 },
     "land-gradient-dark": { name: "Land gradient dark", format: "webp", maxZoom: 4 },
     "satellite-night": { name: "Satellite at night", format: "webp", maxZoom: 6 }
@@ -84,6 +85,11 @@ var GeoSources = (function () {
   function maxZoom(src, opts) {
     var t = knownTileset(tilesetId(src, opts));
     return t ? t.maxZoom : src.maxZoom;
+  }
+  // True for a semi-transparent tileset (hillshade): its tiles are placed edge to edge, without the seam overlap.
+  function seeThrough(src, opts) {
+    var t = knownTileset(tilesetId(src, opts));
+    return !!(t && t.seeThrough);
   }
   function fill(template, z, x, y) { return template.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y); }
   function style(src, opts) { return String((opts && opts.style) || "").trim() || src.defaultStyle || ""; }
@@ -194,7 +200,7 @@ var GeoSources = (function () {
     return false;
   }
 
-  return { list: list, night: night, isSatellite: isSatellite, byId: byId, suggestions: suggestions, isTileset: isTileset, imagePx: imagePx, maxZoom: maxZoom, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
+  return { list: list, night: night, isSatellite: isSatellite, byId: byId, suggestions: suggestions, isTileset: isTileset, imagePx: imagePx, maxZoom: maxZoom, seeThrough: seeThrough, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
     attribution: attribution, providerName: providerName, extForContentType: extForContentType, extForUrl: extForUrl,
     usesImages: usesImages, imageUrl: imageUrl };
 })();

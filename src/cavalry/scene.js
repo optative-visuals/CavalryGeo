@@ -1324,7 +1324,7 @@ var GeoScene = (function () {
     var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
     var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
-    var assetByPath = existingAssets(), base = (plan.mode === "tiles" && GeoSources.imagePx(src, opts) === 512) ? 0.5 : 1, built = 0, unreadable = 0;
+    var assetByPath = existingAssets(), base = (plan.mode === "tiles" && GeoSources.imagePx(src, opts) === 512) ? 0.5 : 1, pad = GeoSources.seeThrough(src, opts) ? 0 : 4, built = 0, unreadable = 0;
     // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
     // (the older flat form, which planImagery no longer makes).
     var bent = !!plan.bent, sourced = bent, mapComp = api.getActiveComp(), size = bent ? compSize() : null;
@@ -1462,9 +1462,10 @@ var GeoScene = (function () {
       var kx = base, ky = base;
       if (plan.mode === "tiles" && res && res.x > 0 && res.y > 0) { kx = px[0] / res.x; ky = px[1] / res.y; }
       // A 2-px overlap on each side hides hairline seams (260/256 for a single tile;
-      // 257/256 still showed faint seams in Cavalry).
+      // 257/256 still showed faint seams in Cavalry). Semi-transparent tiles would show the overlap as a
+      // brighter line, so they are placed edge to edge.
       api.set(id, { "position.x": p[0], "position.y": p[1], "rotation.z": 0,
-        "scale.x": kx * (px[0] + 4) / px[0], "scale.y": ky * (px[1] + 4) / px[1] });
+        "scale.x": kx * (px[0] + pad) / px[0], "scale.y": ky * (px[1] + pad) / px[1] });
       if (!sourced) matte(id); // a source-comp build (bent) mattes its reference only, not the tiles inside the source comp
       built++;
     }
