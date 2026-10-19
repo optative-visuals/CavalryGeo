@@ -26,7 +26,10 @@ wraps past the date line, so a flight across the Pacific never runs off the edge
 ### Satellite imagery and camera flights
 Put real satellite imagery under your map that stays sharp as the camera zooms. **Fly here**
 animates a smooth zoom‑out, travel and zoom‑in between places, from the whole world down to a
-city. Imagery works on Web Mercator, Equal Earth and the globe. It needs the
+city. On a globe, **Whole Earth** also lays the whole planet underneath, so you can spin it
+freely without rebuilding. With your own MapTiler or Mapbox key, pick any of their maps by name
+(Streets, Topo, Aquarelle, Winter…) or a MapTiler tileset such as Hillshade.
+Imagery works on Web Mercator, Equal Earth and the globe. It needs the
 bundled Cavalry Geo Reproject plugin on every projection, installed once by dragging it into Cavalry.
 
 ![The end of a camera flight into Paris, over satellite imagery](docs/images/flight.jpg)
