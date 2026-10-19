@@ -2,6 +2,28 @@
 if (typeof GeoUtil === "undefined" && typeof require !== "undefined") { var GeoUtil = require("./util.js"); }
 if (typeof GeoBlocks === "undefined" && typeof require !== "undefined") { var GeoBlocks = require("./blocks.js"); }
 var GeoSources = (function () {
+  // MapTiler's standard maps by name: the picker shows the name and fills the Map ID box with the id.
+  var MAPTILER_MAPS = [
+    { name: "Satellite", id: "satellite" }, { name: "Satellite Hybrid", id: "hybrid" }, { name: "Streets", id: "streets-v4" },
+    { name: "Outdoor", id: "outdoor-v4" }, { name: "Topo", id: "topo-v4" }, { name: "Base", id: "base-v4" },
+    { name: "Dataviz", id: "dataviz-v4" }, { name: "Landscape", id: "landscape-v4" }, { name: "Winter", id: "winter-v4" },
+    { name: "Ocean", id: "ocean" }, { name: "Backdrop", id: "backdrop" }, { name: "Aquarelle", id: "aquarelle" },
+    { name: "Toner", id: "toner-v2" }, { name: "OpenStreetMap", id: "openstreetmap" }, { name: "JP GSI Standard", id: "jp-gsi-standard" }
+  ];
+  // MapTiler raster tilesets, picked as "tiles/<id>": the format of the files, the highest zoom they
+  // go to (deeper zooms show that level magnified) and the friendly name.
+  var MAPTILER_TILESETS = {
+    // seeThrough: the tiles are semi-transparent (probed 2026-10-19), so overlapping tile edges would show.
+    "hillshade": { name: "Hillshade", format: "webp", maxZoom: 12, seeThrough: true },
+    "hand-drawn-hillshade": { name: "Hand-drawn hillshade", format: "webp", maxZoom: 9, seeThrough: true },
+    "land-gradient": { name: "Land gradient", format: "webp", maxZoom: 4 },
+    "land-gradient-dark": { name: "Land gradient dark", format: "webp", maxZoom: 4 },
+    "satellite-night": { name: "Satellite at night", format: "webp", maxZoom: 6 }
+  };
+  var TILESET_PREFIX = "tiles/";
+  function tilesetEntries() {
+    return Object.keys(MAPTILER_TILESETS).map(function (k) { return { name: "Tileset \u00b7 " + MAPTILER_TILESETS[k].name, id: TILESET_PREFIX + k }; });
+  }
   var LIST = [
     { id: "eox", name: "EOX Sentinel-2", label: "EOX Sentinel-2 satellite (non-commercial)", key: null, minZoom: 0, maxZoom: 15, imagePx: 256,
       wms: { url: "https://tiles.maps.eox.at/wms", layer: "s2cloudless-2024_3857", format: "image/jpeg" },
@@ -15,14 +37,16 @@ var GeoSources = (function () {
       licence: "Public domain (NASA)." },
     { id: "maptiler", name: "MapTiler", label: "MapTiler (your key)", key: "maptiler", minZoom: 0, maxZoom: 20, imagePx: 512,
       defaultStyle: "satellite",
-      suggestions: ["satellite", "hybrid", "streets-v2", "outdoor-v2", "topo-v2", "dataviz", "dataviz-dark", "dataviz-light", "landscape"],
+      suggestions: MAPTILER_MAPS.concat(tilesetEntries()),
       attribution: "© MapTiler © OpenStreetMap contributors",
-      licence: "MapTiler's free plan is non-commercial. Map ID: pick a suggestion or type any MapTiler map ID." },
+      licence: "MapTiler's free plan is non-commercial. Pick a map above, or type any MapTiler Map ID in \u2699 Settings." },
     { id: "mapbox", name: "Mapbox", label: "Mapbox (your key)", key: "mapbox", minZoom: 0, maxZoom: 22, imagePx: 512,
       defaultStyle: "mapbox/satellite-v9",
-      suggestions: ["mapbox/satellite-v9", "mapbox/satellite-streets-v12", "mapbox/streets-v12", "mapbox/outdoors-v12", "mapbox/light-v11", "mapbox/dark-v11"],
+      suggestions: [{ name: "Satellite", id: "mapbox/satellite-v9" }, { name: "Satellite Streets", id: "mapbox/satellite-streets-v12" },
+        { name: "Streets", id: "mapbox/streets-v12" }, { name: "Outdoors", id: "mapbox/outdoors-v12" },
+        { name: "Light", id: "mapbox/light-v11" }, { name: "Dark", id: "mapbox/dark-v11" }],
       attribution: "© Mapbox © OpenStreetMap contributors",
-      licence: "Check Mapbox's terms for video use. Style: pick a suggestion or type user/style from Mapbox Studio." },
+      licence: "Check Mapbox's terms for video use. Pick a style above, or type user/style from Mapbox Studio in \u2699 Settings." },
     { id: "custom", name: "Custom tiles", label: "Custom tile link", key: null, minZoom: 0, maxZoom: 19, imagePx: 256,
       attribution: "",
       licence: "Only use tiles you have permission to use." }
@@ -41,6 +65,31 @@ var GeoSources = (function () {
     if (id === NIGHT.id) return NIGHT;
     for (var i = 0; i < LIST.length; i++) if (LIST[i].id === id) return LIST[i];
     throw new Error("Unknown imagery source: " + id);
+  }
+  // The Map ID / style picker's entries as { name, id }; a string suggestion is its own name.
+  function suggestions(src) {
+    return (src.suggestions || []).map(function (s) { return typeof s === "string" ? { name: s, id: s } : s; });
+  }
+  // A MapTiler style "tiles/<id>" is a raster tileset, not a map: its id, or null for anything else.
+  function tilesetId(src, opts) {
+    if (!src || src.id !== "maptiler") return null;
+    var m = /^tiles\/(.*)$/i.exec(style(src, opts));
+    return m ? m[1].trim() : null;
+  }
+  function knownTileset(id) { return id !== null && MAPTILER_TILESETS.hasOwnProperty(id) ? MAPTILER_TILESETS[id] : null; }
+  function isTileset(src, opts) { return tilesetId(src, opts) !== null; }
+  // The size a source's tiles are expected to be. Tilesets come at 512 px like MapTiler's maps (probed 2026-10-19);
+  // the build scales each tile by its real pixel size when Cavalry reports it, and uses this only when it doesn't.
+  function imagePx(src) { return src.imagePx; }
+  // A known tileset stops at its own zoom; a map, or an unknown tileset, at the source's.
+  function maxZoom(src, opts) {
+    var t = knownTileset(tilesetId(src, opts));
+    return t ? t.maxZoom : src.maxZoom;
+  }
+  // True for a semi-transparent tileset (hillshade): its tiles are placed edge to edge, without the seam overlap.
+  function seeThrough(src, opts) {
+    var t = knownTileset(tilesetId(src, opts));
+    return !!(t && t.seeThrough);
   }
   function fill(template, z, x, y) { return template.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y); }
   function style(src, opts) { return String((opts && opts.style) || "").trim() || src.defaultStyle || ""; }
@@ -74,6 +123,13 @@ var GeoSources = (function () {
     opts = opts || {};
     if (src.id === "maptiler") {
       if (!opts.key) throw new Error(missingSetting(src, opts));
+      var tileset = tilesetId(src, opts);
+      if (tileset !== null) {
+        if (!tileset) throw new Error("Type a tileset name after tiles/, e.g. tiles/hillshade.");
+        var known = knownTileset(tileset);
+        return "https://api.maptiler.com/tiles/" + encodeURIComponent(tileset) + "/" + z + "/" + x + "/" + y + "." + (known ? known.format : "webp") +
+          "?key=" + encodeURIComponent(opts.key);
+      }
       var map = style(src, opts);
       return "https://api.maptiler.com/maps/" + encodeURIComponent(map) + "/256/" + z + "/" + x + "/" + y + "@2x.jpg?key=" + encodeURIComponent(opts.key);
     }
@@ -99,6 +155,8 @@ var GeoSources = (function () {
     return src.id;
   }
   function label(src, opts) {
+    var t = knownTileset(tilesetId(src, opts));
+    if (t) return src.name + " " + t.name;
     if (src.id === "maptiler" || src.id === "mapbox") return src.name + " " + style(src, opts);
     return src.name;
   }
@@ -113,11 +171,14 @@ var GeoSources = (function () {
     var t = String(ct || "").toLowerCase();
     if (/image\/jpe?g/.test(t)) return "jpg";
     if (/image\/png/.test(t)) return "png";
+    if (/image\/webp/.test(t)) return "webp";
     return null;
   }
   function extForUrl(url) {
-    var m = /\.(jpe?g|png)(\?|#|$)/i.exec(String(url));
-    return m ? (m[1].toLowerCase() === "png" ? "png" : "jpg") : null;
+    var m = /\.(jpe?g|png|webp)(\?|#|$)/i.exec(String(url));
+    if (!m) return null;
+    var e = m[1].toLowerCase();
+    return e === "png" ? "png" : e === "webp" ? "webp" : "jpg";
   }
 
   // EOX and NASA serve WMS, so a whole block of tiles comes as one image (GeoBlocks).
@@ -134,12 +195,12 @@ var GeoSources = (function () {
   function isSatellite(m) {
     if (!m || typeof m !== "object") return false;
     if (m.source === "eox" || m.source === "nasa") return true;
-    if (m.source === "maptiler") return m.style === "satellite" || m.style === "hybrid";
+    if (m.source === "maptiler") return ["satellite", "hybrid", "satellite-v4", "hybrid-v4"].indexOf(m.style) >= 0;
     if (m.source === "mapbox") return String(m.style || "").indexOf("satellite") >= 0;
     return false;
   }
 
-  return { list: list, night: night, isSatellite: isSatellite, byId: byId, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
+  return { list: list, night: night, isSatellite: isSatellite, byId: byId, suggestions: suggestions, isTileset: isTileset, imagePx: imagePx, maxZoom: maxZoom, seeThrough: seeThrough, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
     attribution: attribution, providerName: providerName, extForContentType: extForContentType, extForUrl: extForUrl,
     usesImages: usesImages, imageUrl: imageUrl };
 })();

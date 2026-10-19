@@ -374,11 +374,22 @@ test("downloadTile saves with the extension from Content-Type and retries networ
   assert.equal(fakeApi.calls.length, 2);
 });
 
+test("downloadTile saves a WebP tile as .webp, and cachedTile finds it", () => {
+  const fakeApi = makeScriptedApi([{ status: 200, headers: { "Content-Type": "image/webp" } }]);
+  const net = loadNetWith(fakeApi);
+  const base = net.tileBase("maptiler-tiles_hillshade", 3, 4, 2);
+  assert.equal(net.cachedTile(base), null);
+  const r = net.downloadTile("https://api.maptiler.com/tiles/hillshade/3/4/2.webp?key=K", base);
+  assert.equal(r.path, base + ".webp");
+  assert.deepEqual(fakeApi._written, [base + ".webp"]);
+  assert.equal(net.cachedTile(base), base + ".webp");
+});
+
 test("downloadTile reports missing, rejected and unsupported tiles without saving", () => {
-  const net = loadNetWith(makeScriptedApi([{ status: 404 }, { status: 403 }, { status: 200, headers: { "content-type": "image/webp" } }, { status: 200 }]));
+  const net = loadNetWith(makeScriptedApi([{ status: 404 }, { status: 403 }, { status: 200, headers: { "content-type": "image/gif" } }, { status: 200 }]));
   assert.deepEqual(plainObj(net.downloadTile("https://a.example/1/2/3.png", "C:/t/a")), { status: 404 });
   assert.deepEqual(plainObj(net.downloadTile("https://a.example/1/2/3.png", "C:/t/b")), { status: 403 });
-  assert.deepEqual(plainObj(net.downloadTile("https://a.example/1/2/3", "C:/t/c")), { status: 200, unsupported: "image/webp" });
+  assert.deepEqual(plainObj(net.downloadTile("https://a.example/1/2/3", "C:/t/c")), { status: 200, unsupported: "image/gif" });
   assert.equal(net.downloadTile("https://a.example/1/2/3.png", "C:/t/d").path, "C:/t/d.png", "no Content-Type: extension from the URL");
 });
 

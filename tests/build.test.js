@@ -2235,6 +2235,61 @@ test("buildImagery uses only the levels that actually have files for the opacity
   assert.equal(T.levelOpacity(5.2, 4, 4, 4, 0), 100, "z 4 must stay opaque past its old fade-out point since it's now the highest built level");
 });
 
+test("planImagery caps a MapTiler tileset at its own max zoom; a map keeps zoom 20", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+  const asked = [], real = context.GeoTiles.bentTileSet;
+  context.GeoTiles.bentTileSet = function (samples, w, h, minZoom, maxZoom) { asked.push(maxZoom); return real.apply(this, arguments); };
+  context.GeoScene.planImagery(map, src, { key: "K", style: "tiles/hillshade" });
+  assert.equal(asked[0], 12);
+  asked.length = 0;
+  context.GeoScene.planImagery(map, src, { key: "K", style: "satellite" });
+  assert.equal(asked[0], 20);
+});
+
+test("a hillshade tile (512 px, see-through) is placed at half scale, edge to edge, when Cavalry reports no resolution", () => {
+  const { context, api } = buildSandbox();
+  const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+  let n = 0;
+  context.GeoNet.cachedTile = (base) => (n++ % 2 ? base + ".webp" : null);
+  const opts = { key: "K", style: "tiles/hillshade" };
+  const plan = context.GeoScene.planImagery(map, src, opts);
+  const r = context.GeoScene.buildImagery(map, src, opts, plan);
+  const tile = api.getChildren(levelGroup(api, r.groupId, 4))[0];
+  assert.equal(api.get(tile, "scale.x"), 256 / 512);
+});
+
+test("a tile is scaled from its real pixel size when Cavalry reports it (solid tiles keep the seam overlap)", () => {
+  [[512, 260 / 512], [256, 260 / 256]].forEach(([size, want]) => {
+    const { context, api } = buildSandbox();
+    const map = imageryMap(context, api, 4), src = context.GeoSources.byId("maptiler");
+    let n = 0;
+    context.GeoNet.cachedTile = (base) => (n++ % 2 ? base + ".webp" : null);
+    const add = api.addAssetToComp;
+    api.addAssetToComp = function () { const ids = add.apply(this, arguments), id = Array.isArray(ids) ? ids[0] : ids; api.set(id, { resolution: { x: size, y: size } }); return ids; };
+    const opts = { key: "K", style: "tiles/land-gradient" };
+    const r = context.GeoScene.buildImagery(map, src, opts, context.GeoScene.planImagery(map, src, opts));
+    const tile = api.getChildren(levelGroup(api, r.groupId, 4))[0];
+    assert.equal(api.get(tile, "scale.x"), want, size + " px");
+    assert.equal(api.get(tile, "scale.y"), want, size + " px");
+  });
+});
+
+test("GeoFetch.poll counts a WebP tile as whole", () => {
+  const { context, api } = buildSandbox();
+  fakeCurl(api); context.GeoFetch._reset();
+  const batch = context.GeoFetch.start([{ url: "https://api.maptiler.com/tiles/hillshade/1/2/3.webp?key=K", path: "C:/x/1.webp" }]);
+  api._files[batch.status] = "200 0 image/webp C:/x/1.webp\n";
+  api._files["C:/x/1.webp"] = "<tile>";
+  const r = context.GeoFetch.poll(batch);
+  assert.deepEqual(plain(r.results.map((x) => [x.path, x.ok])), [["C:/x/1.webp", true]]);
+});
+
+test("the unsupported-type message names PNG, JPG or WebP", () => {
+  assert.ok(buildPanel().includes("choose a PNG, JPG or WebP style or link."));
+  assert.equal(buildPanel().includes("PNG or JPG style"), false);
+});
+
 test("512-px sources are placed at half scale; tiles without files are skipped", () => {
   const { context, api } = buildSandbox();
   const map = imageryMap(context, api, 4);
@@ -4634,6 +4689,7 @@ test("labelled rows use fieldLabel (fixed width 92): Map, Layers, Imagery, Label
   assert.ok(holds(rowLabel(over, "UTC time (0-24)"), context.dayNightTimeField));
   const img = context.settingsColumn;
   [["MapTiler key", "maptilerKeyField"], ["Mapbox token", "mapboxKeyField"], ["Map ID / style", "styleField"], ["Custom link", "customUrlField"], ["Custom credit", "customAttrField"]].forEach((x) => assert.ok(holds(rowLabel(img, x[0]), context[x[1]]), x[0]));
+  assert.ok(!holds(img, context.stylePicker), "the Map picker is not in Settings");
   const routes = context.labelPages.pages[1];
   [["Shape", "routeShapePicker"], ["Arc height %", "arcField"], ["Traveller", "travellerPicker"]].forEach((x) => assert.ok(holds(rowLabel(routes, x[0]), context[x[1]]), x[0]));
   const data = context.sectionPages.pages[4];
@@ -13173,6 +13229,30 @@ test("Add layers: the large-area and heavy-layers questions go through the quest
   assert.match(context.statusLabel.getText(), /^Added \d+ layer\(s\)/);
 });
 
+test("Imagery picker: tilesets follow the maps; picking one fills the box with tiles/<id>", () => {
+  const { context } = buildSandbox();
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  assert.equal(sp._entries.length, 20);
+  assert.equal(sp._entries[15], "Tileset \u00b7 Hillshade");
+  sp.setValue(15); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "tiles/hillshade");
+});
+
+test("Imagery picker: MapTiler maps show by name, and a pick fills the box with the map's id", () => {
+  const { context } = buildSandbox();
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  assert.equal(sp._entries[0], "Satellite");
+  assert.equal(sp._entries[3], "Outdoor");
+  sp.setValue(3); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  sp.setValue(0); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "satellite");
+});
+
 test("Imagery pickers: a throwing source change is caught, and refilling the style list does not overwrite the style box", () => {
   const { context } = buildSandbox();
   context.styleField.setText("mine");
@@ -13188,11 +13268,118 @@ test("Imagery pickers: a throwing source change is caught, and refilling the sty
   sp.clear = clear; sp.addEntry = add;
   sp.setValue(1);
   sp.onValueChanged();
-  assert.equal(context.styleField.getText(), sp._entries[1], "a real pick still fills the box");
+  assert.equal(context.styleField.getText(), "hybrid", "a real pick still fills the box with the map's id");
   context.licenceLabel.setText = () => { throw new Error("boom"); };
   assert.doesNotThrow(() => context.sourcePicker.onValueChanged());
   assert.equal(context.statusLabel.getText(), "Error: boom");
   assert.doesNotThrow(() => { context.GeoSources.list = () => { throw new Error("bad"); }; sp.onValueChanged(); });
+});
+
+test("Imagery tab: the Map label and picker sit right under the source, and Settings holds only the box", () => {
+  const { context, ui } = buildSandbox();
+  const source = panelsOf(context, context.sectionPages.pages[2])[0];
+  assert.deepEqual(panelHeadings(context, source), ["Source"]);
+  const items = panelContents(source);
+  const i = items.indexOf(context.sourcePicker);
+  assert.ok(i >= 0 && items[i + 1] instanceof ui.HLayout, "the Map row comes right under the source");
+  assert.deepEqual(items[i + 1]._items, [context.imageryMapLabel, context.stylePicker]);
+  assert.equal(context.imageryMapLabel.getText(), "Map");
+  assert.ok(holds(context.settingsColumn, context.styleField));
+  assert.ok(!holds(context.settingsColumn, context.stylePicker), "the picker is not in Settings");
+});
+
+test("Imagery picker follows the provider: MapTiler and Mapbox lists, hidden for EOX, back again", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const pick = (id) => { context.sourcePicker.setValue(ids.indexOf(id)); context.sourcePicker.onValueChanged(); };
+  pick("maptiler");
+  assert.equal(context.stylePicker._entries.length, 20);
+  assert.ok(!context.stylePicker.isHidden() && !context.imageryMapLabel.isHidden());
+  pick("mapbox");
+  assert.deepEqual(plain(context.stylePicker._entries), ["Satellite", "Satellite Streets", "Streets", "Outdoors", "Light", "Dark"]);
+  assert.ok(!context.stylePicker.isHidden());
+  pick("eox");
+  assert.ok(context.stylePicker.isHidden() && context.imageryMapLabel.isHidden(), "EOX has no maps to pick");
+  pick("maptiler");
+  assert.ok(!context.stylePicker.isHidden() && !context.imageryMapLabel.isHidden());
+});
+
+test("Imagery picker shows what the Map ID box holds: a listed id, the default, a tileset, or a custom id", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  const sp = context.stylePicker, shown = () => sp._entries[sp.getValue()];
+  const commit = (text) => { context.styleField.setText(text); context.styleField.onValueCommitted(); };
+  commit("outdoor-v4");
+  assert.equal(shown(), "Outdoor");
+  commit("");
+  assert.equal(shown(), "Satellite", "a blank box shows the provider's default");
+  commit("tiles/hillshade");
+  assert.equal(shown(), "Tileset \u00b7 Hillshade");
+  commit("mine");
+  assert.equal(sp._entries.length, 21);
+  assert.equal(sp._entries[20], "Custom: mine");
+  assert.equal(shown(), "Custom: mine");
+  assert.equal(context.styleField.getText(), "mine", "showing a custom id does not change the box");
+});
+
+test("Imagery picker: committing a new id in the Settings box re-syncs the picker", () => {
+  const { context } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  context.styleField.setText("streets-v4");
+  context.styleField.onValueCommitted();
+  assert.equal(context.stylePicker._entries[context.stylePicker.getValue()], "Streets");
+  assert.equal(context.stylePicker._entries.length, 20, "no custom entry for a listed id");
+});
+
+test("Imagery picker: switching provider clears another provider's id, but keeps a custom id", () => {
+  const { context, api } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const pick = (id) => { context.sourcePicker.setValue(ids.indexOf(id)); context.sourcePicker.onValueChanged(); };
+  const sp = context.stylePicker;
+  pick("maptiler");
+  context.styleField.setText("outdoor-v4");
+  context.styleField.onValueCommitted();
+  pick("mapbox");
+  assert.equal(context.styleField.getText(), "", "a MapTiler id is cleared for Mapbox");
+  assert.equal(settingsOf(api).style, "", "the cleared box is saved");
+  assert.equal(sp._entries[sp.getValue()], "Satellite", "blank shows Mapbox's default");
+  pick("maptiler");
+  context.styleField.setText("mine");
+  context.styleField.onValueCommitted();
+  pick("mapbox");
+  assert.equal(context.styleField.getText(), "mine", "a custom id survives the switch");
+  assert.equal(sp._entries[sp.getValue()], "Custom: mine");
+});
+
+test("Imagery picker: a pick fills and saves the box and resets the plan; a custom entry is a no-op; a sync never writes the box", () => {
+  const { context, api } = buildSandbox();
+  const ids = context.GeoSources.list().map((s) => s.id);
+  const sp = context.stylePicker;
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  context.imageryState.plan = { stale: true };
+  sp.setValue(3); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  assert.equal(settingsOf(api).style, "outdoor-v4", "the pick is saved");
+  assert.equal(context.imageryState.plan, null, "the pick resets the plan");
+  context.styleField.setText("mine");
+  context.styleField.onValueCommitted();
+  context.imageryState.plan = { stale: true };
+  sp.setValue(20); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "mine", "picking the custom entry leaves the box unchanged");
+  assert.deepEqual(context.imageryState.plan, { stale: true });
+  // A Cavalry that reports a pick whenever the picker is set in code must not touch the box or the plan.
+  const setValue = sp.setValue;
+  sp.setValue = function (v) { setValue.call(sp, v); sp.onValueChanged(); };
+  context.styleField.setText("outdoor-v4");
+  context.styleField.onValueCommitted();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  assert.deepEqual(context.imageryState.plan, { stale: true }, "syncing the selection keeps the plan");
+  sp.setValue = setValue;
 });
 
 // ---- The panel follows the active composition -------------------------------------------
@@ -14841,7 +15028,7 @@ test("The cog button is 22 wide and 24 tall; it shows the cog icon when the file
 
 test("Keys and cache buttons moved: Settings holds them; Imagery, Layers and Map don't", () => {
   const { context } = buildSandbox();
-  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "stylePicker", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
+  const moved = ["maptilerKeyField", "mapboxKeyField", "styleField", "customUrlField", "customAttrField", "clearCacheBtn", "clearTilesBtn"];
   moved.forEach((n) => assert.ok(holds(context.settingsColumn, context[n]), n + " is in Settings"));
   const elsewhere = [context.sectionPages.pages[0], context.sectionPages.pages[2], context.layersPages.widget];
   moved.forEach((n) => elsewhere.forEach((page) => assert.ok(!holds(page, context[n]), n + " left its old page")));
