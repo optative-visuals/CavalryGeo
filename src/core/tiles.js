@@ -114,10 +114,16 @@ var GeoTiles = (function () {
     return [(tileOriginX(x0, L) - cam.lon * D2R) * R, (tileOriginY(y0, L) - mercY(cam.lat)) * R];
   }
   function levelScale(cam, L) { var s = Math.pow(2, clampZoom(cam.zoom) - L); return [s, s]; }
+  // The Whole Earth level: the world repeats every 360 degrees, so it is placed from the camera's longitude
+  // wrapped into [-180, 180). The copies it holds cover -360..360, which the wrapped camera needs (see planImagery).
+  function wrapLon(lon) { return ((lon + 180) % 360 + 360) % 360 - 180; }
+  function worldLevelPosition(cam, L, x0, y0) {
+    return levelPosition({ lat: cam.lat, lon: wrapLon(cam.lon), zoom: cam.zoom }, L, x0, y0);
+  }
 
   return { MAX_TILES: MAX_TILES, WARN_TILES: WARN_TILES, worldScale: worldScale, mercY: mercY,
     currentLevel: currentLevel, visibleLevels: visibleLevels, levelOpacity: levelOpacity,
     tilesForView: tilesForView, tileSet: tileSet, bentTileSet: bentTileSet, groupByLevel: groupByLevel, levelOrigin: levelOrigin,
-    tileLocal: tileLocal, levelPosition: levelPosition, levelScale: levelScale };
+    tileLocal: tileLocal, levelPosition: levelPosition, levelScale: levelScale, worldLevelPosition: worldLevelPosition };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoTiles;

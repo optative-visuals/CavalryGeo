@@ -2119,7 +2119,7 @@ buildImageryBtn.onClick = guardAction(function () {
     var plan = GeoScene.planImagery(map, src, opts);
     plan.sig = sig;
     imageryState.plan = plan;
-    var noun = itemNoun(plan), n = plan.items.length, missing = plan.missing.length;
+    var noun = itemNoun(plan), n = plan.fileCount, missing = plan.missing.length; // files: a Whole Earth file's copies count once
     var label = (missing ? "Download " + missing : "Build " + n) + " " + noun;
     var warn = plan.mode === "images" ? n > GeoBlocks.WARN_IMAGES : n > GeoTiles.WARN_TILES;
     // Name the limit that forced the cap (image count or tiles' worth of pixels).

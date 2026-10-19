@@ -995,7 +995,8 @@ var GeoScene = (function () {
     // tiles' worth of pixels really downloaded (GeoBlocks.totalTiles), not the tiles needed.
     // In tiles mode each item is one tile, so the items count is the tiles count.
     function over(items) {
-      return images ? items.length > GeoBlocks.MAX_IMAGES || GeoBlocks.totalTiles(items) > GeoBlocks.MAX_IMAGE_TILES : items.length > GeoTiles.MAX_TILES;
+      var c = countable(items);
+      return images ? c.length > GeoBlocks.MAX_IMAGES || GeoBlocks.totalTiles(c) > GeoBlocks.MAX_IMAGE_TILES : c.length > GeoTiles.MAX_TILES;
     }
     var items = itemsFor(set), uncappedTiles = set.tiles.length, uncappedItems = items.length;
     // Too much: drop the sharpest level until it fits. The top built level never fades
@@ -1013,13 +1014,14 @@ var GeoScene = (function () {
     }
     if (over(items)) {
       var end = " — end the flight at a lower zoom or use a smaller composition.";
-      if (!images) throw new Error("Too many tiles (" + items.length + ")" + end);
-      throw new Error(items.length > GeoBlocks.MAX_IMAGES ? "Too many images (" + items.length + ")" + end
-        : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(items) + ")" + end);
+      var c = countable(items);
+      if (!images) throw new Error("Too many tiles (" + c.length + ")" + end);
+      throw new Error(c.length > GeoBlocks.MAX_IMAGES ? "Too many images (" + c.length + ")" + end
+        : "Too many tiles' worth of images (" + GeoBlocks.totalTiles(c) + ")" + end);
     }
     var plan = { mode: images ? "images" : "tiles", items: items, tiles: worldL === null ? set.tiles : set.tiles.concat(worldTiles), lo: set.lo, hi: set.hi, cacheKey: GeoSources.cacheKey(src, opts), bent: true };
-    if (images) plan.imageTiles = GeoBlocks.totalTiles(items);
-    if (worldL !== null) plan.world = { L: worldL, count: worldItems.length };
+    if (images) plan.imageTiles = GeoBlocks.totalTiles(countable(items));
+    if (worldL !== null) plan.world = { L: worldL, count: countable(worldItems).length };
     if (detailDropped) plan.world.detailDropped = true;
     var left = {};
     GeoFetch.leftovers().forEach(function (p) { left[String(p).replace(/\\/g, "/")] = true; });
@@ -1042,9 +1044,10 @@ var GeoScene = (function () {
       if (saved.length) {
         var re = GeoBlocks.reuseCovering(plan.missing, saved, plan.items, GeoBlocks.MAX_IMAGE_TILES);
         plan.items = re.items; plan.missing = re.missing; plan.reused = re.reused;
-        plan.imageTiles = GeoBlocks.totalTiles(plan.items);
+        plan.imageTiles = GeoBlocks.totalTiles(countable(plan.items));
       }
     }
+    plan.fileCount = countable(plan.items).length;
     bentMissing(plan);
     if (!detailDropped && set.tiles.length < uncappedTiles) { plan.cappedZoom = set.hi; plan.uncappedTiles = uncappedTiles; plan.uncappedItems = uncappedItems; }
     return plan;
@@ -1055,10 +1058,24 @@ var GeoScene = (function () {
   function worldZoom(src, opts, images) {
     return Math.max(src.minZoom || 0, Math.min(images ? 5 : 3, GeoSources.maxZoom(src, opts)));
   }
+  // Unwrapped x runs from -n/2 to 3n/2, so the copies at shifts -1, 0 and +1 cover -360..360 degrees: the
+  // Reproject filter samples the wrapped camera's longitude plus or minus 180. Each copy is one world file, counted once.
   function worldTileList(L) {
     var n = Math.pow(2, L), out = [];
-    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) out.push({ z: L, x: x, y: y });
+    for (var y = 0; y < n; y++) for (var x = -n / 2; x < 3 * n / 2; x++) out.push({ z: L, x: x, y: y });
     return out;
+  }
+  // The items that are different files: a world item's copies (same file, other shifts) count once. Detail items
+  // are all kept, so a plan without Whole Earth counts as before.
+  function countable(items) {
+    var seen = {};
+    return items.filter(function (r) {
+      if (!r.world) return true;
+      var k = GeoBlocks.rectKey(r);
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
   }
 
   // Whole Earth (spin freely): the map's choice, kept on the map group. Without one, a globe (2) or Equal Earth (1)
@@ -1331,7 +1348,7 @@ var GeoScene = (function () {
     var miss = {}, unique = [];
     plan.missing.forEach(function (r) { var k = GeoBlocks.rectKey(r); if (!miss[k]) { miss[k] = true; unique.push(r); } });
     plan.missing = unique;
-    plan.cached = plan.items.filter(function (r) { return !miss[GeoBlocks.rectKey(r)]; }).length;
+    plan.cached = countable(plan.items).filter(function (r) { return !miss[GeoBlocks.rectKey(r)]; }).length;
   }
 
   // A new, empty source comp sized for the whole View box (see below), with the map comp's frame
@@ -1600,7 +1617,7 @@ var GeoScene = (function () {
       if (worldBuilt) {
         var wlv = { L: worldBuilt.L, x0: worldBuilt.x0, y0: worldBuilt.y0, lo: builtLo, hi: builtHi };
         ["position", "scale"].forEach(function (attr) {
-          var wname = "Imagery driver: World z " + wlv.L + " " + attr, wexpr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr, wlv);
+          var wname = "Imagery driver: World z " + wlv.L + " " + attr, wexpr = GeoExpression.imageryLevelExpression(GEO_IMAGERY_RUNTIME_SRC, attr === "position" ? "worldPosition" : attr, wlv);
           if (sourced) withSourceComp(function () { imageryDriver(map, view, wname, wexpr, worldBuilt.group, attr, 3); });
           else imageryDriver(map, outer, wname, wexpr, worldBuilt.group, attr);
         });
