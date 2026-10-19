@@ -13280,7 +13280,7 @@ test("Imagery picker follows the provider: MapTiler and Mapbox lists, hidden for
   assert.equal(context.stylePicker._entries.length, 20);
   assert.ok(!context.stylePicker.isHidden() && !context.imageryMapLabel.isHidden());
   pick("mapbox");
-  assert.deepEqual(plain(context.stylePicker._entries), ["mapbox/satellite-v9", "mapbox/satellite-streets-v12", "mapbox/streets-v12", "mapbox/outdoors-v12", "mapbox/light-v11", "mapbox/dark-v11"]);
+  assert.deepEqual(plain(context.stylePicker._entries), ["Satellite", "Satellite Streets", "Streets", "Outdoors", "Light", "Dark"]);
   assert.ok(!context.stylePicker.isHidden());
   pick("eox");
   assert.ok(context.stylePicker.isHidden() && context.imageryMapLabel.isHidden(), "EOX has no maps to pick");
@@ -13330,7 +13330,7 @@ test("Imagery picker: switching provider clears another provider's id, but keeps
   pick("mapbox");
   assert.equal(context.styleField.getText(), "", "a MapTiler id is cleared for Mapbox");
   assert.equal(settingsOf(api).style, "", "the cleared box is saved");
-  assert.equal(sp._entries[sp.getValue()], "mapbox/satellite-v9", "blank shows Mapbox's default");
+  assert.equal(sp._entries[sp.getValue()], "Satellite", "blank shows Mapbox's default");
   pick("maptiler");
   context.styleField.setText("mine");
   context.styleField.onValueCommitted();

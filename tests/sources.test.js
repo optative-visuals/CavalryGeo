@@ -86,8 +86,8 @@ test("MapTiler picker: standard maps by name, in order, each with its id", () =>
   assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "toner-v2" }, 1, 1, 0), "https://api.maptiler.com/maps/toner-v2/256/1/1/0@2x.jpg?key=K1");
 });
 
-test("Mapbox picker keeps its strings, each naming itself; sources without suggestions have none", () => {
-  assert.deepEqual(S.suggestions(src("mapbox"))[0], { name: "mapbox/satellite-v9", id: "mapbox/satellite-v9" });
+test("Mapbox picker: styles by name, each with its id; sources without suggestions have none", () => {
+  assert.deepEqual(S.suggestions(src("mapbox"))[0], { name: "Satellite", id: "mapbox/satellite-v9" });
   assert.equal(S.suggestions(src("mapbox")).length, 6);
   assert.deepEqual(S.suggestions(src("eox")), []);
   assert.deepEqual(S.suggestions(src("custom")), []);
