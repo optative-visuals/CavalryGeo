@@ -199,6 +199,7 @@ Put satellite photos, styled maps or terrain under your map, on Web Mercator, Eq
   **Yes** downloads them and builds the imagery at the bottom of the map with a progress bar;
   **No** downloads nothing. When everything is already downloaded it builds straight away. (In an
   older Cavalry without that dialog, the button changes to "Download N images" — press it again.)
+- **Whole Earth (spin freely):** ticked by default on a globe or Equal Earth map, it also downloads the whole world at a lower detail, so the globe can be spun or re-animated without rebuilding, while the views your camera visits stay sharp. Your choice is remembered for each map, and unticking it on a flat map skips the extra download.
 - **Covering fills:** the first full-map imagery build on a map (any source except a MapTiler tileset) hides the Ocean, the lakes, water, parks and buildings layers, and the countries' land fill (their borders stay), so the imagery shows; the build's message says what it hid, and the Layers window turns them back on. Tilesets like Hillshade leave the fills on and are drawn above the land.
 - **Large images:** EOX and NASA imagery is built from a few large images (each covering up to
   8×8 map tiles), so even a flight from the whole world down to a street builds quickly (limit 150

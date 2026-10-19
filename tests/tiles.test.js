@@ -153,3 +153,24 @@ test("bentTileSet: a region spanning the whole world gives 2^L + 1 columns (the 
   assert.deepEqual(xs, Array.from({ length: n + 1 }, (_, i) => x0 + i), "consecutive, x0 .. x0 + 2^L");
   assert.equal(x0, 0);
 });
+
+// Whole Earth: the world level follows the camera's longitude wrapped into [-180, 180).
+test("worldLevelPosition equals levelPosition for a camera longitude in [-180, 180)", () => {
+  for (const lon of [-180, -95.5, 0, 12.25, 170, 179.9]) {
+    const c = cam({ lon: lon, lat: 20, zoom: 3.4 });
+    const a = T.worldLevelPosition(c, 3, -4, 0), b = T.levelPosition(c, 3, -4, 0);
+    near(a[0], b[0]); near(a[1], b[1]);
+  }
+});
+
+test("worldLevelPosition wraps the longitude: 170 + 360k gives the same as 170, and the camera is not changed", () => {
+  const c = cam({ lon: 170 }), before = Object.assign({}, c);
+  const base = T.worldLevelPosition(c, 3, -4, 0);
+  for (const k of [-2, -1, 1, 2]) {
+    const p = T.worldLevelPosition(cam({ lon: 170 + 360 * k }), 3, -4, 0);
+    near(p[0], base[0]); near(p[1], base[1]);
+  }
+  const q = T.worldLevelPosition(cam({ lon: 720 }), 3, -4, 0), zero = T.levelPosition(cam({ lon: 0 }), 3, -4, 0);
+  near(q[0], zero[0]); near(q[1], zero[1]);
+  assert.deepEqual(c, before);
+});

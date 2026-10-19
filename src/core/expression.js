@@ -176,6 +176,7 @@ var GeoExpression = (function () {
   function imageryLevelExpression(runtimeSrc, attr, level) {
     var L = Number(level.L), call;
     if (attr === "position") call = "GeoTiles.levelPosition(" + CAM + ", " + L + ", " + Number(level.x0) + ", " + Number(level.y0) + ");";
+    else if (attr === "worldPosition") call = "GeoTiles.worldLevelPosition(" + CAM + ", " + L + ", " + Number(level.x0) + ", " + Number(level.y0) + ");";
     else if (attr === "scale") call = "GeoTiles.levelScale(" + CAM + ", " + L + ");";
     else if (attr === "opacity") call = "GeoTiles.levelOpacity(_i2, " + L + ", " + Number(level.lo) + ", " + Number(level.hi) + ", _i4);";
     else throw new Error("Unknown imagery driver: " + attr);
