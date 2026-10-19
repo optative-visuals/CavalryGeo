@@ -1797,7 +1797,7 @@ function refreshSourceUi() {
   refreshingSource = true;
   try {
     stylePicker.clear();
-    (src.suggestions || []).forEach(function (s) { stylePicker.addEntry(s); });
+    GeoSources.suggestions(src).forEach(function (s) { stylePicker.addEntry(s.name); });
   } finally { refreshingSource = false; }
   resetImageryPlan();
 }
@@ -1846,8 +1846,8 @@ refreshSourceUi();
 sourcePicker.onValueChanged = guard(function () { refreshSourceUi(); });
 stylePicker.onValueChanged = guard(function () {
   if (refreshingSource) return; // refilling the list is not the user picking a style
-  var s = currentSource().suggestions || [];
-  if (s.length) styleField.setText(s[stylePicker.getValue()] || "");
+  var entry = GeoSources.suggestions(currentSource())[stylePicker.getValue()];
+  if (entry) styleField.setText(entry.id);
   resetImageryPlan();
 });
 

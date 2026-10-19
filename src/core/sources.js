@@ -2,6 +2,14 @@
 if (typeof GeoUtil === "undefined" && typeof require !== "undefined") { var GeoUtil = require("./util.js"); }
 if (typeof GeoBlocks === "undefined" && typeof require !== "undefined") { var GeoBlocks = require("./blocks.js"); }
 var GeoSources = (function () {
+  // MapTiler's standard maps by name: the picker shows the name and fills the Map ID box with the id.
+  var MAPTILER_MAPS = [
+    { name: "Satellite", id: "satellite" }, { name: "Satellite Hybrid", id: "hybrid" }, { name: "Streets", id: "streets-v4" },
+    { name: "Outdoor", id: "outdoor-v4" }, { name: "Topo", id: "topo-v4" }, { name: "Base", id: "base-v4" },
+    { name: "Dataviz", id: "dataviz-v4" }, { name: "Landscape", id: "landscape-v4" }, { name: "Winter", id: "winter-v4" },
+    { name: "Ocean", id: "ocean" }, { name: "Backdrop", id: "backdrop" }, { name: "Aquarelle", id: "aquarelle" },
+    { name: "Toner", id: "toner-v2" }, { name: "OpenStreetMap", id: "openstreetmap" }, { name: "JP GSI Standard", id: "jp-gsi-standard" }
+  ];
   var LIST = [
     { id: "eox", name: "EOX Sentinel-2", label: "EOX Sentinel-2 satellite (non-commercial)", key: null, minZoom: 0, maxZoom: 15, imagePx: 256,
       wms: { url: "https://tiles.maps.eox.at/wms", layer: "s2cloudless-2024_3857", format: "image/jpeg" },
@@ -15,7 +23,7 @@ var GeoSources = (function () {
       licence: "Public domain (NASA)." },
     { id: "maptiler", name: "MapTiler", label: "MapTiler (your key)", key: "maptiler", minZoom: 0, maxZoom: 20, imagePx: 512,
       defaultStyle: "satellite",
-      suggestions: ["satellite", "hybrid", "streets-v2", "outdoor-v2", "topo-v2", "dataviz", "dataviz-dark", "dataviz-light", "landscape"],
+      suggestions: MAPTILER_MAPS,
       attribution: "© MapTiler © OpenStreetMap contributors",
       licence: "MapTiler's free plan is non-commercial. Map ID: pick a suggestion or type any MapTiler map ID." },
     { id: "mapbox", name: "Mapbox", label: "Mapbox (your key)", key: "mapbox", minZoom: 0, maxZoom: 22, imagePx: 512,
@@ -41,6 +49,10 @@ var GeoSources = (function () {
     if (id === NIGHT.id) return NIGHT;
     for (var i = 0; i < LIST.length; i++) if (LIST[i].id === id) return LIST[i];
     throw new Error("Unknown imagery source: " + id);
+  }
+  // The Map ID / style picker's entries as { name, id }; a string suggestion is its own name.
+  function suggestions(src) {
+    return (src.suggestions || []).map(function (s) { return typeof s === "string" ? { name: s, id: s } : s; });
   }
   function fill(template, z, x, y) { return template.replace(/\{z\}/g, z).replace(/\{x\}/g, x).replace(/\{y\}/g, y); }
   function style(src, opts) { return String((opts && opts.style) || "").trim() || src.defaultStyle || ""; }
@@ -134,12 +146,12 @@ var GeoSources = (function () {
   function isSatellite(m) {
     if (!m || typeof m !== "object") return false;
     if (m.source === "eox" || m.source === "nasa") return true;
-    if (m.source === "maptiler") return m.style === "satellite" || m.style === "hybrid";
+    if (m.source === "maptiler") return ["satellite", "hybrid", "satellite-v4", "hybrid-v4"].indexOf(m.style) >= 0;
     if (m.source === "mapbox") return String(m.style || "").indexOf("satellite") >= 0;
     return false;
   }
 
-  return { list: list, night: night, isSatellite: isSatellite, byId: byId, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
+  return { list: list, night: night, isSatellite: isSatellite, byId: byId, suggestions: suggestions, tileUrl: tileUrl, missingSetting: missingSetting, splitUrl: splitUrl, cacheKey: cacheKey, label: label, meta: meta,
     attribution: attribution, providerName: providerName, extForContentType: extForContentType, extForUrl: extForUrl,
     usesImages: usesImages, imageUrl: imageUrl };
 })();

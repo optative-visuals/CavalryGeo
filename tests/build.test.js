@@ -13173,6 +13173,19 @@ test("Add layers: the large-area and heavy-layers questions go through the quest
   assert.match(context.statusLabel.getText(), /^Added \d+ layer\(s\)/);
 });
 
+test("Imagery picker: MapTiler maps show by name, and a pick fills the box with the map's id", () => {
+  const { context } = buildSandbox();
+  const sp = context.stylePicker, ids = context.GeoSources.list().map((s) => s.id);
+  context.sourcePicker.setValue(ids.indexOf("maptiler"));
+  context.sourcePicker.onValueChanged();
+  assert.equal(sp._entries[0], "Satellite");
+  assert.equal(sp._entries[3], "Outdoor");
+  sp.setValue(3); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "outdoor-v4");
+  sp.setValue(0); sp.onValueChanged();
+  assert.equal(context.styleField.getText(), "satellite");
+});
+
 test("Imagery pickers: a throwing source change is caught, and refilling the style list does not overwrite the style box", () => {
   const { context } = buildSandbox();
   context.styleField.setText("mine");
@@ -13188,7 +13201,7 @@ test("Imagery pickers: a throwing source change is caught, and refilling the sty
   sp.clear = clear; sp.addEntry = add;
   sp.setValue(1);
   sp.onValueChanged();
-  assert.equal(context.styleField.getText(), sp._entries[1], "a real pick still fills the box");
+  assert.equal(context.styleField.getText(), "hybrid", "a real pick still fills the box with the map's id");
   context.licenceLabel.setText = () => { throw new Error("boom"); };
   assert.doesNotThrow(() => context.sourcePicker.onValueChanged());
   assert.equal(context.statusLabel.getText(), "Error: boom");

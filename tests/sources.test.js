@@ -75,6 +75,22 @@ test("image types from Content-Type or URL", () => {
   assert.deepEqual(S.splitUrl("https://api.maptiler.com/maps/x/1.png?key=K"), { base: "https://api.maptiler.com", path: "/maps/x/1.png?key=K" });
 });
 
+test("MapTiler picker: standard maps by name, in order, each with its id", () => {
+  const e = S.suggestions(src("maptiler"));
+  assert.deepEqual(e.map((x) => x.name), ["Satellite", "Satellite Hybrid", "Streets", "Outdoor", "Topo", "Base", "Dataviz", "Landscape", "Winter",
+    "Ocean", "Backdrop", "Aquarelle", "Toner", "OpenStreetMap", "JP GSI Standard"]);
+  assert.deepEqual(e.map((x) => x.id), ["satellite", "hybrid", "streets-v4", "outdoor-v4", "topo-v4", "base-v4", "dataviz-v4", "landscape-v4", "winter-v4",
+    "ocean", "backdrop", "aquarelle", "toner-v2", "openstreetmap", "jp-gsi-standard"]);
+  assert.equal(S.tileUrl(src("maptiler"), { key: "K1", style: "toner-v2" }, 1, 1, 0), "https://api.maptiler.com/maps/toner-v2/256/1/1/0@2x.jpg?key=K1");
+});
+
+test("Mapbox picker keeps its strings, each naming itself; sources without suggestions have none", () => {
+  assert.deepEqual(S.suggestions(src("mapbox"))[0], { name: "mapbox/satellite-v9", id: "mapbox/satellite-v9" });
+  assert.equal(S.suggestions(src("mapbox")).length, 6);
+  assert.deepEqual(S.suggestions(src("eox")), []);
+  assert.deepEqual(S.suggestions(src("custom")), []);
+});
+
 test("EOX and NASA use large WMS images; the others don't", () => {
   const S = require("../src/core/sources.js");
   assert.equal(S.usesImages(S.byId("eox")), true);
@@ -110,6 +126,7 @@ test("nasa-night: hidden from the picker, Black Marble 2016 as JPEG, zoom 8", ()
 
 test("isSatellite: EOX, NASA, MapTiler satellite/hybrid, Mapbox *satellite*; never custom or street styles", () => {
   const yes = [{ source: "eox" }, { source: "nasa" }, { source: "maptiler", style: "satellite" }, { source: "maptiler", style: "hybrid" },
+    { source: "maptiler", style: "satellite-v4" }, { source: "maptiler", style: "hybrid-v4" },
     { source: "mapbox", style: "mapbox/satellite-v9" }, { source: "mapbox", style: "mapbox/satellite-streets-v12" }];
   const no = [{ source: "custom" }, { source: "maptiler", style: "streets-v2" }, { source: "mapbox", style: "mapbox/streets-v12" },
     { source: "nasa-night" }, null, undefined, {}];
