@@ -58,8 +58,8 @@ var GeoBlocks = (function () {
     for (var i = 0; i < rects.length; i++) { if (rects[i].x0 < x0) x0 = rects[i].x0; if (rects[i].y0 < y0) y0 = rects[i].y0; }
     return { x0: x0, y0: y0 };
   }
-  // Level-local centre, in the same frame as GeoTiles.tileLocal (north up, origin at the
-  // level origin's north-west corner).
+  // Level-local centre, in the tile frame (north up, origin at the level origin's north-west
+  // corner), so a one-tile rect lands on the same point as its tile.
   function rectLocal(r, origin) { return [((r.x0 + r.x1 + 1) / 2 - origin.x0) * TILE, -((r.y0 + r.y1 + 1) / 2 - origin.y0) * TILE]; }
 
   // Reuse of saved images: each missing rect is replaced by the smallest saved rect of the

@@ -6,7 +6,7 @@ if (typeof GeoCodec === "undefined" && typeof require !== "undefined") { var Geo
 var GeoDataset = (function () {
   function csvLocation(url) {
     var u = String(url || "").trim();
-    var g = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(u);
+    var g = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/(?!e\/)([A-Za-z0-9_-]+)/.exec(u);
     if (g) {
       var gid = /[#&?]gid=(\d+)/.exec(u);
       return { base: "https://docs.google.com", path: "/spreadsheets/d/" + g[1] + "/export?format=csv&gid=" + (gid ? gid[1] : "0") };

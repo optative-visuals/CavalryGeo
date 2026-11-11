@@ -1,7 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const B = require("../src/core/blocks.js");
-const T = require("../src/core/tiles.js");
 const near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) < e, `${a} vs ${b}`);
 
 test("limits", () => {
@@ -71,10 +70,9 @@ test("rectMercator matches tile edges in EPSG:3857 metres", () => {
   near(q.minx, 0); near(q.maxx, H); near(q.miny, 0); near(q.maxy, H);
 });
 
-test("rectLocal of a one-tile rect equals GeoTiles.tileLocal; bigger rects are centred", () => {
+test("rectLocal: a one-tile rect sits on its tile centre; bigger rects are centred", () => {
   const origin = { x0: 4, y0: 5 };
-  const t = { z: 4, x: 6, y: 7 };
-  assert.deepEqual(B.rectLocal(B.tileRect(t), origin), T.tileLocal(t, origin));
+  assert.deepEqual(B.rectLocal(B.tileRect({ z: 4, x: 6, y: 7 }), origin), [640, -640]);
   assert.deepEqual(B.rectLocal({ z: 4, x0: 4, y0: 5, x1: 7, y1: 7 }, origin), [512, -384]);
   assert.deepEqual(B.levelOrigin([{ z: 4, x0: 8, y0: 5, x1: 11, y1: 7 }, { z: 4, x0: 4, y0: 8, x1: 7, y1: 10 }]), { x0: 4, y0: 5 });
 });

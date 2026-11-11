@@ -130,7 +130,8 @@ var GeoCsv = (function () {
       return byKey[id];
     }
     function put(p, year, v) {
-      if (v === null) return;
+      // a blank or non-numeric year (NaN) would otherwise become a key and poison the year range
+      if (v === null || !isFinite(year)) return;
       p.values[year] = v;
       if (choice.layout !== "none") { minY = Math.min(minY, year); maxY = Math.max(maxY, year); }
     }

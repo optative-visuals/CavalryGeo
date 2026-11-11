@@ -16,6 +16,9 @@ test("csvLocation: Google Sheet links become the CSV export, others pass through
     { base: "https://docs.google.com", path: "/spreadsheets/d/1ExampleSheetId_abcdefghijklmnopqrstuvwx/export?format=csv&gid=123456789" });
   assert.deepEqual(D.csvLocation("https://docs.google.com/spreadsheets/d/abc_DEF-1/edit"), { base: "https://docs.google.com", path: "/spreadsheets/d/abc_DEF-1/export?format=csv&gid=0" });
   assert.deepEqual(D.csvLocation("https://ourworldindata.org/grapher/population.csv?v=1"), { base: "https://ourworldindata.org", path: "/grapher/population.csv?v=1" });
+  // "Publish to web" links use /d/e/<id>/pub, not an edit id: they must not be read as a sheet id "e"
+  assert.deepEqual(D.csvLocation("https://docs.google.com/spreadsheets/d/e/2PACX-1vABC123/pub?output=csv"),
+    { base: "https://docs.google.com", path: "/spreadsheets/d/e/2PACX-1vABC123/pub?output=csv" });
   assert.throws(() => D.csvLocation("population.csv"), /Paste a Google Sheet or CSV link/);
 });
 

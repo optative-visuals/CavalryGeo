@@ -172,13 +172,12 @@ var GeoStyles = (function () {
     for (var i = 0; i < all.length; i++) if (key(all[i].name) === key(name)) return all[i];
     return null;
   }
-  function names(saved) { return BUILT_IN.concat(saved || []).map(function (s) { return s.name; }); }
   function previewColors(style) { return { water: style.colors.ocean, land: style.colors.land, border: style.colors.borders }; }
 
   return {
     ROLES: ROLES, WIDTH_ROLES: WIDTH_ROLES, BUILT_IN: BUILT_IN, DARK: BUILT_IN[0],
     layerStyle: layerStyle, targets: targets, valueFor: valueFor, calloutBox: calloutBox, nightColour: nightColour, CALLOUT_BOX_LIGHTEN: CALLOUT_BOX_LIGHTEN, toHex: toHex, clean: clean, fromReadings: fromReadings,
-    normalise: normalise, builtIn: builtIn, isBuiltIn: isBuiltIn, find: find, names: names, previewColors: previewColors
+    normalise: normalise, builtIn: builtIn, isBuiltIn: isBuiltIn, find: find, previewColors: previewColors
   };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoStyles;

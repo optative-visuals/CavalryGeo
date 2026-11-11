@@ -102,6 +102,14 @@ test("parse: a normal file with no preamble is unaffected (I3 regression guard)"
   assert.equal(t.rows.length, 4);
 });
 
+// A row with a blank Year used to store a NaN year, which also poisoned the year range.
+test("buildSeries: long layout skips rows whose year is not a number", () => {
+  const table = V.parse("Entity,Code,Year,Value\nFrance,FRA,2000,5\nFrance,FRA,,7\n");
+  const s = V.buildSeries(table, { placeColumn: "Code", placeKind: "iso3", nameColumn: "Entity", valueColumn: "Value", layout: "long", yearColumn: "Year" });
+  assert.deepEqual(s.places[0].series, [[2000, 5]]);
+  assert.deepEqual(s.years, [2000, 2000]);
+});
+
 // M2: long-layout year parsing used to slice the first 4 characters, breaking negative
 // years (-10000 -> -100). Parse with the leading integer instead.
 test("buildSeries: long layout year parsing handles negative years and still reads dates (M2)", () => {

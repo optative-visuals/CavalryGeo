@@ -2347,7 +2347,8 @@ test("buildImagery parents layers before setting their local transforms (parent 
   const kids = api.getChildren(level);
   assert.equal(kids.length, 48);
   kids.forEach((id) => assert.equal(api.get(id, "rotation.z"), 0, "tile rotation"));
-  const expected = tiles.map((t) => { const p = context.GeoTiles.tileLocal(t, origin); return p[0] + "," + p[1]; }).sort();
+  // level-local tile centre: 256 px tiles, north up, from the level origin's north-west corner
+  const expected = tiles.map((t) => { const p = [(t.x - origin.x0) * 256 + 128, -((t.y - origin.y0) * 256 + 128)]; return p[0] + "," + p[1]; }).sort();
   const actual = kids.map((id) => api.get(id, "position.x") + "," + api.get(id, "position.y")).sort();
   assert.deepEqual(Array.from(actual), Array.from(expected));
 });

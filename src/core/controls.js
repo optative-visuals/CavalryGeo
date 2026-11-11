@@ -306,27 +306,6 @@ var GeoControls = (function () {
     return out;
   }
 
-  function ids(model) {
-    var out = {};
-    function add(m) { var id = m && typeof m === "object" ? m.id : m; if (id) out[id] = true; }
-    add(model.valuesId); add(model.camera); add(model.ocean);
-    (model.layers || []).concat(model.pins || [], model.labels || [], model.imagery || []).forEach(add);
-    (model.routes || []).forEach(function (r) { (r.legs || []).forEach(add); (r.draws || []).forEach(add); });
-    (model.stops || []).forEach(add);
-    (model.highlights || []).forEach(function (h) { add(h.id); add(h.shape); add(h.osc); add(h.blur); });
-    (model.newRoutes || []).forEach(function (r) { (r.legs || []).forEach(function (l) { add(l); add(l.start); add(l.end); }); (r.draws || []).forEach(add); });
-    (model.travellers || []).forEach(function (t) { add(t.marker); add(t.scale); (t.dups || []).forEach(add); });
-    (model.callouts || []).forEach(function (c) { add(c.label); add(c.box); add(c.dot); add(c.bend); add(c.edge); (c.lines || []).forEach(add); (c.draws || []).forEach(add); });
-    var dn = model.dayNight;
-    if (dn) { add(dn.id); (dn.layers || []).concat(dn.helpers || [], dn.blurs || [], [dn.night, dn.filter, dn.blurHelper, dn.mask, dn.label, dn.nightLights]).forEach(add); }
-    var fu = model.furniture || {};
-    add(fu.scaleBar); add(fu.northArrow); add(fu.fade);
-    var data = model.data || {};
-    (data.year || []).forEach(add);
-    (data.sets || []).forEach(function (s) { add(s.regions); add(s.bubbles); add(s.labels); });
-    return out;
-  }
-
-  return { plan: plan, ids: ids, recordFor: recordFor, BASE: BASE, GROUPS: GROUPS, STATE_ATTRS: STATE_ATTRS };
+  return { plan: plan, recordFor: recordFor, BASE: BASE, GROUPS: GROUPS, STATE_ATTRS: STATE_ATTRS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GeoControls;

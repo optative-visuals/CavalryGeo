@@ -132,6 +132,15 @@ test("mercatorViewBoxes: one box normally, two boxes across the date line", () =
   assert.equal(east.south, west.south);
 });
 
+// A camera lon outside [-180, 180) must give the same boxes as its wrapped equivalent.
+test("mercatorViewBoxes: a camera lon past the antimeridian gives the same boxes as its wrapped lon", () => {
+  const boxes = (lon) => P.mercatorViewBoxes(cam({ lat: -17, lon, zoom: 12 }), 1920, 1080);
+  assert.deepEqual(boxes(190), boxes(-170));
+  assert.deepEqual(boxes(-190), boxes(170));
+  assert.deepEqual(boxes(-1000), boxes(80));
+  assert.ok(boxes(190).every((b) => b.east > b.west), "no zero-width box");
+});
+
 test("makeGlobeProjector3 matches makeProjector on the globe's surface", () => {
   const c = cam({ lat: 20, lon: 118.5, zoom: 2.9, rotation: 15, projection: 2 });
   const f2 = P.makeProjector(c), f3 = P.makeGlobeProjector3(c);

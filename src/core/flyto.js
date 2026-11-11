@@ -54,7 +54,9 @@ var GeoFly = (function () {
     opts = opts || {};
     var rho = arcRho(opts.arc), ez = easing(opts.easing), over = opts.easing === "overshoot";
     var x0 = wrapLon(start.lon) * D2R, x1 = end.lon * D2R;
-    if (x1 - x0 > Math.PI) x1 -= 2 * Math.PI; else if (x0 - x1 > Math.PI) x1 += 2 * Math.PI;
+    // shortest way round: fold the difference into [-PI, PI] (exactly +-PI is left as it is, as before), in any number of turns
+    var dx = x1 - x0;
+    if (Math.abs(dx) > Math.PI) x1 -= 2 * Math.PI * Math.round(dx / (2 * Math.PI));
     var peak = over ? clampZoom(end.zoom + OVERSHOOT_ZOOM) : end.zoom;
     var f = interpolator([x0, mercY(start.lat), viewWidth(start.zoom, width)], [x1, mercY(end.lat), viewWidth(peak, width)], rho);
     var endLon = wrapLon(end.lon), out = [];

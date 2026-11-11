@@ -108,9 +108,8 @@ test("normalise keeps good saved styles and drops unusable ones without throwing
   assert.deepEqual(S.normalise("junk"), []);
 });
 
-test("names, find, builtIn and previewColors", () => {
+test("find, builtIn and previewColors", () => {
   const saved = S.normalise([{ name: "Mine" }]);
-  assert.deepEqual(S.names(saved), ["Dark", "Light", "Blueprint", "Vintage", "Mono", "Neon night", "Mine"]);
   assert.equal(S.find("BLUEPRINT", saved).name, "Blueprint");
   assert.equal(S.find(" mine", saved).name, "Mine");
   assert.equal(S.find("nope", saved), null);
