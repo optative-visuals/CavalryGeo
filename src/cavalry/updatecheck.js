@@ -16,8 +16,7 @@ var GeoUpdateCheck = (function () {
     var shown = GeoUpdate.notice(settings.latestVersion, GEO_VERSION);
     if (shown) tell(shown);
     if (!GeoUpdate.parts(GEO_VERSION) || !GeoUpdate.due(settings, now) || !GeoFetch.available()) return null;
-    settings.updateCheckedAt = now; // a failed check isn't retried until tomorrow either
-    GeoNet.saveSettings(settings);
+    GeoNet.updateSettings({ updateCheckedAt: now }); // a failed check isn't retried until tomorrow either
     var out = replyFile();
     GeoFetch.discard(out);
     GeoNet.ensureDir(out.slice(0, out.lastIndexOf("/")));
@@ -31,9 +30,7 @@ var GeoUpdateCheck = (function () {
         timer.stop();
         GeoFetch.discard(out);
         if (!latest) return;
-        var s = GeoNet.loadSettings();
-        s.latestVersion = latest;
-        GeoNet.saveSettings(s);
+        GeoNet.updateSettings({ latestVersion: latest });
         var msg = GeoUpdate.notice(latest, GEO_VERSION);
         if (msg && msg !== shown) tell(msg);
       } catch (e) { timer.stop(); }

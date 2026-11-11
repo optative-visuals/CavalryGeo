@@ -27,7 +27,7 @@ function installText(version) {
 }
 
 function collect(dir, prefix, out) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) { // code-unit order, not the machine's locale
     const full = path.join(dir, entry.name), name = prefix + entry.name;
     if (entry.isDirectory()) collect(full, name + "/", out);
     else out.push({ name, data: fs.readFileSync(full) });

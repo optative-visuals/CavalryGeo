@@ -79,6 +79,64 @@ test("night.sksl's constants match the GeoNight mirror", () => {
   assert.equal(constOf("BAND"), GeoNight.BAND);
 });
 
+// The projection constants the shaders repeat from the JavaScript. Some JS constants are not exported, so they
+// are read from the source text: the value after "NAME =" (an expression such as Math.sqrt(3) / 2 is evaluated).
+const GeoProjection = require("../src/core/projection.js");
+function jsConst(file, name) {
+  const src = fs.readFileSync(path.join(ROOT, "src", "core", file), "utf8");
+  const m = new RegExp("\\b" + name + "\\s*=\\s*([^,;]+)").exec(src);
+  assert.ok(m, name + " in " + file);
+  return Number(new Function("return (" + m[1] + ");")());
+}
+function shaderConst(text, name) {
+  const m = new RegExp("const\\s+float\\s+" + name + "\\s*=\\s*([-\\d.]+)\\s*;").exec(text);
+  assert.ok(m, name + " in the shader");
+  return Number(m[1]);
+}
+const SHADER_CODE = {
+  reproject: codeOf(fs.readFileSync(path.join(dir, "reproject.sksl"), "utf8")),
+  night: codeOf(fs.readFileSync(path.join(dir, "night.sksl"), "utf8")),
+};
+// The JavaScript value for each shared constant. PI and D2R are written differently in JS (Math.PI, Math.PI / 180), so
+// they are compared within a tolerance instead of exactly.
+const SHARED = {
+  PI: { js: Math.PI, tolerance: 1e-12 },
+  D2R: { js: Math.PI / 180, tolerance: 1e-12 },
+  MAX_LAT: { js: GeoProjection.MAX_LAT },
+  MAX_ZOOM: { js: GeoProjection.MAX_ZOOM },
+  A1: { js: jsConst("projection.js", "A1") },
+  A2: { js: jsConst("projection.js", "A2") },
+  A3: { js: jsConst("projection.js", "A3") },
+  A4: { js: jsConst("projection.js", "A4") },
+  EM: { js: jsConst("night.js", "EM") },
+  SIN_MAX: { js: jsConst("reproject.js", "SIN_MAX") },
+};
+for (const [shader, names] of [
+  ["reproject", ["PI", "D2R", "MAX_LAT", "A1", "A2", "A3", "A4", "EM", "SIN_MAX"]],
+  ["night", ["PI", "D2R", "MAX_LAT", "MAX_ZOOM", "A1", "A2", "A3", "A4", "EM"]],
+]) {
+  test(`${shader}.sksl: the shared projection constants equal the JavaScript values`, () => {
+    for (const name of names) {
+      const want = SHARED[name], got = shaderConst(SHADER_CODE[shader], name);
+      if (want.tolerance) assert.ok(Math.abs(got - want.js) <= want.tolerance * Math.abs(want.js), `${name}: shader ${got}, JS ${want.js}`);
+      else assert.equal(got, want.js, name);
+    }
+  });
+}
+
+test("night.sksl's subsolar-point formula uses the same coefficients as sun.js", () => {
+  const sunJs = fs.readFileSync(path.join(ROOT, "src", "core", "sun.js"), "utf8");
+  // The numbers of each statement in order, with their signs: "- 0.399912" is -0.399912, "2.0" and "2" are both 2.
+  const numbers = (stmt) => (stmt.match(/[+-]?\s*\d+(?:\.\d+)?/g) || []).map((s) => Number(s.replace(/\s+/g, "")));
+  for (const name of ["decl", "eot"]) {
+    const js = new RegExp("var " + name + " = ([\\s\\S]*?);").exec(sunJs);
+    const sh = new RegExp("float " + name + " = ([\\s\\S]*?);").exec(SHADER_CODE.night);
+    assert.ok(js && sh, name + " in both");
+    assert.ok(numbers(sh[1]).length >= 6, name + " has its coefficients");
+    assert.deepEqual(numbers(sh[1]), numbers(js[1]), name + " coefficients");
+  }
+});
+
 test("copyPlugin copies the plugin folder", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "geo-plugin-"));
   try {

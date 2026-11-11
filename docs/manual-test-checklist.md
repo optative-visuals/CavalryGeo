@@ -16,7 +16,7 @@ fixed before release.
       Label a Pins / Routes switch; each changes the page.
 - [ ] 1b. Narrow the panel → the tab bar stays on one row and the tab text stays centred
       (check nothing is clipped at the narrowest width); widen it again.
-- [ ] 2. The Map dropdown shows only "New map", and there is no Create map, Drop pin or
+- [ ] 2. The Map dropdown shows only "New map", and there is no Drop pin or
       Centre button. Press Jump here or Fly here → "Pick a map, or search for a place
       first — that creates the map (Map tab)."
 - [ ] 3. Leave the name blank, pick Web Mercator, search "Notre-Dame, Paris" → a group
@@ -24,7 +24,7 @@ fixed before release.
       Map dropdown (with "New map" last), and the status says "Created map "…" centred on
       …". Its inputs are named centerLat/centerLon/zoom/rotation/projection (or n0..n4 if
       renaming turned out to be display-only). Pick "New map" again → no error ("New map:
-      type a place and press Search to make it."); search the same place → the new map is
+      type a place and press Search to make it, or press Create map here."); search the same place → the new map is
       named "… 2". Type a name and search again with "New map" picked → the map takes that name.
       The map name and projection fields hide once a map is picked and come back when
       "New map" is picked.
@@ -510,7 +510,7 @@ Run after the Map styles checks. SC4 needs a settings.json that still holds a `m
 - [ ] Press **Got it** → the box disappears. Close and reopen the panel → it stays hidden.
 - [ ] **Got it** is a green button (like Search). The Map tab has no Tips button: in ⚙ → Preferences, press **Show tips again** → the box shows again. Close and reopen → it is still shown.
 - [ ] Create map here with the name blank twice → "Map 1", then "Map 2" (and "Map 1 Map controls" in the Scene Window). Delete Map 1, press again → the new one is "Map 1". A typed name is used as typed; the name box hint reads "Map name (blank = the place's name, or Map 1, Map 2…)".
-- [ ] Layers → Add: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time; its box unticks once it's added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
+- [ ] Layers → Add: the Streets note reads "Downloads the area the camera shows. Add one street layer at a time. Boxes untick once their layer is added." Tick Roads and Countries, press Add layers → Roads unticks, Countries stays ticked. If a street layer finds nothing, or you cancel, its box stays ticked.
 - [ ] The Start here box ends with the line "Every map's settings are in "(map name) Map controls" in the Scene Window." in full. **Refresh controls** is on the Map tab, under the map and projection pickers (it is no longer on Layers); with a map picked it brings that map's Controls up to date.
 
 ## Panel layout and hover help

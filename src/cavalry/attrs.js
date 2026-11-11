@@ -25,7 +25,6 @@ var GeoAttrs = {
   TRIM_REVERSED: false,                       // check 6: true if Trim runs from the path's last point
   COLOR_INPUT_TYPE: "color",                  // check 9: colour inputs read as {r,g,b,a}
   FILL_ALPHA_ATTR: "opacity",                 // check 9: fill opacity 0-100 (null if none found)
-  WEBCLIENT_FOLLOWS_REDIRECTS: false,         // check 9: Google's CSV export answers 307
   ROTATION_SIGN: 1,                           // check 11 (2026-10-02): confirmed - rotation.z direction vs map rotation (+1 same, -1 opposite)
   COMP_END_ATTR: "endFrame",                 // probed 2026-10-05: setting it lengthens the comp; frameRange follows
   COMP_PLAYBACK_END_ATTR: "playbackEnd",      // probed 2026-10-05: does NOT follow endFrame

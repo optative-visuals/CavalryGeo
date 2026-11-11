@@ -4,6 +4,9 @@
   "private": true,
   "description": "GeoLayers-style map toolkit for Cavalry",
   "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test",
     "build": "node tools/build.js",

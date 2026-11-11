@@ -147,6 +147,15 @@ test("osmLayer: a 200 response with a remark error is not treated as success; ne
   assert.equal(api._state.constructed, 2);
 });
 
+// A proxy's HTML page (or a cut-off body) with a 200 status is not JSON: it counts as a bad mirror.
+test("osmLayer: a 200 response that is not JSON moves on to the next mirror instead of throwing", () => {
+  const goodBody = JSON.stringify({ elements: [{ type: "way", id: 1 }] });
+  const { GeoNet, api } = buildGeoNetWithApi(makeRemarkApi(["<html><body>Proxy error</body></html>", goodBody]));
+  const enc = GeoNet.osmLayer("roads", { west: 0, east: 1, south: 0, north: 1 }, "all");
+  assert.equal(enc.features.length, 1, "the result comes from the second mirror");
+  assert.equal(api._state.constructed, 2);
+});
+
 test("osmLayer: a remark error on every mirror throws a friendly overload message and caches nothing", () => {
   const remarkBody = JSON.stringify({ remark: "runtime error: Query timed out.", elements: [] });
   const { GeoNet, api } = buildGeoNetWithApi(makeRemarkApi([remarkBody, remarkBody]));
@@ -216,6 +225,30 @@ function makeFsApi(paths) {
     _files: files
   };
 }
+
+// A listing with backslash paths must keep the same tiles and downloads as a forward-slash one.
+test("clearCache keeps the same files when the listing uses backslash paths", () => {
+  const C = "C:/fake/CavalryGeo_assets/cache";
+  const fixture = () => ({
+    [C]: "<dir>", [C + "/generation.txt"]: "1",
+    [C + "/g0"]: "<dir>", [C + "/g0/a.json"]: "x".repeat(2048),
+    [C + "/tiles"]: "<dir>", [C + "/tiles/eox"]: "<dir>", [C + "/tiles/eox/4.jpg"]: "t",
+    [C + "/downloads"]: "<dir>", [C + "/downloads/batch.json"]: "d"
+  });
+  const run = (backslash) => {
+    const fakeApi = makeFsApi(fixture());
+    if (backslash) {
+      const list = fakeApi.listDirectoryRecursive, del = fakeApi.deleteFilePath;
+      fakeApi.listDirectoryRecursive = (dir) => list(dir).map((p) => p.replace(/\//g, "\\"));
+      fakeApi.deleteFilePath = (p) => del(String(p).replace(/\\/g, "/"));
+    }
+    buildGeoNetWithApi(fakeApi).GeoNet.clearCache();
+    return Object.keys(fakeApi._files).sort();
+  };
+  assert.deepEqual(run(true), run(false));
+  assert.ok(run(true).includes(C + "/tiles/eox/4.jpg"), "tiles survive");
+  assert.ok(run(true).includes(C + "/downloads/batch.json"), "downloads survive");
+});
 
 test("clearCache deletes cached files and folders and reports the space freed", () => {
   const C = "C:/fake/CavalryGeo_assets/cache";
@@ -303,7 +336,7 @@ function makeScriptedApi(responses) {
   };
 }
 function loadNetWith(fakeApi) {
-  const context = vm.createContext({ api: fakeApi, GeoAttrs: { ASSETS_DIR: () => "C:/fake/CavalryGeo_assets", WEBCLIENT_FOLLOWS_REDIRECTS: false }, console });
+  const context = vm.createContext({ api: fakeApi, GeoAttrs: { ASSETS_DIR: () => "C:/fake/CavalryGeo_assets" }, console });
   for (const f of ["src/core/util.js", "src/core/sources.js", "src/core/search.js", "src/core/csv.js", "src/core/match.js", "src/core/codec.js", "src/core/dataset.js", "src/cavalry/net.js"]) vm.runInContext(read(f), context, { filename: f });
   return context.GeoNet;
 }
@@ -316,6 +349,16 @@ test("fetchCsv converts a Google Sheet link and follows a 307 redirect", () => {
   const text = loadNetWith(fakeApi).fetchCsv("https://docs.google.com/spreadsheets/d/ID1/edit#gid=5");
   assert.equal(text, "Entity,Code\nFrance,FRA\n");
   assert.deepEqual(fakeApi.calls, ["https://docs.google.com/spreadsheets/d/ID1/export?format=csv&gid=5", "https://doc-04.googleusercontent.com/export/abc?format=csv"]);
+});
+
+// A relative Location is resolved against the current path (the part after the last "/", query dropped).
+test("fetchCsv follows a relative Location header", () => {
+  const fakeApi = makeScriptedApi([
+    { status: 302, headers: { Location: "export2?format=csv" } },
+    { status: 200, body: "a,b\n1,2\n" }
+  ]);
+  assert.equal(loadNetWith(fakeApi).fetchCsv("https://example.com/a/b.csv?x=1"), "a,b\n1,2\n");
+  assert.deepEqual(fakeApi.calls, ["https://example.com/a/b.csv?x=1", "https://example.com/a/export2?format=csv"]);
 });
 
 test("fetchCsv explains sharing when it gets a sign-in page or 401/403", () => {
@@ -440,6 +483,19 @@ test("settings: an old settings.json is copied to the new place once, and the ol
   fakeApi._files[OLD] = JSON.stringify({ maptilerKey: "other" });
   assert.deepEqual(plainObj(net.loadSettings()), { maptilerKey: "K1", mapStyle: "Dark" }, "the new file wins; the old one is not copied again");
   assert.equal(fakeApi._files[OLD], JSON.stringify({ maptilerKey: "other" }), "the old file is untouched");
+});
+
+// The clock moving backwards must not freeze the one-request-per-second wait. The fake clock
+// ticks on every read, so the old code would spin for a long time (and fail the read count) instead of hanging.
+test("geocodePlaces: a clock that moved back does not stall the search wait", () => {
+  const clock = { t: 1e12, reads: 0 };
+  const fakeDate = { now: () => { clock.reads++; clock.t++; return clock.t; } };
+  const { GeoNet } = buildGeoNet([200, 200], { __loadSearch: true, Date: fakeDate });
+  GeoNet.search("first");
+  clock.t -= 500000; // the clock is now behind the last search
+  clock.reads = 0;
+  GeoNet.geocodePlaces(["Paris"]);
+  assert.ok(clock.reads < 100, "the wait ends at once, took " + clock.reads + " clock reads");
 });
 
 test("reverse: a failed or empty lookup gives null and never throws", () => {

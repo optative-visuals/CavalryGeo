@@ -156,7 +156,8 @@ var GeoFetch = (function () {
       // appends and closes the file per line, so the status can be read while curl runs.
       available(); // sets appendOutput (cached after the first call)
       var statusFormat = "%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n";
-      var curlArgs = ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2",
+      // -g (--globoff): a literal [] or {} in a link is not read as a curl glob pattern.
+      var curlArgs = ["--parallel", "--parallel-max", "4", "-s", "-g", "-L", "--fail", "--create-dirs", "--retry", "2",
         "--max-time", "120", "-A", GeoNet.USER_AGENT];
       if (appendOutput && batch.status.indexOf("}") < 0) curlArgs.push("-w", "%output{>>" + batch.status + "}" + statusFormat);
       else curlArgs.push("-w", "%{stderr}" + statusFormat, "--stderr", batch.status);

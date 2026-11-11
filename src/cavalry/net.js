@@ -59,7 +59,7 @@ var GeoNet = (function () {
       return { files: 0, bytes: 0, fallback: true };
     }
     var keep = [tilesDir(), imagesDir(), dir + "/downloads"];
-    var entries = api.listDirectoryRecursive(dir).filter(function (p) {
+    var entries = api.listDirectoryRecursive(dir).map(function (p) { return String(p).replace(/\\/g, "/"); }).filter(function (p) {
       return !keep.some(function (k) { return p === k || p.indexOf(k + "/") === 0; });
     });
     var r = deleteEntries(entries);
@@ -127,8 +127,10 @@ var GeoNet = (function () {
       if (!loc) return r;
       if (loc.charAt(0) === "/") { path = loc; continue; }
       var m = /^(https?:\/\/[^\/?#]+)(.*)$/.exec(loc);
-      if (!m) return r;
-      base = m[1]; path = m[2] || "/";
+      if (m) { base = m[1]; path = m[2] || "/"; continue; }
+      // Another scheme or a protocol-relative link is not followed; a bare name is relative to the current path.
+      if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(loc)) return r;
+      path = path.split(/[?#]/)[0].replace(/[^\/]*$/, "") + loc;
     }
     throw new Error("That link sent too many redirects.");
   }
@@ -150,12 +152,21 @@ var GeoNet = (function () {
     return r.body;
   }
 
+  // Waits until 1.1 s have passed since the last place search. If the clock moved back, lastSearch is in
+  // the future and the wait would never end, so it is reset (checked on every turn of the loop too).
+  function waitForSearchSlot() {
+    if (lastSearch > Date.now()) lastSearch = 0;
+    while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */
+      if (lastSearch > Date.now()) lastSearch = 0;
+    }
+  }
+
   // Looks up place names (1 request/second, as Nominatim asks), caching each answer.
   function geocodePlaces(names) {
     var out = {};
     (names || []).forEach(function (name) {
       var hit = cached("geocode|" + name, function () {
-        while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
+        waitForSearchSlot();
         lastSearch = Date.now();
         var r = get(NOMINATIM, GeoSearch.path(name));
         if (r.status !== 200) throw new Error("Place lookup failed for \"" + name + "\" (status " + r.status + "). Try again."); // never cache a failure
@@ -175,7 +186,7 @@ var GeoNet = (function () {
   function reverse(lat, lon, zoom) {
     try {
       if (Date.now() < reverseOfflineUntil) return null;
-      while (Date.now() - lastSearch < 1100) { /* wait without api.processEvents: running clicks mid-action hung Cavalry */ }
+      waitForSearchSlot();
       lastSearch = Date.now();
       var r = get(NOMINATIM, GeoSearch.reversePath(lat, lon, zoom), 1);
       if (r.status === -1) reverseOfflineUntil = Date.now() + REVERSE_BACKOFF_MS;
@@ -192,7 +203,9 @@ var GeoNet = (function () {
     for (var i = 0; i < OVERPASS.length; i++) {
       var r = get(OVERPASS[i], "/api/interpreter?data=" + encodeURIComponent(query));
       if (r.status === 200) {
-        var json = JSON.parse(r.body);
+        // A proxy's HTML page or a cut-off body is a bad mirror too: fall through to the next one.
+        var json;
+        try { json = JSON.parse(r.body); } catch (e) { last = r.status; continue; }
         if (json && json.remark && /error/i.test(json.remark)) { overloaded = true; last = r.status; continue; }
         return json;
       }
@@ -231,6 +244,7 @@ var GeoNet = (function () {
 
   function search(q) {
     var now = Date.now();
+    if (lastSearch > now) lastSearch = 0; // the clock moved back: see waitForSearchSlot
     if (now - lastSearch < 1000) throw new Error("Please wait a second between searches.");
     lastSearch = now;
     var r = get(NOMINATIM, GeoSearch.path(q));

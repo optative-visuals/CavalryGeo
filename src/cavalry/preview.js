@@ -1,8 +1,7 @@
 // The map preview, used by the Map, Pins and Routes pages: a ui.Draw showing a flat Web Mercator map
 // (GeoPreview does the maths). The Map page's also has a fixed green frame in the middle and dims what
 // is outside it; Pins and Routes turn the frame and dim off (opts.frame, opts.dim) and take clicks
-// instead. Dragging only updates the view; a 40 ms timer redraws
-// the latest state while something changed (or only on release, if Cavalry draws too slowly).
+// instead. Dragging only updates the view; a 40 ms timer redraws the latest state while something changed.
 // Land is one fill path plus one border path per redraw; detail follows the zoom (one level
 // lower while dragging), and 50m data is read the first time it's needed.
 var GeoPreviewPanel = (function () {
@@ -230,7 +229,6 @@ var GeoPreviewPanel = (function () {
     }
     function changed() {
       if (failed) return;
-      if (opts.redraw === "release" && (drag || zoomDrag)) return; // redrawn on release
       dirty = true;
       if (!timer) { timer = new api.Timer(new Tick()); timer.setRepeating(true); timer.setInterval(TICK_MS); }
       if (!running) { running = true; timer.start(); }
