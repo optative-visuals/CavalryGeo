@@ -5,6 +5,18 @@ const near = (a, b, e = 1e-9) => assert.ok(Math.abs(a - b) < e, `${a} vs ${b}`);
 
 const london = { lat: 51.5, lon: -0.12, zoom: 10 }, tokyo = { lat: 35.68, lon: 139.69, zoom: 10 };
 
+// An end longitude more than a turn away must still take the short way round.
+test("an end lon beyond +-540 routes the same way as the wrapped lon", () => {
+  const a = F.path({ lat: 0, lon: 0, zoom: 5 }, { lat: 0, lon: 800, zoom: 5 }, 40, 1920);
+  const b = F.path({ lat: 0, lon: 0, zoom: 5 }, { lat: 0, lon: 80, zoom: 5 }, 40, 1920);
+  for (let k = 0; k < a.length; k++) {
+    const d = ((a[k].lon - b[k].lon) % 360 + 540) % 360 - 180; // difference modulo 360, in [-180, 180)
+    assert.ok(Math.abs(d) < 1e-6, `frame ${k}: ${a[k].lon} vs ${b[k].lon}`);
+  }
+  // eastward at every step, never back over the long way
+  for (let k = 1; k < a.length; k++) assert.ok(((a[k].lon - a[k - 1].lon) % 360 + 540) % 360 - 180 >= -1e-9, `step ${k}`);
+});
+
 test("exact start and end, one point per frame", () => {
   const p = F.path(london, tokyo, 10, 1920);
   assert.equal(p.length, 10);

@@ -674,6 +674,21 @@ test("Map tab: an empty scene offers only \"New map\", and map actions say how t
   });
 });
 
+test("Map tab Style: Apply to map with New map picked gives the same 'pick a map' message as the other map buttons", () => {
+  const { context } = buildSandbox();
+  createWorldMap(context);
+  context.mapPicker.setValue(1); // New map
+  context.mapPicker.onValueChanged();
+  context.applyStyleBtn.onClick();
+  assert.equal(context.statusLabel.getText(), NO_MAP);
+});
+
+test("status line: a < in any message shows as ‹ (the label reads < as markup, which hid the rest of the line)", () => {
+  const { context } = buildSandbox();
+  context.say("Frame <3 of <b>map</b>");
+  assert.equal(context.statusLabel.getText(), "Frame ‹3 of ‹b>map‹/b>");
+});
+
 test("Map tab: \"New map\" stays last in the picker, and selecting it means no map", () => {
   const { context } = buildSandbox();
   createWorldMap(context);
@@ -854,7 +869,7 @@ test("Fly to keys the camera from Start to End on the selected place", () => {
   assert.equal(api.getFrame(), 29);
   flyRange(context, 20, 20);
   context.flyBtn.onClick();
-  assert.match(context.statusLabel.getText(), /Set End at least 1 frame after Start/);
+  assert.match(context.statusLabel.getText(), /Set the To frame at least 1 frame after From/);
 });
 
 test("Fly to the world view", () => {
@@ -1167,7 +1182,7 @@ test("Fly here refuses an End less than 1 frame after Start and changes nothing"
   [[20, 20], [20, 15]].forEach(([s, e]) => {
     flyRange(context, s, e);
     context.flyBtn.onClick();
-    assert.equal(context.statusLabel.getText(), "Error: Set End at least 1 frame after Start (a flight needs 2 frames or more).");
+    assert.equal(context.statusLabel.getText(), "Error: Set the To frame at least 1 frame after From (a flight needs 2 frames or more).");
     assert.deepEqual(camTimes(api, map), [[], [], []]);
     assert.equal(context.flyStartField.getValue(), s, "the fields stay as they were");
   });
@@ -1180,7 +1195,7 @@ test("Fly here refuses a Start before the composition's first frame", () => {
   const map = flyWorld(context);
   flyRange(context, 3, 20);
   context.flyBtn.onClick();
-  assert.equal(context.statusLabel.getText(), "Error: Start is before the composition's first frame (5).");
+  assert.equal(context.statusLabel.getText(), "Error: The From frame is before the composition's first frame (5).");
   assert.deepEqual(camTimes(api, map), [[], [], []]);
 });
 
@@ -1242,7 +1257,7 @@ test("Fly here past the composition's end: No cancels and changes nothing", () =
   flyRange(context, 0, 14);
   context.flyBtn.onClick();
   assert.equal(asked.length, 1);
-  assert.equal(context.statusLabel.getText(), "Cancelled. Set End to 9 or earlier to stay within your composition.");
+  assert.equal(context.statusLabel.getText(), "Cancelled. Set the To frame to 9 or earlier to stay within your composition.");
   assert.deepEqual(camTimes(api, map), [[], [], []]);
   assert.equal(api.get(comp, "endFrame"), 9);
   assert.equal(api.get(comp, "playbackEnd"), 9);
@@ -1258,7 +1273,7 @@ test("Fly here past the composition's end with no dialog available refuses and n
   assert.equal(context.questionDialog(), null);
   flyRange(context, 0, 14);
   context.flyBtn.onClick();
-  assert.equal(context.statusLabel.getText(), "Error: End is after your composition's last frame (9). Set End to 9 or earlier, or lengthen the composition first.");
+  assert.equal(context.statusLabel.getText(), "Error: The To frame is after your composition's last frame (9). Set it to 9 or earlier, or lengthen the composition first.");
   assert.deepEqual(camTimes(api, map), [[], [], []]);
   assert.equal(api.get(comp, "endFrame"), 9);
   assert.equal(api.getOutFrame(layer), 10);
@@ -1569,6 +1584,19 @@ test("map styles: new-style and old-style routes take the map's accent, route wi
   delete api.setGenerator;
   const old = G.createRoute(map, [{ name: "C", lon: 0, lat: 0 }, { name: "D", lon: 5, lat: 5 }], { lift: 30, pins: true, labels: false });
   old.legs.forEach((leg) => { assert.equal(api.get(leg, "stroke.strokeColor"), "#ffffff"); assert.equal(api.get(leg, "stroke.width"), 2); });
+});
+
+test("map styles: a traveller falls back to its own map's route colour when the leg colour can't be read", () => {
+  const { context, api } = buildSandbox();
+  const G = context.GeoScene;
+  const map = styledMap(context, "Blueprint");
+  const r = G.createRoute(map, [{ name: "A", lon: 0, lat: 0 }, { name: "B", lon: 10, lat: 10 }], { arc: 30, labels: false });
+  const leg = r.legs[0], realGet = api.get;
+  api.get = function (id, attr) { if (id === leg && attr === "stroke.strokeColor") throw new Error("unreadable"); return realGet.apply(this, arguments); };
+  try { G.addTraveller(map, r.groupId, "dot"); } finally { api.get = realGet; }
+  const blueprint = context.GeoStyles.builtIn("Blueprint").colors.accent;
+  assert.notEqual(blueprint, context.GeoStyles.builtIn("Dark").colors.accent, "the two styles differ, so the test can tell them apart");
+  assert.equal(api.get(travData(api, r.groupId).source, "material.materialColor"), blueprint);
 });
 
 test("map styles: data layers take the map's text and ocean colours; bubbles keep their own", () => {
@@ -2347,7 +2375,8 @@ test("buildImagery parents layers before setting their local transforms (parent 
   const kids = api.getChildren(level);
   assert.equal(kids.length, 48);
   kids.forEach((id) => assert.equal(api.get(id, "rotation.z"), 0, "tile rotation"));
-  const expected = tiles.map((t) => { const p = context.GeoTiles.tileLocal(t, origin); return p[0] + "," + p[1]; }).sort();
+  // level-local tile centre: 256 px tiles, north up, from the level origin's north-west corner
+  const expected = tiles.map((t) => { const p = [(t.x - origin.x0) * 256 + 128, -((t.y - origin.y0) * 256 + 128)]; return p[0] + "," + p[1]; }).sort();
   const actual = kids.map((id) => api.get(id, "position.x") + "," + api.get(id, "position.y")).sort();
   assert.deepEqual(Array.from(actual), Array.from(expected));
 });
@@ -2647,6 +2676,31 @@ test("an error in a build step tears down the new group and keeps the old imager
   assert.throws(() => job.step(0), /boom/);
   assert.deepEqual(imageryGroups(api), [old.groupId]);
   assert.equal(footageCount(api), 48);
+});
+
+test("a build that fails puts the user's selection back, not the footage it added", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  api.select([map.cameraId]);
+  let calls = 0;
+  const realAdd = api.addAssetToComp.bind(api);
+  api.addAssetToComp = function (assetId) { if (++calls === 3) throw new Error("boom"); return realAdd(assetId); };
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  job.step(0);
+  job.step(0);
+  assert.throws(() => job.step(0), /boom/);
+  assert.deepEqual(Array.from(api.getSelection()), [map.cameraId]);
+});
+
+test("a cancelled build puts the user's selection back once its partial imagery is gone", () => {
+  const { context, api, map, src, plan } = imageryFixture();
+  api.select([map.cameraId]);
+  const job = context.GeoScene.beginImageryBuild(map, src, {}, plan);
+  for (let i = 0; i < 5; i++) job.step(0);
+  assert.notDeepEqual(Array.from(api.getSelection()), [map.cameraId], "the build has selected its footage by now");
+  job.cancel();
+  const steps = stepToEnd(job, 0);
+  assert.ok(steps.length > 1, "the partial imagery is deleted over several steps");
+  assert.deepEqual(Array.from(api.getSelection()), [map.cameraId]);
 });
 
 // ---- Bent imagery (globe / Equal Earth): source composition + reproject filter ----------
@@ -3021,6 +3075,19 @@ test("Flat imagery: night lights plan bent on a flat map too, so they repeat, an
   assert.throws(() => context.GeoScene.planNightLights(map), (e) => e.message === PLUGIN_NEEDED);
 });
 
+test("night lights walk the camera timeline once, as day imagery does", () => {
+  const { context, api, map, src } = bentFixture({ lon: 0, zoom: 4, projection: 0 });
+  let frames = 0;
+  const realSetFrame = api.setFrame;
+  api.setFrame = function (f) { frames++; return realSetFrame.call(this, f); };
+  context.GeoScene.planImagery(map, src, {});
+  const dayFrames = frames;
+  frames = 0;
+  context.GeoScene.planNightLights(map);
+  assert.ok(dayFrames > 0, "the day plan walks the timeline");
+  assert.equal(frames, dayFrames, "the night plan walks it once too, not once for the zoom check and again for the plan");
+});
+
 test("Flat imagery: old flat imagery is left alone by Refresh controls, which reports the note and ends its status with it", () => {
   const { context, api } = buildSandbox();
   const { map, src } = flatWorld(context);
@@ -3277,7 +3344,7 @@ for (const version of ["curl 7.75.0 (Windows)", "curl 8.4.0 (x86_64-pc-win32)"])
 test("GeoFetch.available is false when the assets folder path isn't plain ASCII (F4)", () => {
   const { context, api } = buildSandbox();
   fakeCurl(api); context.GeoFetch._reset();
-  api.getAppDataFolder = () => "C:/Users/üser/AppData"; // any non-ASCII folder name
+  api.getAppDataFolder = () => "/fake/üser/AppData"; // any non-ASCII folder name
   assert.equal(context.GeoFetch.available(), false);
 });
 
@@ -3341,7 +3408,8 @@ test("GeoFetch starts one detached curl batch and reports each file as its statu
   assert.equal(curl.calls.length, 1);
   assert.equal(curl.calls[0].cmd, "curl");
   const a = curl.calls[0].args;
-  assert.deepEqual(plain(a.slice(0, 11)), ["--parallel", "--parallel-max", "4", "-s", "-L", "--fail", "--create-dirs", "--retry", "2", "--max-time", "120"]);
+  // -g (--globoff): a literal [] or {} in a link is not read as a curl glob pattern.
+  assert.deepEqual(plain(a.slice(0, 12)), ["--parallel", "--parallel-max", "4", "-s", "-g", "-L", "--fail", "--create-dirs", "--retry", "2", "--max-time", "120"]);
   assert.equal(a.indexOf("--stderr"), -1, "curl 8.4 appends to the status file itself (no --stderr)");
   assert.equal(a[a.indexOf("-w") + 1], "%output{>>" + batch.status + "}%{http_code} %{exitcode} %{content_type} %{filename_effective}\\n");
   assert.match(api._files[a[a.indexOf("-K") + 1]], /url = "https:\/\/a\.example\/1\?x=\\"q\\""\noutput = ".*\/1\.jpg"\n/);
@@ -4087,6 +4155,19 @@ test("Imagery tab: Cancel during a background download keeps the in-flight list"
   assert.ok(context.GeoFetch.leftovers().length > 0);
 });
 
+test("Imagery tab: Cancel keeps its message when the composition was switched during the download", () => {
+  const { context, api, ui } = buildSandbox();
+  createWorldMap(context);
+  fakeCurl(api); context.GeoFetch._reset();
+  context.sourcePicker.setValue(0);
+  context.buildImageryBtn.onClick();
+  context.buildImageryBtn.onClick();
+  otherComp(context, api, "Other", "Elsewhere");
+  follower(ui).onCompChanged(); // ignored while the download runs
+  context.cancelImageryBtn.onClick();
+  assert.equal(context.statusLabel.getText(), "Download cancelled. Files still downloading in the background are kept; nothing was built.");
+});
+
 test("Imagery tab: a source without a key that answers 403 is said to have refused the request (F8)", () => {
   const { context, api } = buildSandbox();
   createWorldMap(context);
@@ -4223,6 +4304,18 @@ test("update check: a day later it asks again, and the same answer isn't shown t
   runTimers(api);
   assert.equal(context.statusLabel.getText(), "Ready.");
   assert.equal(readSettings(api).apiKey, "kept", "other settings survive");
+});
+
+test("update check: an unreadable settings file is kept as .bak, not overwritten by the check", () => {
+  const broken = "{ \"apiKey\": \"kept\", oops";
+  let curl;
+  const { api } = buildSandbox({ version: "0.4.1", setup: (a) => { curl = fakeCurl(a); a._files[SETTINGS] = broken; } });
+  assert.equal(curl.calls.length, 1, "the check still runs");
+  assert.equal(api._files[SETTINGS + ".bak"], broken, "the unreadable file is copied before it is replaced");
+  api._files[REPLY] = JSON.stringify({ tag_name: "v0.5.0" });
+  runTimers(api);
+  assert.equal(readSettings(api).latestVersion, "0.5.0");
+  assert.equal(readSettings(api).updateCheckedAt > 0, true);
 });
 
 test("update check: silent when up to date, switched off, or GitHub never answers", () => {
@@ -4937,7 +5030,7 @@ test("GeoStyle.tabBar without ui.Container is a plain HLayout of the buttons, an
 // ---- Map preview widget ------------------------------------------------------------
 function makePreview(context, opts = {}) {
   const picks = [];
-  const p = context.GeoPreviewPanel.create(Object.assign({ compSize: () => ({ width: 1920, height: 1080 }), onPick: (i) => picks.push(i), yUp: false, dim: true, redraw: "timer" }, opts));
+  const p = context.GeoPreviewPanel.create(Object.assign({ compSize: () => ({ width: 1920, height: 1080 }), onPick: (i) => picks.push(i), yUp: false, dim: true }, opts));
   return { p, picks };
 }
 const fills = (draw, color) => draw._paths.filter((x) => x.paint.color === color && !x.paint.stroke);
@@ -5380,7 +5473,7 @@ test("preview: without ui.Draw, or with the data missing, it says so and is unav
   delete ui.Draw;
   const context = vm.createContext({ api: api, ui: ui, cavalry: makeFakeCavalry(), console: console });
   vm.runInContext(buildPanel(), context, { filename: "CavalryGeo.js" });
-  const a = context.GeoPreviewPanel.create({ compSize: () => ({ width: 1920, height: 1080 }), onPick() {}, yUp: false, dim: true, redraw: "timer" });
+  const a = context.GeoPreviewPanel.create({ compSize: () => ({ width: 1920, height: 1080 }), onPick() {}, yUp: false, dim: true });
   assert.equal(a.available(), false);
   const { context: c2 } = buildSandbox(); // no bundled data installed
   const { p } = makePreview(c2);
@@ -5903,6 +5996,17 @@ test("Map tab: Refresh shows the picked map's camera as the dashed frame", () =>
   assert.equal(strokes(context.preview._draw, "#e6e6e6").length, 1);
 });
 
+test("Map tab: Refresh keeps the picked map when it is not the first", () => {
+  const { context } = buildSandbox();
+  context.makeMap("A", context.worldViewCamera(0));
+  context.makeMap("B", { lat: 35, lon: 139, zoom: 8, rotation: 0, projection: 0 });
+  context.mapPicker.setValue(1);
+  context.mapPicker.onValueChanged();
+  context.refreshMapsBtn.onClick();
+  assert.equal(context.mapPicker.getValue(), 1);
+  assert.equal(context.currentMap().name, "B");
+});
+
 // ---- Map tab: Style section ----
 const SETTINGS_FILE = "C:/fake/AppData/CavalryGeo/settings.json"; // outside the Scripts folder, so an update can't wipe it
 const OLD_SETTINGS_FILE = "C:/fake/AppData/Scripts/CavalryGeo_assets/settings.json";
@@ -6007,6 +6111,14 @@ test("Map tab Style: Apply reports colours it left alone", () => {
   pickStyle(context, "Mono");
   context.applyStyleBtn.onClick();
   assert.equal(context.statusLabel.getText(), "Applied Mono to Map. 1 animated or connected colour was left alone.");
+});
+
+test("Imagery: a changed source is saved at once, so closing Cavalry keeps it (no map needed)", () => {
+  const { context, api } = buildSandbox();
+  const list = context.GeoSources.list();
+  context.sourcePicker.setValue(4);
+  context.sourcePicker.onValueChanged();
+  assert.equal(settingsOf(api).source, list[4].id);
 });
 
 test("Map tab Style: Save as style saves the map's colours, lists and picks the new style, keeping other settings", () => {
@@ -11086,7 +11198,7 @@ test("Drift past the composition's end: No cancels, no dialog refuses", () => {
   flyWorld(b.context);
   flyRange(b.context, 0, 14);
   b.context.driftBtn.onClick();
-  assert.match(b.context.statusLabel.getText(), /^Error: End is after your composition's last frame/);
+  assert.match(b.context.statusLabel.getText(), /^Error: The To frame is after your composition's last frame/);
 });
 
 test("a Drift over an older flight removes that flight's record", () => {
@@ -15213,8 +15325,9 @@ test("Reset remembered choices: Yes asks the exact question, sets the pickers to
   assert.equal(context.easingPicker.getValue(), 2, "remembered easing shows");
   assert.equal(context.sourcePicker.getValue(), context.GeoSources.list().findIndex((s) => s.key === "maptiler"));
   assert.equal(context.pickedStyle().name, "Mono");
-  context.maptilerKeyField.setText(""); // MapTiler with no key: the hint is showing
-  context.sourcePicker.onValueChanged();
+  context.sourcePicker.onValueChanged(); // saves the source with the key still in the box
+  context.maptilerKeyField.setText(""); // MapTiler with no key: the hint is showing (typed, not saved)
+  context.refreshKeyHint();
   assert.ok(!context.keyHint.isHidden(), "hint shows before the reset");
   const asked = withModal(ui, true);
   context.resetChoicesBtn.onClick();

@@ -317,9 +317,10 @@ var GeoScene = (function () {
     if (startHandle) api.connect(startHandle, CA + "." + E.inputIndex(E.HANDLE_INPUTS, "shape"), id, at("shape"), true);
   }
   // A clip helper ("start" -> trim start, "end" -> trim end, "fade" -> opacity), parented and wired;
-  // one that can't be set up is deleted again before the error goes on.
-  function addLegClip(map, parentId, line, name, which, a, b, startHandle, track) {
-    var E = GeoExpression, cam = readCamera(map.cameraId);
+  // one that can't be set up is deleted again before the error goes on. cam (optional): the camera reading, when the caller has one.
+  function addLegClip(map, parentId, line, name, which, a, b, startHandle, track, cam) {
+    var E = GeoExpression;
+    cam = cam || readCamera(map.cameraId);
     var id = api.create(A.CAMERA_LAYER_TYPE, name + (which === "fade" ? " fade" : " clip " + which));
     if (track) track(id);
     try {
@@ -614,9 +615,9 @@ var GeoScene = (function () {
         api.connect(h, A.DRIVER_OUTPUT_ATTR, line, which === "start" ? "generator.startOffset" : "generator.endOffset", true);
         handle[which] = h;
       });
-      var fade = addLegClip(map, helpers, line, name, "fade", a, b, handle.start, track);
-      var clipStart = addLegClip(map, helpers, line, name, "start", a, b, handle.start, track);
-      var clipEnd = addLegClip(map, helpers, line, name, "end", a, b, handle.start, track);
+      var fade = addLegClip(map, helpers, line, name, "fade", a, b, handle.start, track, cam);
+      var clipStart = addLegClip(map, helpers, line, name, "start", a, b, handle.start, track, cam);
+      var clipEnd = addLegClip(map, helpers, line, name, "end", a, b, handle.start, track, cam);
       return { number: idx + 1, line: line, startHandle: handle.start, endHandle: handle.end, fade: fade, clipStart: clipStart, clipEnd: clipEnd, from: visitHolder[legStops[idx][0]], to: visitHolder[legStops[idx][1]] };
     });
 
@@ -962,11 +963,14 @@ var GeoScene = (function () {
 
   // Every plan is bent, flat maps included: day imagery and night lights (see planNightLights) repeat past the
   // date line through Reproject, and need the plugin.
-  function planImagery(map, src, opts) {
+  // samples (optional): the camera samples when the caller has walked the timeline already (planNightLights).
+  function planImagery(map, src, opts, samples) {
     GeoSources.tileUrl(src, opts, 0, 0, 0); // validates key, style or link before any work
     // Large images need background downloads: one at a time, an EOX image would freeze
     // Cavalry ~15 s, so without curl EOX/NASA plan map tiles instead.
-    var s = compSize(), samples = sampleCamera(map), images = GeoSources.usesImages(src) && GeoFetch.available();
+    var s = compSize();
+    samples = samples || sampleCamera(map);
+    var images = GeoSources.usesImages(src) && GeoFetch.available();
     if (!reprojectAvailable()) throw new Error(REPROJECT_MISSING);
     // Each sample's region is worked out once, however many times the level drops.
     var regions = [];
@@ -1436,8 +1440,10 @@ var GeoScene = (function () {
     var night = !!plan.night, dayNight = night ? findDayNight(map) : null;
     if (night && !dayNightComplete(dayNight)) throw new Error(NIGHT_NEEDS_DAY_NIGHT);
     // A first full map imagery build (no full map imagery on the map yet) hides the covering fills (hideCoveringFills).
-    var firstFullMap = !night && !GeoSources.isTileset(src, opts) && findImagery(map).filter(function (i) { return !isTilesetImagery(i); }).length === 0;
-    var previous = night ? findNightLights(map) : findImagery(map).filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
+    // One scan of the day imagery serves both checks (nothing changes the comp between them).
+    var dayImagery = night ? [] : findImagery(map);
+    var firstFullMap = !night && !GeoSources.isTileset(src, opts) && dayImagery.filter(function (i) { return !isTilesetImagery(i); }).length === 0;
+    var previous = night ? findNightLights(map) : dayImagery.filter(function (i) { return i.meta.cacheKey === plan.cacheKey; });
     var assetByPath = existingAssets(), base = (plan.mode === "tiles" && GeoSources.imagePx(src, opts) === 512) ? 0.5 : 1, pad = GeoSources.seeThrough(src, opts) ? 0 : 4, built = 0, unreadable = 0;
     // sourced: the build has a source comp (bent). A plan without the bent flag builds footage tiles in the map comp
     // (the older flat form, which planImagery no longer makes).
@@ -1484,6 +1490,8 @@ var GeoScene = (function () {
     // Adding footage selects it, so the user's selection is put back at the end.
     var userSelection = [];
     try { userSelection = api.getSelection(); } catch (e) { /* nothing selected */ }
+    // Put back on success, and on failure or cancel once the half-built layers are gone (cancel: when its discard ends).
+    function restoreSelection() { try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ } }
 
     function withSourceComp(fn) { return withComp(sourceComp, mapComp, fn); }
     // The source comp's name: "Imagery source: <label> · <map>" (day and night alike).
@@ -1628,7 +1636,7 @@ var GeoScene = (function () {
       if (!night) sendImageryToBack(map); // night lights stay on top of their Day & night group
       var hidden = [];
       if (!night && firstFullMap) { try { hidden = hideCoveringFills(map); } catch (e) { /* cosmetic: the imagery is built either way */ } }
-      try { api.select(userSelection); } catch (e) { /* selection restore is cosmetic */ }
+      restoreSelection();
       result = { groupId: outer, tiles: built, levels: builtLevels.length, unreadable: unreadable };
       if (night) result.night = true; else result.hidden = hidden;
       // Only now, with the new imagery complete, is the old imagery for this cache key
@@ -1651,7 +1659,7 @@ var GeoScene = (function () {
         phase = pending.length ? "cleanup" : "done";
       } else {
         removeEntry(pending.shift(), mapComp);
-        if (!pending.length) phase = phase === "cleanup" ? "done" : "cancelled";
+        if (!pending.length) { phase = phase === "cleanup" ? "done" : "cancelled"; if (phase === "cancelled") restoreSelection(); }
       }
     }
 
@@ -1682,6 +1690,7 @@ var GeoScene = (function () {
           if (outer) { try { deleteIfThere(outer); } catch (e2) { /* already failing */ } }
           if (filter) { try { deleteIfThere(filter); } catch (e2) { /* already failing */ } }
           if (sourceComp) { try { api.deleteLayer(sourceComp); } catch (e2) { /* already failing */ } }
+          restoreSelection();
         }
         phase = "failed";
         throw e;
@@ -1699,6 +1708,7 @@ var GeoScene = (function () {
       var mine = { groupId: outer, meta: sourced ? { bent: bent, sourceComp: sourceComp } : null };
       pending = outer && layerThere(outer) ? teardownEntries(mine, mapComp) : [];
       phase = pending.length ? "discard" : "cancelled";
+      if (phase === "cancelled") restoreSelection();
       return true;
     }
 
@@ -1738,8 +1748,8 @@ var GeoScene = (function () {
   // The plan for night lights: NASA's night layer over the same view, bent like day imagery. planImagery already
   // stops at the layer's maximum zoom (8); zoomCapped says the camera went past it.
   function planNightLights(map) {
-    var zoomed = sampleCamera(map).some(function (c) { return c.zoom > 8.5; });
-    var plan = planImagery(map, GeoSources.night(), { wholeEarth: wholeEarthFor(map) });
+    var samples = sampleCamera(map), zoomed = samples.some(function (c) { return c.zoom > 8.5; });
+    var plan = planImagery(map, GeoSources.night(), { wholeEarth: wholeEarthFor(map) }, samples);
     plan.night = true;
     if (zoomed) plan.zoomCapped = true;
     return plan;
@@ -2182,8 +2192,8 @@ var GeoScene = (function () {
     return true;
   }
 
-  // The route's own line colour as "#rrggbb" (the default route green when it can't be read).
-  function routeColour(legs) { return readColour(legs[0].line, A.STROKE_COLOR_ATTR, STYLE.route.stroke); }
+  // The route's own line colour as "#rrggbb": the map's route colour when it can't be read (the Dark style's without a map).
+  function routeColour(legs, map) { return readColour(legs[0].line, A.STROKE_COLOR_ATTR, map ? layerStyle(map, "route").stroke : STYLE.route.stroke); }
 
   function makeMarker(kind, colour, track) {
     var id;
@@ -2206,7 +2216,10 @@ var GeoScene = (function () {
     var parent = api.getParent(id);
     var at = function (x) { return api.getChildren(parent).indexOf(x); };
     api.select([id]);
-    for (var guard = api.getChildren(parent).length; guard > 0 && at(id) < at(below) - 1; guard--) api.moveBackward();
+    // below holds its index: id either starts above it (and stops directly above it) or below it (no step at all),
+    // so it never passes below and at(below) is read once.
+    var stop = at(below) - 1;
+    for (var guard = api.getChildren(parent).length; guard > 0 && at(id) < stop; guard--) api.moveBackward();
   }
 
   // A traveller's show helper also reads the leg's trim start and its un-clipped draw, so the copy
@@ -2235,7 +2248,7 @@ var GeoScene = (function () {
     function track(id) { made.push(id); return id; }
     try { previous = api.getSelection(); } catch (e) { previous = null; }
     try {
-      var source = kind === "layer" ? userLayerId : makeMarker(kind, routeColour(info.legs), track);
+      var source = kind === "layer" ? userLayerId : makeMarker(kind, routeColour(info.legs, map), track);
       if (kind !== "layer") { api.parent(source, info.helpers); api.set(source, identityTransform()); }
       var meta = function (c) { return { camera: map.cameraId, category: c }; };
       var scale = track(api.create(A.CAMERA_LAYER_TYPE, "Traveller scale"));
@@ -3647,7 +3660,7 @@ var GeoScene = (function () {
     STYLE: STYLE,
     styleOf: styleOf, setMapStyle: setMapStyle, layerStyle: layerStyle, createMap: createMap, findMaps: findMaps, readCamera: readCamera, setCamera: setCamera,
     compSize: compSize, createMapLayer: createMapLayer, findMapLayers: findMapLayers, readLayerData: readLayerData, readLayerMeta: layerMeta,
-    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, routeNumber: routeNumber, routeDraws: routeDraws, stripRoute: stripRoute, prepareRoutes: prepareRoutes, numberRoutes: numberRoutes, sceneOrder: sceneOrder, pinStops: pinStops,
+    addPin: addPin, extract: extract, bake: bake, createLabel: createLabel, createRoute: createRoute, findRoutes: findRoutes, routeNumber: routeNumber, routeDraws: routeDraws, stripRoute: stripRoute, prepareRoutes: prepareRoutes, sceneOrder: sceneOrder, pinStops: pinStops,
     isMapPart: isMapPart, routeOfSelection: routeOfSelection, addTraveller: addTraveller, removeTraveller: removeTraveller, findTravellers: findTravellers,
     hasAttribution: hasAttribution, createAttribution: createAttribution, createImageryCredit: createImageryCredit, restackBaseLayers: restackBaseLayers,
     createDataLayers: createDataLayers, refreshData: refreshData,
@@ -3655,10 +3668,10 @@ var GeoScene = (function () {
     REPROJECT_TYPE: REPROJECT_TYPE, reprojectAvailable: reprojectAvailable, wholeEarthFor: wholeEarthFor, setWholeEarth: setWholeEarth,
     findImagery: findImagery, findNightLights: findNightLights, findAllImagery: findAllImagery, nightLightsStatus: nightLightsStatus, planNightLights: planNightLights, removeNightLights: removeNightLights, prepareNightLights: prepareNightLights, flyCamera: flyCamera, recordFlight: recordFlight, flightAt: flightAt, flightStart: flightStart, readCameraAt: readCameraAt, extendComp: extendComp, findLabels: findLabels, findOcean: findOcean,
     applyMapStyle: applyMapStyle, readMapStyle: readMapStyle,
-    HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts, highlightNumber: highlightNumber,
+    HIGHLIGHT_EFFECTS: HIGHLIGHT_EFFECTS, createHighlight: createHighlight, changeHighlightEffect: changeHighlightEffect, highlightOfSelection: highlightOfSelection, findHighlights: findHighlights, prepareHighlights: prepareHighlights, highlightParts: highlightParts,
     createCallout: createCallout, findCallouts: findCallouts, prepareCallouts: prepareCallouts, calloutParts: calloutParts, calloutNumber: calloutNumber,
     addDayNight: addDayNight, prepareDayNight: prepareDayNight, prepareImagery: prepareImagery, imageryNote: imageryNote, findDayNight: findDayNight, dayNightParts: dayNightParts,
-    nightMattes: nightMattes, dayNightComplete: dayNightComplete, NIGHT_TYPE: NIGHT_TYPE, DAYNIGHT_MISSING: DAYNIGHT_MISSING, layerTypeAvailable: layerTypeAvailable, nightAvailable: nightAvailable,
+    nightMattes: nightMattes, dayNightComplete: dayNightComplete, DAYNIGHT_MISSING: DAYNIGHT_MISSING,
     addScaleBar: addScaleBar, addNorthArrow: addNorthArrow, findFurniture: findFurniture, fitFurniture: fitFurniture, fitLayers: fitLayers, upgradeMapLayers: upgradeMapLayers,
     labelDrivers: labelDrivers,
     previewModel: previewModel, previewStreets: previewStreets, readPreviewLayer: readPreviewLayer

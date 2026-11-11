@@ -3,8 +3,8 @@
 Needs Node.js 20 or newer; there are no dependencies to install.
 
 - `npm test` — runs the unit tests.
-- `npm run build` — builds `dist/CavalryGeo.js` and `dist/CavalryGeo_assets/` without installing.
-- `npm run install-cavalry` — builds and copies the result into Cavalry's Scripts folder.
+- `npm run build` — builds `dist/CavalryGeo.js`, `dist/CavalryGeo_assets/` and `dist/CavalryGeo_plugin/` without installing.
+- `npm run install-cavalry` — builds and copies the result into Cavalry's Scripts folder. Windows only: the installer reads `APPDATA`. On macOS, copy the contents of `dist/` into Cavalry's Scripts folder by hand (Help → Show Scripts Folder).
 - `npm run package` — builds `dist/CavalryGeo-v<version>.zip` for a GitHub release.
 - `npm run ne-data` — re-downloads and re-encodes the bundled Natural Earth data into `assets/ne/`.
 

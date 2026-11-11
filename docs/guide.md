@@ -113,10 +113,11 @@ the **Controls** tab there to find the map's settings in one place:
   (**Data 1 · …**, **Data 2 · …**; hover a row to see which set it is).
 - **Imagery:** opacity and hide.
 
-A map's settings are split over up to four components, stacked above the map group: **Map controls**
+A map's settings are split over up to five components, stacked above the map group: **Map controls**
 (named after the map: camera, ocean, base layers, imagery), **Overlay controls** (pins, labels, routes,
-travellers, scale bar, north arrow), **Data controls** (data maps) and **Extract controls**
-(extracted features). Each appears once it has something to show. Maps made with earlier versions
+travellers, scale bar, north arrow), **Data controls** (data maps), **Extract controls**
+(extracted features) and **Time controls** (the day and night date and time, Night colour, Night opacity,
+Twilight, Night lights % and the time label). Each appears once it has something to show. Maps made with earlier versions
 are split the next time their controls refresh (any action in the panel, or Refresh controls);
 anything you promoted yourself stays where it is. A main component still called "Map name Controls"
 is renamed to "Map name Map controls" then; a name you gave it yourself is kept.
@@ -128,7 +129,7 @@ kept, after the plugin's — including settings of the map's own layers, such as
 - **Moving it:** once the Controls layer exists the plugin never moves it again. Drag it wherever
   you like (another group, further down the stack); the plugin still finds it and keeps it up to date.
 - **Deleting a map:** deleting a map's group does not delete its Controls layers (the main one
-  and, if the map has them, the Overlay, Data and Extract ones: up to four), because they sit
+  and, if the map has them, the Overlay, Data, Extract and Time ones: up to five), because they sit
   outside the group. Delete those layers too.
 - **Maps made before this change:** their Controls layer sat inside the map's group. Press
   **Refresh controls** once and it moves out to just above the group, keeping its settings.

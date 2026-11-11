@@ -230,9 +230,6 @@ var GeoExpression = (function () {
   function routeDrawExpression(meta) {
     return writeTag("GEO_META", meta) + "\n" + inputPrelude(ROUTE_DRAW_INPUTS) + "Math.max(0, Math.min(100, (_i0 / 100 * _i2 - _i1) * 100));\n";
   }
-  function routeFadeExpression(meta) {
-    return writeTag("GEO_META", meta) + "\n" + inputPrelude(FADE_INPUTS) + "Math.min(_i0, _i1);\n";
-  }
 
   // Globe legs are cut off where they go round the back: three helpers per leg (trim start, trim
   // end, fade) share one input list, so they are wired alike. The fade inputs come first (an older
@@ -378,7 +375,7 @@ var GeoExpression = (function () {
     writeTag: writeTag, readTag: readTag, frameInputs: frameInputs, mapLayerExpression: mapLayerExpression, routeLayerExpression: routeLayerExpression, readData: readData,
     cameraExpression: cameraExpression, labelDriverExpression: labelDriverExpression,
     labelVisibilityExpression: labelVisibilityExpression, imageryRotationExpression: imageryRotationExpression, imageryLevelExpression: imageryLevelExpression, imageryViewExpression: imageryViewExpression,
-    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, routeFadeExpression: routeFadeExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
+    routeEndPointExpression: routeEndPointExpression, routeHandleExpression: routeHandleExpression, CLIP_INPUTS: CLIP_INPUTS, routeClipStartExpression: routeClipStartExpression, routeClipEndExpression: routeClipEndExpression, routeClipFadeExpression: routeClipFadeExpression, ROUTE_DRAW_INPUTS: ROUTE_DRAW_INPUTS, routeDrawExpression: routeDrawExpression,
     CALLOUT_GEOM_INPUTS: CALLOUT_GEOM_INPUTS, CALLOUT_DRAW_INPUTS: CALLOUT_DRAW_INPUTS, calloutEdgeExpression: calloutEdgeExpression, calloutBendExpression: calloutBendExpression, calloutDrawExpression: calloutDrawExpression,
     travellerTipExpression: travellerTipExpression, travellerScaleExpression: travellerScaleExpression, travellerShowInputs: travellerShowInputs, travellerShowExpression: travellerShowExpression,
     regionsExpression: regionsExpression, bubblesExpression: bubblesExpression, valueLabelsExpression: valueLabelsExpression,

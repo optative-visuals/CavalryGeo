@@ -55,6 +55,18 @@ test("formatValue: compact, full, fixed, negatives, prefix and suffix", () => {
   assert.equal(G.formatValue(null, 0, 1), "");
 });
 
+// The unit is picked after rounding to the shown decimals, so 999.9 reads as 1k, not 1000.
+test("formatValue: rounding up to the next unit, and no minus sign on a zero result", () => {
+  assert.equal(G.formatValue(600, 0, 0), "600");
+  assert.equal(G.formatValue(999.4, 0, 0), "999");
+  assert.equal(G.formatValue(999950, 0, 1), "1.0M");
+  assert.equal(G.formatValue(999.9, 0, 0), "1k");
+  assert.equal(G.formatValue(999999, 0, 0), "1M");
+  assert.equal(G.formatValue(-999.9, 0, 0), "-1k");
+  assert.equal(G.formatValue(-0.0001, 0, 1), "0.0");
+  assert.equal(G.formatValue(-0.4, 1, 0), "0");
+});
+
 const geo = C.encodeLayer({ kind: "polygon", features: [
   { name: "A", rank: 2, rings: [[[0, 0], [10, 0], [10, 10], [0, 0]]] },
   { name: "B", rank: 1, rings: [[[20, 0], [30, 0], [30, 10], [20, 0]]] }

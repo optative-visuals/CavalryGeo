@@ -31,7 +31,8 @@ var GeoMatch = (function () {
   var CODE_ALIASES = { "OWID_KOS": "KOS" };
 
   function buildIndex(props) {
-    var idx = { iso3: {}, iso2: {}, name: {} };
+    // null-prototype tables: a plain {} would make "constructor" or "toString" look like a hit
+    var idx = { iso3: Object.create(null), iso2: Object.create(null), name: Object.create(null) };
     (props || []).forEach(function (p, i) {
       if (!p) return;
       if (p.iso3 && !(p.iso3 in idx.iso3)) idx.iso3[p.iso3] = i;

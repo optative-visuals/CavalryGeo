@@ -135,8 +135,12 @@ var GeoProjection = (function () {
   // Like mercatorViewBounds, but a view that crosses the date line comes back as two
   // boxes (one ending at 180, one starting at -180) so street downloads cover both sides.
   function mercatorViewBoxes(cam, width, height) {
+    // wrap once and use the wrapped camera everywhere: an unwrapped lon (e.g. 190) gives a zero-width box
+    // (in-range lons are left alone: the wrap arithmetic would perturb their last float digits)
+    var lon = cam.lon < -180 || cam.lon >= 180 ? wrapLon(cam.lon) : cam.lon;
+    cam = { lat: cam.lat, lon: lon, zoom: cam.zoom, rotation: cam.rotation };
     var whole = mercatorViewBounds({ lat: cam.lat, lon: 0, zoom: cam.zoom, rotation: cam.rotation }, width, height);
-    var half = whole.east, lon = ((cam.lon + 540) % 360) - 180;
+    var half = whole.east;
     if (half >= 180) return [mercatorViewBounds(cam, width, height)];
     var west = lon - half, east = lon + half, s = whole.south, n = whole.north;
     function box(w, e) { return { west: w, east: e, south: s, north: n }; }

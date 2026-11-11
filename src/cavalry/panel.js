@@ -4,10 +4,9 @@ var WORLD_VIEW = { west: -180, east: 180, south: -60, north: 75 };
 var TAB_BUILDERS = [];
 
 var statusLabel = new ui.Label("Ready.");
-function say(msg) { statusLabel.setText(msg); console.log("[CavalryGeo] " + msg); }
-// Like say(), right before something slow. It no longer calls api.processEvents to repaint the label:
-// that let Cavalry run the user's other clicks inside the running action, which hung Cavalry.
-function sayNow(msg) { say(msg); }
+// The label reads < as markup (a <word> hides the rest of the line), so every message is escaped here.
+// It doesn't call api.processEvents to repaint: that let Cavalry run the user's other clicks inside the running action, which hung Cavalry.
+function say(msg) { msg = String(msg).replace(/</g, "‹"); statusLabel.setText(msg); console.log("[CavalryGeo] " + msg); }
 // Wraps a panel action. Afterwards (also after an error): Cavalry expands Scene Window groups to
 // reveal selected nested layers and no API collapses them, so a selection that now holds a nested
 // layer is put back to what it was (a top-level selection made on purpose stays); then the
@@ -47,7 +46,7 @@ function guard(fn) {
   };
 }
 // One action at a time: a button, an Enter that starts work or a preview click can pump Cavalry's events
-// (sayNow, the network waits), so a second press could otherwise run nested inside the first.
+// (say, the network waits), so a second press could otherwise run nested inside the first.
 var busy = false;
 // While a long action runs Cavalry is frozen and keeps the user's clicks; it delivers them all as soon as
 // the action ends, after the flag has cleared. So after an action that took a while, clicks arriving in
@@ -195,7 +194,7 @@ if (typeof searchBtn.setFixedWidth === "function") searchBtn.setFixedWidth(MAP_A
 if (typeof flyBtn.setFixedWidth === "function") flyBtn.setFixedWidth(MAP_ACTION_WIDTH);
 
 // The preview: settled by probing Cavalry (2026-10).
-var PREVIEW_Y_UP = true, PREVIEW_DIM = true, PREVIEW_REDRAW = "timer";
+var PREVIEW_Y_UP = true, PREVIEW_DIM = true;
 var fromLabel = new ui.Label("From:");
 var toLabel = new ui.Label("To:");
 var flyStartBox = GeoStyle.frameField(flyStartField);
@@ -272,9 +271,9 @@ function reloadStyleFiles(quiet) {
   if (!fresh.length) return "";
   fresh.forEach(function (p) { reportedSkips[p] = true; });
   var first = fresh[0];
-  var why = r.reasons[first] === "duplicate" ? "\"" + String(r.names[first]).replace(/</g, "‹") + "\" is already saved." : "not a Cavalry Geo style.";
-  // The file name is shown in the status line, which reads "<" as markup: a file named a<b.json shows as a‹b.json.
-  return "Skipped Map styles/" + fileNameOf(first).replace(/</g, "‹") + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
+  // The note goes to say(), which escapes "<" (a file named a<b.json shows as a‹b.json).
+  var why = r.reasons[first] === "duplicate" ? "\"" + String(r.names[first]) + "\" is already saved." : "not a Cavalry Geo style.";
+  return "Skipped Map styles/" + fileNameOf(first) + ": " + why + (fresh.length > 1 ? " (and " + (fresh.length - 1) + " more)" : "");
 }
 (function () {
   var s = {};
@@ -289,7 +288,7 @@ var preview = GeoPreviewPanel.create({
   onPress: syncToCanvas,
   // Hide Create map here as soon as the preview fails (it may fail while the panel is being built).
   onFail: function () { if (preview) refreshNewMapFields(); },
-  yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM, redraw: PREVIEW_REDRAW
+  yUp: PREVIEW_Y_UP, dim: PREVIEW_DIM
 });
 // Centres the preview on the picked result (or the world view) — the preview then "follows" it.
 function previewFollowPicked() {
@@ -377,6 +376,11 @@ function currentMap() {
   if (newMapSelected()) throw new Error("Pick a map, or search for a place first — that creates the map (Map tab).");
   return maps[mapPicker.getValue()];
 }
+// The camera of the picked map, for refreshMaps to select again; null for "New map" (refreshMaps then picks the first).
+function pickedCameraId() {
+  try { if (!newMapSelected()) return currentMap().cameraId; } catch (e) { /* no map picked */ }
+  return null;
+}
 // Makes a map and selects it in the Map picker.
 function makeMap(name, cam) {
   var map = GeoScene.createMap(name, cam, pickedStyle());
@@ -443,7 +447,7 @@ refreshResultPicker();
 resultPicker.onValueChanged = guard(function () { previewFollowPicked(); });
 
 refreshMapsBtn.onClick = guardAction(function () {
-  refreshMaps();
+  refreshMaps(pickedCameraId());
   var note = reloadStyleFiles(false);
   say(maps.length + " map(s) in this composition." + (note ? " " + note : ""));
 });
@@ -515,28 +519,26 @@ jumpBtn.onClick = guardAction(function () {
 // composition asked for) before anything changes.
 function planMove(noun) {
   var map = currentMap(), from = Math.round(Number(flyStartField.getValue())), to = Math.round(Number(flyEndField.getValue()));
-  if (!(to >= from + 1)) throw new Error("Set End at least 1 frame after Start (a " + noun + " needs 2 frames or more).");
+  if (!(to >= from + 1)) throw new Error("Set the To frame at least 1 frame after From (a " + noun + " needs 2 frames or more).");
   var comp = GeoScene.compFrameRange();
-  if (from < comp.start) throw new Error("Start is before the composition's first frame (" + comp.start + ").");
+  if (from < comp.start) throw new Error("The From frame is before the composition's first frame (" + comp.start + ").");
   return { map: map, from: from, to: to, comp: comp };
 }
 // A composition extended for a move gets this many seconds after the move, so playback doesn't hit
 // the end and snap back to the start.
 var EXTEND_PAD_SECONDS = 3;
 function extendPadFrames() {
-  var fps = 25;
-  try { var f = Number(api.get(api.getActiveComp(), "fps")); if (f > 0) fps = f; } catch (e) {}
-  return Math.round(fps * EXTEND_PAD_SECONDS);
+  return Math.round(compFps() * EXTEND_PAD_SECONDS);
 }
 // The new end frame when extended, false = no need, null = the user said No (already told).
 function extendForMove(plan, noun, button) {
   if (plan.to <= plan.comp.end) return false;
   var dialog = questionDialog();
-  if (!dialog) throw new Error("End is after your composition's last frame (" + plan.comp.end + "). Set End to " + plan.comp.end + " or earlier, or lengthen the composition first.");
+  if (!dialog) throw new Error("The To frame is after your composition's last frame (" + plan.comp.end + "). Set it to " + plan.comp.end + " or earlier, or lengthen the composition first.");
   var newEnd = plan.to + extendPadFrames();
   if (!dialog.showQuestion("Extend the timeline", "This " + noun + " ends at frame " + plan.to + ", after your composition's last frame (" + plan.comp.end +
     "). " + button + " will extend the composition, and the layers that reach its end, to frame " + newEnd + " (" + EXTEND_PAD_SECONDS + " seconds after the " + noun + " ends). Continue?")) {
-    say("Cancelled. Set End to " + plan.comp.end + " or earlier to stay within your composition.");
+    say("Cancelled. Set the To frame to " + plan.comp.end + " or earlier to stay within your composition.");
     return null;
   }
   return GeoScene.extendComp(newEnd) ? newEnd : false;
@@ -617,18 +619,14 @@ mapStylePicker.onValueChanged = guard(function () {
   GeoNet.updateSettings({ mapStyle: pickedStyle().name });
   previewStyle();
 });
-function styleMap() {
-  if (newMapSelected()) throw new Error("Pick a map first.");
-  return currentMap();
-}
 applyStyleBtn.onClick = guardAction(function () {
-  var map = styleMap(), style = pickedStyle(), r = GeoScene.applyMapStyle(map, style);
+  var map = currentMap(), style = pickedStyle(), r = GeoScene.applyMapStyle(map, style);
   refreshPreviews();
   var left = r.skipped ? " " + r.skipped + " animated or connected colour" + (r.skipped === 1 ? " was" : "s were") + " left alone." : "";
   say("Applied " + style.name + " to " + map.name + "." + left);
 });
 saveStyleBtn.onClick = guardAction(function () {
-  var map = styleMap(), name = styleNameField.getText().trim();
+  var map = currentMap(), name = styleNameField.getText().trim();
   if (!name) throw new Error("Type a name for the style first.");
   var built = GeoStyles.builtIn(name);
   if (built) throw new Error(built.name + " is a built-in style — pick another name.");
@@ -809,12 +807,12 @@ addLayersBtn.onClick = guardAction(function () {
     }
   }
 
-  if (selected.some(isOsm)) sayNow("Downloading from OpenStreetMap… Cavalry may pause for a few seconds.");
+  if (selected.some(isOsm)) say("Downloading from OpenStreetMap… Cavalry may pause for a few seconds.");
 
   // Fetch and encode everything first so a failure adds nothing.
   var fetched = [], bytes = 0;
   selected.forEach(function (c) {
-    sayNow("Loading " + CATEGORY_LABEL[c] + "...");
+    say("Loading " + CATEGORY_LABEL[c] + "...");
     var enc = isOsm(c) ? GeoNet.osmLayer(c, boxes, mode) : GeoNet.neLayer(c, scale);
     bytes += JSON.stringify(enc).length;
     fetched.push({ category: c, enc: enc });
@@ -1225,11 +1223,11 @@ var calloutCoordBtn = GeoStyle.button("Callout at coordinates");
 function labelPreview(hint, onClick, onPick) {
   return GeoPreviewPanel.create({
     compSize: function () { return GeoScene.compSize(); }, onPick: onPick, onClick: onClick, onPress: syncToCanvas, onFail: function () {},
-    yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, redraw: PREVIEW_REDRAW, hint: hint
+    yUp: PREVIEW_Y_UP, dim: false, frame: false, doubleClickZoom: false, hint: hint
   });
 }
 // guard() drops its arguments, so the click handlers get them passed on here. A lookup lets Cavalry
-// run queued events (sayNow, and reverse's wait for its turn), so a second click could start inside
+// run queued events (say, and reverse's wait for its turn), so a second click could start inside
 // the first: while one is being handled (or any other action runs), further clicks are ignored.
 function guardClick(fn) {
   return function (lon, lat) { guardWork(function () { fn(lon, lat); })(); };
@@ -1240,7 +1238,7 @@ function pinsClick(lon, lat) {
   lon = round4(lon); lat = round4(lat);
   latField.setValue(lat); lonField.setValue(lon);
   pinsPreview.setSpot({ lon: lon, lat: lat });
-  sayNow("Looking up the place…");
+  say("Looking up the place…");
   var name = GeoNet.reverse(lat, lon, pinsPreview.frameCamera().zoom), typed = labelText.getText().trim();
   var ours = !typed || (spotName !== null && typed === spotName);
   if (ours) { labelText.setText(name || ""); spotName = name || null; }
@@ -1393,7 +1391,7 @@ function routesClick(lon, lat) {
   lon = round4(lon); lat = round4(lat);
   var last = stops[stops.length - 1];
   if (last && Math.abs(last.lon - lon) < 1e-9 && Math.abs(last.lat - lat) < 1e-9) { say("That's already the last stop."); return; }
-  sayNow("Looking up the place…");
+  say("Looking up the place…");
   var name = GeoNet.reverse(lat, lon, routesPreview.frameCamera().zoom) || (lat.toFixed(4) + ", " + lon.toFixed(4));
   stops.push({ name: name, lon: lon, lat: lat });
   refreshStops();
@@ -1649,7 +1647,7 @@ function showUnmatched(list) {
 var lastLoadedLink = ""; // set once a link has loaded, so a failed one runs again on Enter
 function runLoad() {
   var url = dataLinkField.getText().trim();
-  sayNow("Downloading data…");
+  say("Downloading data…");
   var table = GeoCsv.parse(GeoNet.fetchCsv(url));
   if (!table.rows.length) throw new Error("That link has no data rows.");
   var detection = GeoCsv.detect(table);
@@ -1675,7 +1673,7 @@ addDataBtn.onClick = guardAction(function () {
   var prepared = GeoDataset.prepare(dataLoaded.table, choice, countries);
   var usedLookup = false;
   if (lookupCheck.getValue() && prepared.unmatched.length) {
-    sayNow("Looking up " + prepared.unmatched.length + " place name(s) — about one per second…");
+    say("Looking up " + prepared.unmatched.length + " place name(s) — about one per second…");
     prepared = GeoDataset.prepare(dataLoaded.table, choice, countries, GeoNet.geocodePlaces(prepared.unmatched));
     usedLookup = true;
   }
@@ -1690,7 +1688,7 @@ addDataBtn.onClick = guardAction(function () {
 });
 
 refreshDataBtn.onClick = guardAction(function () {
-  sayNow("Refreshing data…");
+  say("Refreshing data…");
   var r = GeoScene.refreshData(currentMap());
   if (!r.layers) throw new Error("This map has no data layers to refresh.");
   showUnmatched(r.unmatched);
@@ -1893,6 +1891,7 @@ sourcePicker.onValueChanged = guard(function () {
   // Another provider's map id means nothing here: the box is cleared (blank = this provider's default).
   var src = currentSource(), text = styleField.getText().trim();
   if (text && !listedStyle(src, text) && listedElsewhere(src, text)) { styleField.setText(""); saveImagerySettings(); }
+  else GeoNet.updateSettings({ source: src.id }); // the choice is kept even if Cavalry closes before the next build (the other boxes save when committed)
   refreshSourceUi();
 });
 stylePicker.onValueChanged = guard(function () {
@@ -2115,7 +2114,7 @@ buildImageryBtn.onClick = guardAction(function () {
   if (dialog || !imageryState.plan || imageryState.plan.sig !== sig) {
     resetImageryPlan();
     imageryProgress.setValue(0); // don't keep showing the last build's 100% for a new plan
-    sayNow("Checking the camera animation…");
+    say("Checking the camera animation…");
     var plan = GeoScene.planImagery(map, src, opts);
     plan.sig = sig;
     imageryState.plan = plan;
@@ -2137,7 +2136,7 @@ buildImageryBtn.onClick = guardAction(function () {
       say(summary + " Press \"" + label + "\"." + capNote);
       return;
     }
-    if (missing) sayNow(summary + capNote); // the plan, not "Checking…", behind the dialog
+    if (missing) say(summary + capNote); // the plan, not "Checking…", behind the dialog
     if (missing && !dialog.showQuestion("Build imagery", summary + capNote + "\n\nDownload and build now?")) {
       resetImageryPlan();
       say("Nothing downloaded.");
@@ -2162,13 +2161,13 @@ cancelImageryBtn.onClick = guardAction(function () {
   if (imageryState.batch) {
     stopImageryTimer(); resetImageryPlan();
     say(night ? "Cancelled — no night lights were built." : "Download cancelled. Files still downloading in the background are kept; nothing was built.");
-    followActiveComp(false);
+    followActiveComp(false, true); // quiet: "Showing maps in X" must not replace the cancel message
     return;
   }
   stopImageryTimer();
   resetImageryPlan();
   say(night ? "Cancelled — no night lights were built." : "Download cancelled. Downloaded tiles are kept; nothing was built.");
-  followActiveComp(false);
+  followActiveComp(false, true);
 }, false, true);
 
 imageryAttrBtn.onClick = guardAction(function () {
@@ -2514,9 +2513,7 @@ function followActiveComp(sceneChanged, quiet) {
     if (now === null || isImagerySourceComp(now)) return;
     if (now === followedComp) return;
     followedComp = now;
-    var picked = null;
-    try { if (!newMapSelected()) picked = currentMap().cameraId; } catch (e) { picked = null; }
-    refreshMaps(picked); // keeps the picked map when it is in this comp, else the first map or New map
+    refreshMaps(pickedCameraId()); // keeps the picked map when it is in this comp, else the first map or New map
     if (newMapSelected()) clearSourceLayers(); else refreshSourceLayers();
     resetImageryPlan();
     var name = "";

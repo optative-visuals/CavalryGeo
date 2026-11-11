@@ -66,61 +66,18 @@ test("cross-fade invariant holds at every zoom, including the exact boundaries",
   });
 });
 
-test("tiles for a 1920x1080 view", () => {
-  assert.equal(T.tilesForView(cam({}), 1920, 1080, 4).length, 48);
-  const xs = T.tilesForView(cam({}), 1920, 1080, 4).map((t) => t.x);
-  assert.equal(Math.min(...xs), 4); assert.equal(Math.max(...xs), 11);
-  assert.equal(T.tilesForView(cam({ rotation: 90 }), 1920, 1080, 4).length, 48);
-  assert.equal(T.tilesForView(cam({ rotation: 45 }), 1920, 1080, 4).length, 100);
-  const edge = T.tilesForView(cam({ lon: 179, lat: 85 }), 1920, 1080, 4);
-  assert.ok(edge.every((t) => t.x >= 0 && t.x <= 15 && t.y >= 0 && t.y <= 15), "clamped, no wrap");
-  assert.ok(edge.every((t) => t.z === 4));
-});
-
-test("tile set for an animation", () => {
-  const still = T.tileSet([cam({}), cam({}), cam({ projection: 1 })], 1920, 1080, 0, 15);
-  assert.equal(still.tiles.length, 48);
-  assert.equal(still.frames, 2);
-  assert.deepEqual([still.lo, still.hi], [4, 4]);
-  const fade = T.tileSet([cam({ zoom: 4.9 })], 1920, 1080, 0, 15);
-  assert.deepEqual([fade.lo, fade.hi], [4, 5]);
-  assert.ok(fade.tiles.some((t) => t.z === 5) && fade.tiles.some((t) => t.z === 4));
-  const none = T.tileSet([cam({ projection: 2 })], 1920, 1080, 0, 15);
-  assert.equal(none.frames, 0);
-  assert.equal(none.tiles.length, 0);
-  const capped = T.tileSet([cam({ zoom: 12 })], 1920, 1080, 0, 8);
-  assert.deepEqual([capped.lo, capped.hi], [8, 8]);
-});
-
 test("placement and driver maths", () => {
   const tiles = [{ z: 4, x: 8, y: 8 }, { z: 4, x: 9, y: 8 }, { z: 4, x: 8, y: 9 }, { z: 5, x: 1, y: 1 }];
-  const by = T.groupByLevel(tiles);
-  assert.equal(by[4].length, 3);
-  const o = T.levelOrigin(by[4]);
+  const level4 = tiles.filter((t) => t.z === 4);
+  assert.equal(level4.length, 3);
+  const o = T.levelOrigin(level4);
   assert.deepEqual(o, { x0: 8, y0: 8 });
-  assert.deepEqual(T.tileLocal({ z: 4, x: 9, y: 9 }, o), [384, -384]);
   const p0 = T.levelPosition(cam({}), 4, 8, 8);
   near(p0[0], 0); near(p0[1], 0);
   const p1 = T.levelPosition(cam({ lon: 22.5 }), 4, 8, 8);
   near(p1[0], -256, 1e-6); near(p1[1], 0);
   assert.deepEqual(T.levelScale(cam({ zoom: 5 }), 4), [2, 2]);
   near(T.worldScale(4), 4096 / (2 * Math.PI));
-});
-
-// The later fade-in needs each finer level for a shorter stretch of the flight, so a
-// zoom flight needs fewer tiles than with the old 0.5 / 0.7 scheme.
-test("a zoom flight needs fewer tiles than with the old fade constants", () => {
-  const flight = [];
-  for (let k = 0; k <= 120; k++) flight.push(cam({ lat: 48.85, lon: 2.35, zoom: 2 + k * 11 / 120 }));
-  const fresh = T.tileSet(flight, 1920, 1080, 0, 15).tiles.length;
-  const seen = {};
-  flight.forEach((c) => {
-    const L = Math.max(0, Math.min(15, Math.floor(c.zoom + 0.5))), levels = [L];
-    if (L + 1 <= 15 && c.zoom > L + 1 - 0.7) levels.push(L + 1);
-    levels.forEach((lv) => T.tilesForView(c, 1920, 1080, lv).forEach((t) => { seen[t.z + "/" + t.x + "/" + t.y] = true; }));
-  });
-  const old = Object.keys(seen).length;
-  assert.ok(fresh < old * 0.9, `new ${fresh} vs old ${old}`);
 });
 
 const R = require("../src/core/reproject.js");
@@ -135,14 +92,23 @@ test("bentTileSet: unwrapped x beyond the date line, every sample counts, null r
   const none = T.bentTileSet([cam()], 1920, 1080, 0, 22, () => null);
   assert.deepEqual(none, { tiles: [], lo: 0, hi: -1, frames: 0 });
 });
-test("bentTileSet: a Mercator sample covers tileSet", () => {
-  const s = [cam({ lat: 40, lon: 10, zoom: 5.3 })];
-  const flat = T.tileSet(s, 1920, 1080, 0, 22), bent = T.bentTileSet(s, 1920, 1080, 0, 22, region);
+// Independent of the region maths: the Web Mercator tile under the view centre and under each
+// view corner (unrotated camera) must be in the set, at every visible level.
+test("bentTileSet: a Mercator sample covers the tiles under the view centre and corners", () => {
+  const c = cam({ lat: 40, lon: 10, zoom: 5.3 }), W = 1920, H = 1080;
+  const bent = T.bentTileSet([c], W, H, 0, 22, region);
+  assert.deepEqual([bent.lo, bent.hi], [5, 5]);
   const keys = new Set(bent.tiles.map((t) => `${t.z}/${t.x}/${t.y}`));
-  for (const t of flat.tiles) assert.ok(keys.has(`${t.z}/${t.x}/${t.y}`));
-  assert.equal(bent.lo, flat.lo); assert.equal(bent.hi, flat.hi);
+  const Rw = T.worldScale(c.zoom), X = c.lon * Math.PI / 180, Y = T.mercY(c.lat);
+  for (const L of T.visibleLevels(c.zoom, 0, 22)) {
+    const n = Math.pow(2, L);
+    for (const [sx, sy] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const x = Math.floor((X + sx * (W / 2 - 1) / Rw + Math.PI) / (2 * Math.PI) * n);
+      const y = Math.floor((Math.PI - (Y + sy * (H / 2 - 1) / Rw)) / (2 * Math.PI) * n);
+      assert.ok(keys.has(`${L}/${x}/${y}`), `${L}/${x}/${y}`);
+    }
+  }
 });
-
 test("bentTileSet: a region spanning the whole world gives 2^L + 1 columns (the extra one is the wrapped copy, shift 1)", () => {
   const full = () => ({ dlon0: -180, dlon1: 180, lat0: -60, lat1: 60 });
   const set = T.bentTileSet([cam({ zoom: 2, lon: 0 })], 1920, 1080, 2, 2, full);

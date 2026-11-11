@@ -210,8 +210,6 @@ test("route helper expressions: end point, handles (plugin and hand mode) and fa
   const hand = ins.slice(); hand[11] = 1;
   assert.deepEqual(Array.from(run(E.routeHandleExpression(curveSrc, { camera: "c", category: "legHandle" }, "end"), hand)), [7, 8]);
   assert.throws(() => E.routeHandleExpression(curveSrc, {}, "middle"), /Unknown handle/);
-  assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 0]), 0);
-  assert.equal(run(E.routeFadeExpression({ camera: "c", category: "legFade" }), [100, 100]), 100);
   assert.deepEqual(E.HANDLE_INPUTS, [["aHolderX", 0], ["aHolderY", 0], ["aStopX", 0], ["aStopY", 0], ["bHolderX", 0], ["bHolderY", 0], ["bStopX", 0], ["bStopY", 0],
     ["arc", 30], ["lean", 0], ["flip", 0], ["hand", 0], ["handX", 0], ["handY", 0],
     ["shape", 0], ["camLat", 0], ["camLon", 0], ["camZoom", 2], ["camRotation", 0], ["camProjection", 0], ["aLon", 0], ["aLat", 0], ["bLon", 0], ["bLat", 0],

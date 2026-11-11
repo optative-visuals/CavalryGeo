@@ -25,6 +25,15 @@ test("codes: iso3, iso2 and OWID_KOS", () => {
   assert.equal(M.findCountry(idx, "OWID_WRL", "iso3", "World"), -1);
 });
 
+// Index tables must not inherit Object.prototype keys: "constructor" is not a country.
+test("a name that is an Object.prototype key is not found", () => {
+  const idx = M.buildIndex(props);
+  assert.equal(M.findCountry(idx, "constructor", "name"), -1);
+  assert.equal(M.findCountry(idx, "toString", "name"), -1);
+  assert.equal(M.findCountry(idx, "constructor", "iso3"), -1);
+  assert.equal(M.findCountry(idx, "France", "name"), 0);
+});
+
 test("names and aliases", () => {
   assert.equal(M.findCountry(idx, "France", "name"), 0);
   assert.equal(M.findCountry(idx, "USA", "name"), 1);

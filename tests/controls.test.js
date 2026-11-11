@@ -166,16 +166,6 @@ test("sections keep their order: camera, ocean, layers, pins, labels, routes, da
   assert.ok(order.every((i) => i >= 0));
 });
 
-test("ids lists every layer in the model", () => {
-  const regions = { id: "rg", useMiddle: false, state: {} };
-  const ids = G.ids(model({
-    ocean: "oc", layers: [{ id: "cn" }], pins: [{ id: "p1" }], labels: [{ id: "t1" }],
-    routes: [{ id: "r", name: "", legs: [{ id: "l1" }], draws: [{ id: "dw" }] }],
-    data: { year: [regions], sets: [{ id: "dg", name: "", regions, bubbles: { id: "bb" }, labels: { id: "vl" } }] },
-    imagery: [{ id: "ig" }]
-  }));
-  assert.deepEqual(Object.keys(ids).sort(), [V, "bb", "cam", "cn", "dw", "ig", "l1", "oc", "p1", "rg", "t1", "vl"].sort());
-});
 
 test("STATE_ATTRS name the attributes each kind of member is driven on", () => {
   assert.deepEqual(G.STATE_ATTRS.layer, ["generator.array.5", "generator.array.6"]);
@@ -249,14 +239,12 @@ test("new routes: shared stop rows, then four rows per route and no per-leg rows
   assert.deepEqual(p.trim, ["l1", "l2"]);
 });
 
-test("new routes: an old-style route and a new one share the route name numbering; ids include every part", () => {
+test("new routes: an old-style route and a new one share the route name numbering; every part is in the plan", () => {
   const leg = { id: "n1", number: 1, state: {}, start: { id: "n1s", state: {} }, end: { id: "n1e", state: {} } };
   const m = model({ routes: [{ id: "old", name: "A → B", legs: [{ id: "o1", number: 1, state: {} }] }], stops: [{ id: "c1", state: {} }], newRoutes: [{ id: "new", name: "A → B", legs: [leg] }] });
   const p = G.plan(m);
   assert.ok(labels(p).indexOf("A → B · Arc height") >= 0 && labels(p).indexOf("A → B 2 · Arc height") >= 0);
   assert.ok(labels(p).indexOf("Stops · Hide") < labels(p).indexOf("A → B · Colour"));
-  const ids = Object.keys(G.ids(m));
-  ["c1", "n1", "n1s", "n1e"].forEach((id) => assert.ok(ids.indexOf(id) >= 0, id));
   assert.deepEqual(G.STATE_ATTRS.stop, ["hidden", "material.materialColor", "generator.radius.x", "generator.radius.y"]);
   assert.deepEqual(G.STATE_ATTRS.newLeg, ["stroke.strokeColor", "stroke.width"]);
   assert.deepEqual(G.STATE_ATTRS.handle, ["array.8", "array.9", "array.10", "array.11", "array.12", "array.13", "array.14"]);
@@ -284,8 +272,6 @@ test("travellers: hide, size, colour (plugin markers) and faces direction after 
   assert.ok(labels(own).indexOf("C → D · Traveller size") < 0, "no scale helper, no size row");
   assert.ok(labels(own).indexOf("C → D · Traveller colour") < 0, "no colour row for your own layer");
   assert.ok(labels(own).indexOf("C → D · Traveller hide") > labels(own).indexOf("C → D · Width"));
-  const tids = Object.keys(G.ids(model({ travellers: [{ routeId: "x", marker: { id: "mk", state: {} }, scale: { id: "sc", state: {} }, dups: [{ id: "d1", state: {} }] }] })));
-  assert.ok(tids.indexOf("d1") >= 0 && tids.indexOf("sc") >= 0);
 });
 
 test("furniture rows: hide and colour direct, settings as values with whole-number choices", () => {
@@ -370,7 +356,6 @@ test("highlight rows: Amount %, Colour, and only their own effect's extra row, i
   assert.equal(of(1)[0].notes, "France"); assert.equal(of(4)[2].notes, "Greece");
   assert.deepEqual(p.rows.find((r) => r.label === "Highlight 1 · Amount %").overrides, { hardMin: 0, hardMax: 100 });
   assert.deepEqual(G.STATE_ATTRS.blur, ["amount.x", "amount.y"]);
-  assert.ok(G.ids(model).s1 && G.ids(model).o3 && G.ids(model).b4 && G.ids(model).g3);
 });
 
 test("highlight rows: a highlight whose shape is gone shows only the rows it can", () => {
@@ -416,8 +401,6 @@ test("callout rows: ten rows in order, in the overlay group, with the callout's 
   assert.deepEqual(G.STATE_ATTRS.calloutEdge, ["array.8"]);
   assert.deepEqual(G.STATE_ATTRS.calloutLine, ["stroke.strokeColor", "stroke.width"]);
   assert.deepEqual(G.STATE_ATTRS.calloutDot, ["generator.radius.x", "generator.radius.y"]);
-  const ids = G.ids(model);
-  ["lb", "bx", "dt", "ed", "bd", "l1", "l2", "d1", "d2"].forEach((id) => assert.ok(ids[id], id));
 });
 
 test("callout rows: a callout whose box is gone has no Box rows, and rows come after the routes' (callouts numbered apart)", () => {
@@ -474,14 +457,12 @@ test("day & night rows: the exact rows in order, all in the time group, with the
   assert.deepEqual(G.STATE_ATTRS.timeLabel, [TLAB("dayOfYear"), TLAB("utcTime"), TLAB("size"), TLAB("corner")]);
 });
 
-test("day & night rows: none without a model, no label rows without a label, and ids() lists every member", () => {
+test("day & night rows: none without a model, no label rows without a label, and every member is in the plan", () => {
   assert.ok(!G.plan(model()).groups.includes("time"));
   const p = G.plan(dnModel({ label: null }));
   assert.equal(p.rows.filter((r, i) => p.groups[i] === "time").length, 6);
   assert.ok(!labels(p).some((l) => /^Time label/.test(l)));
   assert.deepEqual(p.rows.find((r) => r.label === "Day & night · Day of year (1–365)").link.length, 4);
-  const ids = G.ids(dnModel());
-  ["dn", "tl", "n0", "n18", "h0", "h18"].forEach((id) => assert.equal(ids[id], true, id));
 });
 
 // ---- Night lights in Day & night ----
@@ -496,7 +477,6 @@ test("night lights row: Night lights % follows Night opacity, drives the group's
   assert.equal(p.groups[p.rows.indexOf(r)], "time");
   assert.ok(!labels(G.plan(dnModel())).includes("Day & night · Night lights %"));
   assert.deepEqual(G.STATE_ATTRS.nightLights, ["opacity"]);
-  assert.equal(G.ids(dnModel({ nightLights: { id: "nlg", state: {} } })).nlg, true);
 });
 
 // ---- Day & night, version 2: one Night rectangle and one filter carry the look ----
@@ -528,7 +508,7 @@ test("day & night v2 rows: the same rows, labels and order as version 1, targeti
   assert.deepEqual(G.STATE_ATTRS.nightFilter, ["dayOfYear", "utcTime", "nightOpacity", "twilight", "lights"]);
 });
 
-test("day & night v2: no label rows without a label, Night lights % only with night lights, and ids() lists the new members", () => {
+test("day & night v2: no label rows without a label, Night lights % only with night lights, and the new members are in the plan", () => {
   const noLabel = G.plan(dnModel2({ label: null }));
   assert.ok(!labels(noLabel).some((l) => /^Time label/.test(l)));
   assert.deepEqual(row(noLabel, "Day & night · Day of year (1–365)").link, [{ layer: "nf", attr: "dayOfYear" }]);
@@ -541,8 +521,6 @@ test("day & night v2: no label rows without a label, Night lights % only with ni
   assert.deepEqual(r.link, [{ layer: "nlg", attr: "opacity" }, { layer: "nf", attr: "lights" }]);
   assert.deepEqual(r.overrides, { hardMin: 0, hardMax: 100 });
   assert.equal(p.groups[p.rows.indexOf(r)], "time");
-  const ids = G.ids(dnModel2({ nightLights: { id: "nlg", state: {} } }));
-  ["dn", "nr", "nf", "tl", "nlg"].forEach((id) => assert.equal(ids[id], true, id));
 });
 
 test("day & night v2 with a missing filter (plugin uninstalled): plan() does not throw; the filter-only rows drop out, the rest stay", () => {

@@ -66,17 +66,21 @@ var GeoData = (function () {
   function formatValue(v, format, decimals, prefix, suffix) {
     if (v === null || v === undefined) return "";
     var d = Math.max(0, Math.min(6, Math.round(Number(decimals) || 0))), f = Math.round(Number(format) || 0);
-    var a = Math.abs(v), s = null;
+    var a = Math.abs(v), s = null, neg = v < 0;
     if (f === 0) {
-      var units = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "k"]];
-      for (var i = 0; i < units.length && s === null; i++) if (a >= units[i][0]) s = (a / units[i][0]).toFixed(d) + units[i][1];
-      if (s === null) s = a.toFixed(d);
+      // pick the unit from the size, then move up one if rounding fills it (999.9 -> "1k", not "1000")
+      var units = [[1, ""], [1e3, "k"], [1e6, "M"], [1e9, "B"], [1e12, "T"]], u = 0;
+      while (u < units.length - 1 && a >= units[u + 1][0]) u++;
+      if (u < units.length - 1 && Number((a / units[u][0]).toFixed(d)) >= 1000) u++;
+      s = (a / units[u][0]).toFixed(d) + units[u][1];
     } else if (f === 1) {
       s = groupThousands(Math.round(a));
     } else {
       s = a.toFixed(d);
     }
-    return (v < 0 ? "-" : "") + (prefix || "") + s + (suffix || "");
+    // a value that rounds to zero shows no minus sign
+    if (!/[1-9]/.test(s)) neg = false;
+    return (neg ? "-" : "") + (prefix || "") + s + (suffix || "");
   }
 
   function fmtOf(data) { return data.fmt || {}; }
